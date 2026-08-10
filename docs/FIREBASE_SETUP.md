@@ -202,6 +202,48 @@ done
 
 ---
 
+### プロジェクト側は正常なのに 403 になるとき
+
+`npm run firebase:doctor` で次がすべて ✔ なのに `projects:addfirebase` が 403 を返す場合、
+原因は**プロジェクトの外側**にあります。
+
+- API 5 つが有効
+- 利用規約に同意済み（他に Firebase プロジェクトを持っている）
+- `roles/owner` を保有
+- プロジェクト単位の組織ポリシーなし
+
+確認する順序:
+
+| # | 対象 | 確認方法 |
+|---|---|---|
+| 1 | **Google Workspace の Firebase 設定** | 管理コンソール → アプリ → その他の Google サービス → Firebase が「オン」か |
+| 2 | 組織／フォルダの組織ポリシー | `npm run firebase:doctor` が祖先まで遡って表示します |
+| 3 | プロジェクト固有か否か | 新規プロジェクトを作れるか試す（下記） |
+
+#### 切り分け: 新規 Firebase プロジェクトを作れるか
+
+```bash
+npx --yes firebase-tools@15 projects:create smileq-live-test
+```
+
+| 結果 | 意味 |
+|---|---|
+| 作成できる | Firebase 自体は使える。`idl-application` 固有の問題 |
+| 作成できない | 組織または Workspace 側で Firebase が制限されている |
+
+#### Firebase の追加を妨げる代表的な組織ポリシー
+
+| 制約 | 影響 |
+|---|---|
+| `constraints/gcp.restrictServiceUsage` | Firebase API の利用自体を止める |
+| `constraints/iam.disableServiceAccountCreation` | Firebase のサービスエージェントを作れない |
+| `constraints/gcp.resourceLocations` | リソース作成先の制限に引っかかる |
+
+これらは**プロジェクト単位の一覧には出ません**（組織・フォルダから継承されるため）。
+`npm run firebase:doctor` は祖先をたどって確認します。
+
+---
+
 ### 権限が足りないと言われたら
 
 ```text

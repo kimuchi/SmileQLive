@@ -189,34 +189,94 @@ if (!isFirebaseProject) {
 }
 
 // ---------------------------------------------------------------------------
-step('6. 組織ポリシー');
-if (hasGcloud) {
+step('6. 組織ポリシー（プロジェクト単位 + 組織単位）');
+
+/** Firebase の追加を妨げうる制約。 */
+const RISKY_CONSTRAINTS = [
+  ['constraints/gcp.restrictServiceUsage', 'サービスの利用制限（Firebase API を含むと追加できない）'],
+  ['constraints/iam.disableServiceAccountCreation', 'サービスアカウント作成の禁止（Firebase のサービスエージェントを作れない）'],
+  ['constraints/iam.disableServiceAccountKeyCreation', 'サービスアカウント鍵の作成禁止'],
+  ['constraints/gcp.resourceLocations', 'リソースの作成先リージョン制限'],
+];
+
+function listPolicies(scopeArgs, label) {
   const policies = run(
     'gcloud',
-    ['resource-manager', 'org-policies', 'list', `--project=${projectId}`, '--format=value(constraint)'],
+    ['resource-manager', 'org-policies', 'list', ...scopeArgs, '--format=value(constraint)'],
     { capture: true, quiet: true, allowFailure: true },
   );
-  if (policies.ok) {
-    const lines = policies.stdout.split(/\r?\n/).filter(Boolean);
-    if (lines.length === 0) {
-      record(true, 'プロジェクト単位の組織ポリシーはありません', '');
+  if (!policies.ok) {
+    info(`${label}のポリシーを取得できませんでした（権限が無い場合は正常です）。`);
+    return [];
+  }
+  const lines = policies.stdout.split(/\r?\n/).filter(Boolean);
+  if (lines.length === 0) {
+    record(true, `${label}にポリシーはありません`, '');
+    return [];
+  }
+  console.log('');
+  console.log(`        ${label}のポリシー:`);
+  for (const line of lines) {
+    console.log(`          ${line}`);
+  }
+  console.log('');
+  const risky = lines.filter((line) => RISKY_CONSTRAINTS.some(([c]) => line.includes(c)));
+  record(
+    risky.length === 0,
+    risky.length === 0 ? `${label}に Firebase を妨げるポリシーはありません` : `${label}に要注意のポリシーがあります`,
+    risky
+      .map((line) => {
+        const found = RISKY_CONSTRAINTS.find(([c]) => line.includes(c));
+        return found ? `${line} — ${found[1]}` : line;
+      })
+      .join('\n        '),
+  );
+  return lines;
+}
+
+if (hasGcloud) {
+  listPolicies([`--project=${projectId}`], 'プロジェクト');
+
+  // 組織・フォルダから継承されるポリシーはプロジェクト単位の一覧に出ない。
+  // 祖先をたどって組織 ID を求め、そちらも確認する。
+  const ancestors = run(
+    'gcloud',
+    ['projects', 'get-ancestors', projectId, '--format=value(id,type)'],
+    { capture: true, quiet: true, allowFailure: true },
+  );
+  if (ancestors.ok) {
+    const rows = ancestors.stdout
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => line.split(/\s+/));
+    const org = rows.find((row) => row[1] === 'organization');
+    const folders = rows.filter((row) => row[1] === 'folder');
+
+    for (const folder of folders) {
+      listPolicies([`--folder=${folder[0]}`], `フォルダ ${folder[0]}`);
+    }
+    if (org) {
+      info(`組織 ID: ${org[0]}`);
+      listPolicies([`--organization=${org[0]}`], `組織 ${org[0]}`);
     } else {
-      console.log('');
-      for (const line of lines) {
-        console.log(`          ${line}`);
-      }
-      console.log('');
-      const suspicious = lines.filter((line) => /restrictServiceUsage|firebase/i.test(line));
-      record(
-        suspicious.length === 0,
-        suspicious.length === 0 ? '疑わしいポリシーはありません' : 'Firebase を制限しうるポリシーがあります',
-        suspicious.join(', '),
-      );
+      info('このプロジェクトは組織に属していません。');
     }
   } else {
-    info('組織ポリシーを取得できませんでした（権限が無い場合は正常です）。');
+    info('プロジェクトの祖先を取得できませんでした（権限が無い場合は正常です）。');
   }
 }
+
+// ---------------------------------------------------------------------------
+step('7. Google Workspace 側の Firebase 有効/無効');
+info('Google Workspace 管理コンソールで Firebase を無効化していると、');
+info('プロジェクト権限が十分でも API は 403 を返します。');
+info('  管理コンソール → アプリ → その他の Google サービス → Firebase');
+info('  対象の組織部門(OU)で「オン」になっているか確認してください。');
+console.log('');
+info(`このアカウントで新規 Firebase プロジェクトを作れるか試すと切り分けられます:`);
+info(`  ${fb.bin} ${[...fb.prefix, 'projects:create', 'smileq-live-test'].join(' ')}`);
+info('  作成できる → Firebase 自体は使える。idl-application 固有の問題');
+info('  作成できない → 組織や Workspace 側で Firebase が制限されている');
 
 // ---------------------------------------------------------------------------
 heading('まとめ');
