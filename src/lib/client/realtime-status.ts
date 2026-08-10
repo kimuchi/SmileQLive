@@ -7,12 +7,7 @@
 
 import { CLIENT_NOTICES } from '@/lib/errors/app-error';
 
-export const ROOM_CHANNEL_STATUSES = [
-  'connecting',
-  'connected',
-  'disconnected',
-  'error',
-] as const;
+export const ROOM_CHANNEL_STATUSES = ['connecting', 'connected', 'disconnected', 'error'] as const;
 
 export type RoomChannelStatus = (typeof ROOM_CHANNEL_STATUSES)[number];
 
@@ -32,9 +27,7 @@ export function isDegradedStatus(status: RoomChannelStatus): boolean {
  * 複数チャンネル（public / staff）の状態をひとつに畳み込む。
  * すべて接続済みのときだけ connected とする。
  */
-export function mergeChannelStatuses(
-  statuses: readonly RoomChannelStatus[],
-): RoomChannelStatus {
+export function mergeChannelStatuses(statuses: readonly RoomChannelStatus[]): RoomChannelStatus {
   if (statuses.length === 0) {
     return 'connecting';
   }

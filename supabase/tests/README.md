@@ -14,7 +14,8 @@ npm run db:test -- --url postgres://postgres@localhost:5432/smileq_sqltest
 | ファイル | 役割 |
 |---|---|
 | `_supabase_stubs.sql` | `auth` / `realtime` / `storage` スキーマ、`auth.uid()`、`auth.users`、Supabase の組み込みロールを最小構成で再現する |
-| `functions_smoke.sql` | 全マイグレーション適用後に、実際のシナリオを 1 本流して検証する |
+| `functions_smoke.sql` | 全マイグレーション適用後に、実際の進行シナリオを 1 本流して検証する |
+| `rls_smoke.sql` | 役割を切り替えて「他人のデータと正解情報が 1 行も見えない」ことを検証する |
 
 `scripts/test-sql.mjs` が次の順で実行します。
 
@@ -23,6 +24,7 @@ public / auth / realtime スキーマを作り直す
   → _supabase_stubs.sql
   → supabase/migrations/*.sql（ファイル名順）
   → functions_smoke.sql
+  → rls_smoke.sql
 ```
 
 > **注意**: 指定したデータベースのスキーマを作り直します。Supabase の本番・ステージング DB を指定しないでください（`*.supabase.co` を含む URL は明示的に拒否します）。
@@ -50,6 +52,21 @@ public / auth / realtime スキーマを作り直す
 - `room_leaderboard` の順位規則
 - `lock_question_if_expired` が冪等（2 回呼んでも `state_version` が 1 回しか進まない）
 - `room_events` に監査ログが残ること
+
+### RLS（`rls_smoke.sql`）
+
+`set local role` で役割を切り替えて、実際に SELECT できる行数を数えます。
+
+| 役割 | 期待する結果 |
+|---|---|
+| 参加者（匿名） | `questions` / `choices` / `rooms` / `quizzes` がすべて **0 行**。`room_members` は自分の 1 行だけ |
+| 参加者（匿名） | クイズ作成・ルーム状態の書き換えができない |
+| 別の司会者 | 他人のクイズ・問題・ルームが **0 行** |
+| 所有者の司会者 | 自分のクイズ・問題・ルームが見える |
+| 未認証 (`anon`) | GRANT 自体が無く、テーブルへアクセスできない（多層防御） |
+
+`choices` が参加者から 1 行も見えないことは、**正解 (`is_correct`) が漏れない**ことの直接の裏付けです。
+`rooms` が見えないことは、正解を含む `quiz_snapshot` が漏れないことの裏付けです。
 
 ## CI での扱い
 

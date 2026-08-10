@@ -3,13 +3,7 @@ import { cn } from '@/lib/client/cn';
 
 /** 状態やラベルを短く示すバッジ。 */
 
-export type BadgeVariant =
-  | 'neutral'
-  | 'brand'
-  | 'success'
-  | 'warning'
-  | 'danger'
-  | 'info';
+export type BadgeVariant = 'neutral' | 'brand' | 'success' | 'warning' | 'danger' | 'info';
 
 const VARIANT_CLASS: Record<BadgeVariant, string> = {
   neutral: 'bg-slate-100 text-slate-700 ring-slate-200',

@@ -30,12 +30,7 @@ export function Card({
   const hasHeader = title !== undefined || description !== undefined || actions !== undefined;
 
   return (
-    <section
-      className={cn(
-        'rounded-2xl border border-slate-200 bg-white shadow-sm',
-        className,
-      )}
-    >
+    <section className={cn('rounded-2xl border border-slate-200 bg-white shadow-sm', className)}>
       {hasHeader ? (
         <header className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 sm:px-5">
           <div className="min-w-0">

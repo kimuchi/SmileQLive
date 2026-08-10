@@ -9,10 +9,7 @@ import { cn } from '@/lib/client/cn';
  * ラベル全体をタップ領域にし、行の高さを 44px 以上にする。
  */
 
-export type CheckboxProps = Omit<
-  ComponentPropsWithRef<'input'>,
-  'id' | 'className' | 'type'
-> & {
+export type CheckboxProps = Omit<ComponentPropsWithRef<'input'>, 'id' | 'className' | 'type'> & {
   label: ReactNode;
   hint?: ReactNode;
   error?: ReactNode;
@@ -41,8 +38,8 @@ export function Checkbox({ label, hint, error, id, className, ...rest }: Checkbo
           aria-invalid={error !== undefined || undefined}
           aria-describedby={describedBy}
           className={cn(
-            'size-5 shrink-0 rounded border-slate-400 text-brand-600 accent-brand-600',
-            'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600',
+            'text-brand-600 accent-brand-600 size-5 shrink-0 rounded border-slate-400',
+            'focus-visible:outline-brand-600 focus-visible:outline-2 focus-visible:outline-offset-2',
             'disabled:cursor-not-allowed',
           )}
         />

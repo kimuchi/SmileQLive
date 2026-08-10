@@ -12,10 +12,7 @@ export type SelectOption = {
   disabled?: boolean;
 };
 
-export type SelectProps = Omit<
-  ComponentPropsWithRef<'select'>,
-  'id' | 'className' | 'children'
-> & {
+export type SelectProps = Omit<ComponentPropsWithRef<'select'>, 'id' | 'className' | 'children'> & {
   label: ReactNode;
   options: readonly SelectOption[];
   hint?: ReactNode;
@@ -59,7 +56,7 @@ export function Select({
         aria-describedby={describedBy}
         className={cn(
           'min-h-12 w-full rounded-xl border bg-white px-3 py-2.5 text-slate-900',
-          'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600',
+          'focus-visible:outline-brand-600 focus-visible:outline-2 focus-visible:outline-offset-2',
           'disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500',
           error !== undefined ? 'border-red-400' : 'border-slate-300',
           selectClassName,

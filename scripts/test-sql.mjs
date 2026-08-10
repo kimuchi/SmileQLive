@@ -104,23 +104,32 @@ for (const file of files) {
   success(file);
 }
 
-step('スモークテストを実行');
-const test = run(
-  'psql',
-  [url, '-v', 'ON_ERROR_STOP=1', '-q', '-f', 'supabase/tests/functions_smoke.sql'],
-  { capture: true, quiet: true, allowFailure: true },
-);
+const SMOKE_TESTS = [
+  { file: 'supabase/tests/functions_smoke.sql', label: 'DB 関数' },
+  { file: 'supabase/tests/rls_smoke.sql', label: 'RLS' },
+];
 
-const output = `${test.stdout}\n${test.stderr}`
-  .split(/\r?\n/)
-  .filter((line) => line.includes('NOTICE:') || line.includes('ERROR:'))
-  .map((line) => line.replace(/^.*?(NOTICE|ERROR):\s*/, (_m, kind) => (kind === 'ERROR' ? '✖ ' : '')))
-  .join('\n');
+for (const { file, label } of SMOKE_TESTS) {
+  step(`スモークテストを実行: ${label}`);
+  const test = run('psql', [url, '-v', 'ON_ERROR_STOP=1', '-q', '-f', file], {
+    capture: true,
+    quiet: true,
+    allowFailure: true,
+  });
 
-console.log(output);
+  const output = `${test.stdout}\n${test.stderr}`
+    .split(/\r?\n/)
+    .filter((line) => line.includes('NOTICE:') || line.includes('ERROR:'))
+    .map((line) =>
+      line.replace(/^.*?(NOTICE|ERROR):\s*/, (_m, kind) => (kind === 'ERROR' ? '✖ ' : '')),
+    )
+    .join('\n');
 
-if (!test.ok) {
-  fatal('DB 関数のスモークテストに失敗しました。');
+  console.log(output);
+
+  if (!test.ok) {
+    fatal(`${label} のスモークテストに失敗しました。`);
+  }
 }
 
-console.log(`\n  ${color.green('DB 関数のスモークテストに成功しました。')}\n`);
+console.log(`\n  ${color.green('DB 関数と RLS のスモークテストに成功しました。')}\n`);

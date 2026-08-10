@@ -96,8 +96,8 @@ export function RadioGroup<TValue extends string = string>({
                   onChange(option.value);
                 }}
                 className={cn(
-                  'mt-0.5 size-5 shrink-0 accent-brand-600',
-                  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600',
+                  'accent-brand-600 mt-0.5 size-5 shrink-0',
+                  'focus-visible:outline-brand-600 focus-visible:outline-2 focus-visible:outline-offset-2',
                 )}
               />
               <span className="min-w-0">

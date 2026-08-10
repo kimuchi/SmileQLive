@@ -6,11 +6,7 @@
  * - 想定外の例外は必ず汎用文へ丸める。
  */
 
-import {
-  ApiClientError,
-  NETWORK_ERROR_CODE,
-  isApiClientError,
-} from '@/lib/client/api-client';
+import { ApiClientError, NETWORK_ERROR_CODE, isApiClientError } from '@/lib/client/api-client';
 import { isAppErrorCode, userMessageForCode } from '@/lib/errors/app-error';
 
 const FALLBACK_MESSAGE = '処理に失敗しました。時間をおいて再度お試しください';
