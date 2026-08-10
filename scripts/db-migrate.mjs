@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import { parseArgs } from './lib/config.mjs';
 import { fatal, heading, info, step, success, warn } from './lib/log.mjs';
-import { commandExists, run } from './lib/proc.mjs';
+import { commandExists, detectPackageManager, run } from './lib/proc.mjs';
 
 process.chdir(fileURLToPath(new URL('..', import.meta.url)));
 
@@ -22,10 +22,24 @@ const { flags } = parseArgs(process.argv.slice(2));
 heading('Supabase マイグレーション');
 
 const hasSupabaseCli = commandExists('supabase');
-const supabaseArgs = (args) => (hasSupabaseCli ? { bin: 'supabase', args } : { bin: 'pnpm', args: ['dlx', 'supabase', ...args] });
+
+// supabase CLI が無い場合は、呼び出し元のパッケージマネージャで一時実行する。
+// pnpm なら `pnpm dlx`、npm/yarn なら `npx` を使う（pnpm 必須にしない）。
+const packageManager = detectPackageManager();
+const runner =
+  packageManager === 'pnpm'
+    ? { bin: 'pnpm', prefix: ['dlx'] }
+    : { bin: 'npx', prefix: ['--yes'] };
+
+const supabaseArgs = (args) =>
+  hasSupabaseCli
+    ? { bin: 'supabase', args }
+    : { bin: runner.bin, args: [...runner.prefix, 'supabase', ...args] };
 
 if (!hasSupabaseCli) {
-  warn('supabase CLI が見つからないため pnpm dlx supabase を使用します（初回は時間がかかります）。');
+  warn(
+    `supabase CLI が見つからないため ${runner.bin} ${runner.prefix.join(' ')} supabase を使用します（初回は時間がかかります）。`,
+  );
   info('常用する場合は https://supabase.com/docs/guides/local-development/cli/getting-started を参照。');
 }
 

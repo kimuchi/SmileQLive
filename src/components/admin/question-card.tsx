@@ -245,9 +245,7 @@ export function QuestionCard({
           <Badge variant="brand" size="md">
             第{question.position}問
           </Badge>
-          <span className="text-slate-500">
-            {draft.type === 'choice' ? '選択式' : '数値式'}
-          </span>
+          <span className="text-slate-500">{draft.type === 'choice' ? '選択式' : '数値式'}</span>
         </span>
       }
       actions={
@@ -396,12 +394,7 @@ export function QuestionCard({
             onUploadingChange={handleUploadingChange}
           />
         ) : (
-          <NumberRuleEditor
-            draft={draft}
-            errors={errors}
-            disabled={locked}
-            onPatch={patchDraft}
-          />
+          <NumberRuleEditor draft={draft} errors={errors} disabled={locked} onPatch={patchDraft} />
         )}
 
         <hr className="border-slate-100" />

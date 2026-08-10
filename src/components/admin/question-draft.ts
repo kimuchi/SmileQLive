@@ -221,8 +221,7 @@ function buildNumberRule(
 }
 
 export type BuildPayloadResult =
-  | { ok: true; payload: UpdateQuestionInput }
-  | { ok: false; errors: QuestionDraftErrors };
+  { ok: true; payload: UpdateQuestionInput } | { ok: false; errors: QuestionDraftErrors };
 
 /** 保存用ペイロードを組み立てる。検証に落ちたら保存しない（入力は保持する）。 */
 export function buildQuestionPayload(draft: QuestionDraft): BuildPayloadResult {

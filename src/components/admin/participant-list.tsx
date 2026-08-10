@@ -27,7 +27,8 @@ export function ParticipantList({ participants }: ParticipantListProps) {
   }
 
   const sorted = [...participants].sort(
-    (a, b) => Date.parse(a.joinedAt) - Date.parse(b.joinedAt) || a.nickname.localeCompare(b.nickname, 'ja'),
+    (a, b) =>
+      Date.parse(a.joinedAt) - Date.parse(b.joinedAt) || a.nickname.localeCompare(b.nickname, 'ja'),
   );
 
   return (

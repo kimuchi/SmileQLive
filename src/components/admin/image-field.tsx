@@ -139,7 +139,12 @@ export function ImageField({
               {image ? '画像を差し替える' : '画像を選ぶ'}
             </Button>
             {image ? (
-              <Button variant="ghost" size="sm" disabled={disabled || uploading} onClick={handleRemove}>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={disabled || uploading}
+                onClick={handleRemove}
+              >
                 画像を外す
               </Button>
             ) : null}

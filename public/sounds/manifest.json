@@ -1,0 +1,8 @@
+{
+  "question-start": "question-start.wav",
+  "tick": "tick.wav",
+  "answer-lock": "answer-lock.wav",
+  "answer-reveal": "answer-reveal.wav",
+  "ranking": "ranking.wav",
+  "finish": "finish.wav"
+}

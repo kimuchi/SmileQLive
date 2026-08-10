@@ -26,7 +26,11 @@ const MODE_OPTIONS: ReadonlyArray<{
   label: string;
   description: string;
 }> = [
-  { value: 'exact', label: '完全一致', description: '正解値とぴったり同じ数値だけを正解にします。' },
+  {
+    value: 'exact',
+    label: '完全一致',
+    description: '正解値とぴったり同じ数値だけを正解にします。',
+  },
   {
     value: 'absolute_tolerance',
     label: '許容誤差',

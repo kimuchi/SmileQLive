@@ -40,8 +40,11 @@ function safeNextPath(candidate: string): string {
 
 export function LoginPanel({ missingServerEnv, nextPath }: LoginPanelProps) {
   const config = useRuntimeConfig();
-  const clientConfigured = config.supabaseUrl.length > 0 && config.supabasePublishableKey.length > 0;
-  const missing = [...new Set([...missingServerEnv, ...(clientConfigured ? [] : ['SUPABASE_URL'])])];
+  const clientConfigured =
+    config.supabaseUrl.length > 0 && config.supabasePublishableKey.length > 0;
+  const missing = [
+    ...new Set([...missingServerEnv, ...(clientConfigured ? [] : ['SUPABASE_URL'])]),
+  ];
 
   if (!clientConfigured || missingServerEnv.length > 0) {
     return <ConfigurationError missing={missing} />;

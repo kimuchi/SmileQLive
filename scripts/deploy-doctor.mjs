@@ -59,6 +59,21 @@ const gitProbe = probeCommand('git');
 check('Git', gitProbe.ok, gitProbe.ok ? gitProbe.version : gitProbe.detail);
 const lockExists = existsSync(new URL('../pnpm-lock.yaml', import.meta.url));
 check('pnpm-lock.yaml', lockExists, lockExists ? '' : 'ロックファイルをコミットしてください');
+
+// パッケージマネージャ。pnpm 推奨だが npm でも動く。
+// Windows では corepack enable が管理者権限を要求して失敗しやすいので、
+// pnpm が無い場合に具体的な回避策を出す。
+const pnpmProbe = probeCommand('pnpm');
+const npmProbe = probeCommand('npm');
+check(
+  'パッケージマネージャ',
+  pnpmProbe.ok || npmProbe.ok,
+  pnpmProbe.ok
+    ? `pnpm ${pnpmProbe.version}`
+    : npmProbe.ok
+      ? `npm ${npmProbe.version}（pnpm 未導入。npm でも動作します。pnpm を使う場合は npm install -g pnpm）`
+      : 'pnpm も npm も起動できません。Node.js を再インストールしてください。',
+);
 const dockerfileExists = existsSync(new URL('../Dockerfile', import.meta.url));
 check(
   'Dockerfile',

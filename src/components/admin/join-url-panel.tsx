@@ -43,11 +43,7 @@ export function JoinUrlPanel({
         </Alert>
       ) : (
         <div className="flex flex-col items-start gap-4 sm:flex-row">
-          <QrCode
-            value={joinUrl}
-            size={qrSize}
-            caption="スマートフォンで読み取ると参加できます"
-          />
+          <QrCode value={joinUrl} size={qrSize} caption="スマートフォンで読み取ると参加できます" />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-bold text-slate-700">参加URL</p>
             <p className="mt-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm break-all text-slate-800">

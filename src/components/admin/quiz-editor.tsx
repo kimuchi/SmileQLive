@@ -245,13 +245,14 @@ export function QuizEditor({ quizId }: QuizEditorProps) {
   const handleAddQuestion = useCallback(
     (type: QuestionType) => {
       void runStructureAction(async () => {
-        const response = await apiPost<QuestionResponse>(
-          `/api/admin/quizzes/${quizId}/questions`,
-          { type },
-        );
+        const response = await apiPost<QuestionResponse>(`/api/admin/quizzes/${quizId}/questions`, {
+          type,
+        });
         // 末尾へ足すだけなので、既存カードの下書きは触らない（revision を上げない）。
         setQuiz((previous) =>
-          previous ? { ...previous, questions: [...previous.questions, response.question] } : previous,
+          previous
+            ? { ...previous, questions: [...previous.questions, response.question] }
+            : previous,
         );
       });
     },
@@ -279,10 +280,9 @@ export function QuizEditor({ quizId }: QuizEditorProps) {
         ids[index] = swapped;
         ids[target] = moved;
 
-        const response = await apiPost<QuizDetailResponse>(
-          `/api/admin/quizzes/${quizId}/reorder`,
-          { questionIds: ids },
-        );
+        const response = await apiPost<QuizDetailResponse>(`/api/admin/quizzes/${quizId}/reorder`, {
+          questionIds: ids,
+        });
         setQuiz(response.quiz);
         setRevision((value) => value + 1);
       });
@@ -311,10 +311,9 @@ export function QuizEditor({ quizId }: QuizEditorProps) {
             ids.push(created.question.id);
           }
         }
-        const response = await apiPost<QuizDetailResponse>(
-          `/api/admin/quizzes/${quizId}/reorder`,
-          { questionIds: ids },
-        );
+        const response = await apiPost<QuizDetailResponse>(`/api/admin/quizzes/${quizId}/reorder`, {
+          questionIds: ids,
+        });
         setQuiz(response.quiz);
         setRevision((value) => value + 1);
       });
@@ -501,7 +500,11 @@ export function QuizEditor({ quizId }: QuizEditorProps) {
             onMove={handleMoveQuestion}
             onDuplicate={handleDuplicateQuestion}
             onDelete={(questionId) => {
-              setPendingDialog({ kind: 'delete-question', questionId, position: question.position });
+              setPendingDialog({
+                kind: 'delete-question',
+                questionId,
+                position: question.position,
+              });
             }}
           />
         ))

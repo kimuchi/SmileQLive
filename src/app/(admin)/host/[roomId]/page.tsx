@@ -32,9 +32,7 @@ function summarize(text: string | null, hasImage: boolean): string {
   if (trimmed.length === 0) {
     return hasImage ? '（画像の問題）' : '（未入力）';
   }
-  return trimmed.length > SUMMARY_MAX_LENGTH
-    ? `${trimmed.slice(0, SUMMARY_MAX_LENGTH)}…`
-    : trimmed;
+  return trimmed.length > SUMMARY_MAX_LENGTH ? `${trimmed.slice(0, SUMMARY_MAX_LENGTH)}…` : trimmed;
 }
 
 export default async function HostRoomPage({ params }: { params: Promise<{ roomId: string }> }) {
@@ -70,7 +68,7 @@ export default async function HostRoomPage({ params }: { params: Promise<{ roomI
       <AdminHeader />
       <AdminPageBody
         title="司会画面"
-        description="参加は二次元コードの読み取りだけで完了します。参加コードの入力はありません。"
+        description="参加は二次元コードの読み取りだけで完了します。"
         breadcrumb={
           <Link href="/admin/quizzes" className="text-brand-700 font-bold hover:underline">
             ← クイズ一覧へ戻る

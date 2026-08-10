@@ -70,6 +70,83 @@ pnpm install --frozen-lockfile
 > `npm run deploy` 自体は、npm / pnpm どちらから実行しても動きます
 > （スクリプトが呼び出し元のパッケージマネージャを自動判定します）。
 
+#### Windows で `corepack enable` が EPERM で失敗する場合
+
+```text
+Internal Error: EPERM: operation not permitted, open 'C:\Program Files\nodejs\yarn'
+```
+
+Node.js を `C:\Program Files\nodejs` に入れていると、corepack がそこへシムを書き込もうとして
+**管理者権限が無いと失敗**します。次のいずれかで解決してください。
+
+**方法 A: pnpm を直接入れる（管理者権限が不要。おすすめ）**
+
+```powershell
+npm install -g pnpm
+pnpm --version
+pnpm install --frozen-lockfile
+```
+
+npm のグローバル領域は `%APPDATA%\npm` でユーザー権限のまま書き込めます。
+
+**方法 B: 管理者として実行**
+
+PowerShell を右クリック →「管理者として実行」してから:
+
+```powershell
+corepack enable
+```
+
+そのあとは通常の PowerShell に戻って `pnpm install --frozen-lockfile` を実行できます。
+
+**方法 C: corepack のシム置き場をユーザー領域にする**
+
+```powershell
+mkdir "$env:LOCALAPPDATA\corepack-bin"
+corepack enable --install-directory "$env:LOCALAPPDATA\corepack-bin"
+# PATH へ追加（現在のセッションのみ）
+$env:PATH = "$env:LOCALAPPDATA\corepack-bin;$env:PATH"
+```
+
+恒久化する場合は「システム環境変数の編集」→ ユーザーの `Path` に
+`%LOCALAPPDATA%\corepack-bin` を追加してください。
+
+**方法 D: pnpm を使わず npm だけで進める**
+
+```powershell
+npm install
+npm run verify
+npm run deploy
+```
+
+`pnpm-lock.yaml` の代わりに `package-lock.json` が作られます。依存関係のバージョンは
+`package.json` で固定しているため動作しますが、**Cloud Build 側のコンテナビルドは
+`pnpm-lock.yaml` を使う**（Dockerfile がそう書かれている）ため、
+ロックファイルを更新した場合は pnpm 側も揃えてください。
+
+> npm 11 では次の警告が出ますが、**そのままで問題ありません**。
+>
+> ```text
+> npm warn allow-scripts 2 packages have install scripts not yet covered by allowScripts:
+> npm warn allow-scripts   unrs-resolver@1.12.2 / esbuild@0.28.2
+> ```
+>
+> esbuild はプラットフォーム別パッケージ（optionalDependencies）から解決されるため、
+> postinstall を承認しなくても動作します。承認したい場合は
+> `npm approve-scripts --allow-scripts-pending` を実行してください。
+
+> どの方法を選んでも `npm run deploy` は動きます。デプロイスクリプトは
+> 呼び出し元のパッケージマネージャを自動判定します。
+
+#### `pnpm: The term 'pnpm' is not recognized`
+
+`corepack enable` が失敗した状態です。上の方法 A〜D のいずれかを実施してください。
+現在の状態は次のコマンドで確認できます。
+
+```powershell
+npm run deploy:doctor
+```
+
 ### 2.3 Supabase の準備
 
 先に **[docs/SUPABASE_SETUP.md](./SUPABASE_SETUP.md)** を実施してください。

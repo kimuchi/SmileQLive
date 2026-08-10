@@ -234,6 +234,44 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
   const actionsBusy = busy !== null;
   const isLobby = snapshot.phase === 'lobby';
 
+  // 投影端末は開催中に落ちることがある。待機中に限らず常に再発行できるようにしておく。
+  const presentationCard = (
+    <Card title="投影画面" description="会場のスクリーンへ映す画面を開きます。">
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            loading={busy === 'presentation'}
+            disabled={actionsBusy && busy !== 'presentation'}
+            onClick={() => void handleIssuePresentationLink()}
+          >
+            投影用リンクを発行
+          </Button>
+          <Button variant="primary" disabled={presentation === null} onClick={openPresentation}>
+            投影画面を開く
+          </Button>
+        </div>
+        {presentation !== null ? (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+            <p className="font-mono text-xs break-all text-slate-800">
+              {presentation.presentationUrl}
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <CopyButton value={presentation.presentationUrl} label="投影URLをコピー" />
+              <span className="text-xs text-slate-600">
+                有効期限 {formatDateTime(presentation.expiresAt)}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-600">
+            投影用リンクは一時的なものです。発行した端末・ブラウザで開いてください。
+          </p>
+        )}
+      </div>
+    </Card>
+  );
+
   return (
     <div className="flex flex-col gap-5">
       {/* 状態サマリ */}
@@ -388,7 +426,9 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
             <Card
               title="参加受付"
               description={
-                snapshot.joinOpen ? '現在は参加を受け付けています。' : '現在は参加を締め切っています。'
+                snapshot.joinOpen
+                  ? '現在は参加を受け付けています。'
+                  : '現在は参加を締め切っています。'
               }
             >
               <div className="flex flex-wrap items-center gap-3">
@@ -409,40 +449,7 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
               </p>
             </Card>
 
-            <Card title="投影画面" description="会場のスクリーンへ映す画面を開きます。">
-              <div className="flex flex-col gap-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    variant="secondary"
-                    loading={busy === 'presentation'}
-                    disabled={actionsBusy && busy !== 'presentation'}
-                    onClick={() => void handleIssuePresentationLink()}
-                  >
-                    投影用リンクを発行
-                  </Button>
-                  <Button variant="primary" disabled={presentation === null} onClick={openPresentation}>
-                    投影画面を開く
-                  </Button>
-                </div>
-                {presentation !== null ? (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                    <p className="font-mono text-xs break-all text-slate-800">
-                      {presentation.presentationUrl}
-                    </p>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <CopyButton value={presentation.presentationUrl} label="投影URLをコピー" />
-                      <span className="text-xs text-slate-600">
-                        有効期限 {formatDateTime(presentation.expiresAt)}
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-sm text-slate-600">
-                    投影用リンクは一時的なものです。発行した端末・ブラウザで開いてください。
-                  </p>
-                )}
-              </div>
-            </Card>
+            {presentationCard}
           </div>
 
           <Card
@@ -490,9 +497,7 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
               {snapshot.currentQuestion.choices.map((choice) => (
                 <li key={choice.id} className="flex items-start gap-2">
                   <Badge
-                    variant={
-                      snapshot.reveal?.correctChoiceId === choice.id ? 'success' : 'neutral'
-                    }
+                    variant={snapshot.reveal?.correctChoiceId === choice.id ? 'success' : 'neutral'}
                   >
                     {choice.label}
                   </Badge>
@@ -503,6 +508,8 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
           ) : null}
         </Card>
       ) : null}
+
+      {!isLobby ? presentationCard : null}
 
       {!isLobby ? (
         <Card title="回答の集計">
