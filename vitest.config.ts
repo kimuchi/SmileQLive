@@ -5,14 +5,12 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   plugins: [tsconfigPaths(), react()],
   test: {
-    environment: 'node',
+    // ドメイン層のテストは Node API を、コンポーネントテストは DOM を使うため
+    // jsdom を既定にする（jsdom 環境でも node: 組み込みモジュールは利用できる）。
+    environment: 'jsdom',
     globals: true,
     setupFiles: ['./tests/setup.ts'],
     include: ['tests/unit/**/*.test.{ts,tsx}', 'tests/integration/**/*.test.{ts,tsx}'],
-    environmentMatchGlobs: [
-      ['tests/unit/components/**', 'jsdom'],
-      ['tests/unit/**/*.tsx', 'jsdom'],
-    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],

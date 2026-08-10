@@ -68,7 +68,14 @@ begin
     return;
   end if;
 
-  execute 'alter table realtime.messages enable row level security';
+  -- Supabase 上では realtime.messages の所有者が postgres とは限らない。
+  -- RLS は既定で有効なので、権限不足で失敗しても致命的ではない。
+  begin
+    execute 'alter table realtime.messages enable row level security';
+  exception
+    when insufficient_privilege then
+      raise notice 'realtime.messages の RLS 有効化をスキップしました（既定で有効・権限不足）。';
+  end;
 
   execute 'drop policy if exists smileq_room_public_channel_read on realtime.messages';
   execute 'drop policy if exists smileq_room_staff_channel_read on realtime.messages';
@@ -103,7 +110,17 @@ begin
 
   -- INSERT ポリシーは意図的に作らない。
   -- クライアントから Broadcast を送らせない（なりすまし・偽の正解発表を防ぐ）。
-  execute 'revoke insert, update, delete on realtime.messages from anon, authenticated';
-  execute 'grant select on realtime.messages to authenticated';
+  begin
+    execute 'revoke insert, update, delete on realtime.messages from anon, authenticated';
+    execute 'grant select on realtime.messages to authenticated';
+  exception
+    when insufficient_privilege then
+      raise notice 'realtime.messages の権限変更をスキップしました（権限不足）。';
+  end;
 end;
 $$;
+
+-- 注意:
+--   realtime スキーマは PostgREST へ公開していない（config.toml の [api] schemas = ["public"]）。
+--   Broadcast の payload には正解情報・参加トークンを載せないこと。
+--   イベントは「状態が変わった」ことだけを伝え、実データは Snapshot API から取り直す。

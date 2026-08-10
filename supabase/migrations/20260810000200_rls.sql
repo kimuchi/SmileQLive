@@ -370,6 +370,9 @@ grant all on all sequences in schema public to service_role;
 -- =============================================================================
 -- 関数権限
 -- =============================================================================
+-- 以降のマイグレーションで作る関数も、既定では PUBLIC から実行できないようにする。
+-- そのため新しい関数を足したら service_role（と必要なら authenticated）へ
+-- 明示的に grant execute すること。
 alter default privileges in schema public revoke all on functions from public, anon, authenticated;
 
 -- ポリシー評価に必要なヘルパーだけ実行を許可する（真偽値しか返さない）。

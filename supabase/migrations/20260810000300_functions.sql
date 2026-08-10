@@ -18,7 +18,7 @@
 create or replace function public.iso8601_utc(p_at timestamptz)
 returns text
 language sql
-immutable
+stable
 as $$
   select case
     when p_at is null then null
@@ -67,7 +67,7 @@ create or replace function public.number_rule_json(
 )
 returns jsonb
 language sql
-immutable
+stable
 as $$
   select case p_mode
     when 'exact' then jsonb_build_object(
@@ -99,7 +99,7 @@ create or replace function public.format_number_display(
 )
 returns text
 language plpgsql
-immutable
+stable
 as $$
 declare
   v_places integer := least(greatest(coalesce(p_decimal_places, 0), 0), 10);
@@ -132,7 +132,7 @@ create or replace function public.describe_number_rule(
 )
 returns text
 language plpgsql
-immutable
+stable
 as $$
 declare
   v_mode text;
@@ -253,7 +253,7 @@ create or replace function public.publish_issue(
 )
 returns jsonb
 language sql
-immutable
+stable
 as $$
   select jsonb_build_object(
     'questionPosition', p_position,
