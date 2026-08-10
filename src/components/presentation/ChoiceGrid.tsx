@@ -67,7 +67,7 @@ export function ChoiceGrid({ choices, results = null, correctChoiceId = null }: 
                 aria-hidden="true"
                 className={cn(
                   'inline-flex shrink-0 items-center justify-center rounded-full font-bold',
-                  isCorrect ? 'bg-emerald-300 text-stage-950' : 'bg-white text-stage-950',
+                  isCorrect ? 'text-stage-950 bg-emerald-300' : 'text-stage-950 bg-white',
                 )}
                 style={{
                   width: stageSize(64),
@@ -82,7 +82,7 @@ export function ChoiceGrid({ choices, results = null, correctChoiceId = null }: 
 
               {isCorrect ? (
                 <span
-                  className="inline-flex items-center rounded-full bg-emerald-300 font-bold text-stage-950"
+                  className="text-stage-950 inline-flex items-center rounded-full bg-emerald-300 font-bold"
                   style={{
                     gap: stageSize(8),
                     paddingInline: stageSize(20),
@@ -143,7 +143,10 @@ export function ChoiceGrid({ choices, results = null, correctChoiceId = null }: 
                   style={{ height: stageSize(16) }}
                 >
                   <div
-                    className={cn('h-full rounded-full', isCorrect ? 'bg-emerald-300' : 'bg-white/50')}
+                    className={cn(
+                      'h-full rounded-full',
+                      isCorrect ? 'bg-emerald-300' : 'bg-white/50',
+                    )}
                     style={{ width: `${Math.min(1, Math.max(0, result.ratio)) * 100}%` }}
                   />
                 </div>

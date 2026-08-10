@@ -215,9 +215,27 @@ const SOUNDS = {
   'answer-reveal': () => {
     const samples = createSamples(1.4);
     addTone(samples, { startSec: 0, durationSec: 1.2, frequency: NOTES.C5, gain: 0.9, decay: 2.4 });
-    addTone(samples, { startSec: 0.04, durationSec: 1.2, frequency: NOTES.E5, gain: 0.8, decay: 2.4 });
-    addTone(samples, { startSec: 0.08, durationSec: 1.3, frequency: NOTES.G5, gain: 0.8, decay: 2.2 });
-    addTone(samples, { startSec: 0.12, durationSec: 1.2, frequency: NOTES.C6, gain: 0.6, decay: 2.6 });
+    addTone(samples, {
+      startSec: 0.04,
+      durationSec: 1.2,
+      frequency: NOTES.E5,
+      gain: 0.8,
+      decay: 2.4,
+    });
+    addTone(samples, {
+      startSec: 0.08,
+      durationSec: 1.3,
+      frequency: NOTES.G5,
+      gain: 0.8,
+      decay: 2.2,
+    });
+    addTone(samples, {
+      startSec: 0.12,
+      durationSec: 1.2,
+      frequency: NOTES.C6,
+      gain: 0.6,
+      decay: 2.6,
+    });
     return samples;
   },
 
@@ -234,7 +252,13 @@ const SOUNDS = {
         decay: 3.4,
       });
     });
-    addTone(samples, { startSec: 0.7, durationSec: 1.05, frequency: NOTES.G6, gain: 0.5, decay: 2.8 });
+    addTone(samples, {
+      startSec: 0.7,
+      durationSec: 1.05,
+      frequency: NOTES.G6,
+      gain: 0.5,
+      decay: 2.8,
+    });
     return samples;
   },
 
@@ -242,13 +266,55 @@ const SOUNDS = {
   finish: () => {
     const samples = createSamples(2.4);
     addTone(samples, { startSec: 0, durationSec: 0.35, frequency: NOTES.C5, gain: 0.85, decay: 4 });
-    addTone(samples, { startSec: 0.2, durationSec: 0.35, frequency: NOTES.E5, gain: 0.85, decay: 4 });
-    addTone(samples, { startSec: 0.4, durationSec: 0.4, frequency: NOTES.G5, gain: 0.85, decay: 4 });
-    addTone(samples, { startSec: 0.62, durationSec: 1.7, frequency: NOTES.C4, gain: 0.5, decay: 1.6 });
-    addTone(samples, { startSec: 0.62, durationSec: 1.7, frequency: NOTES.C5, gain: 0.8, decay: 1.6 });
-    addTone(samples, { startSec: 0.66, durationSec: 1.7, frequency: NOTES.E5, gain: 0.7, decay: 1.6 });
-    addTone(samples, { startSec: 0.7, durationSec: 1.7, frequency: NOTES.G5, gain: 0.7, decay: 1.6 });
-    addTone(samples, { startSec: 0.74, durationSec: 1.6, frequency: NOTES.C6, gain: 0.55, decay: 1.8 });
+    addTone(samples, {
+      startSec: 0.2,
+      durationSec: 0.35,
+      frequency: NOTES.E5,
+      gain: 0.85,
+      decay: 4,
+    });
+    addTone(samples, {
+      startSec: 0.4,
+      durationSec: 0.4,
+      frequency: NOTES.G5,
+      gain: 0.85,
+      decay: 4,
+    });
+    addTone(samples, {
+      startSec: 0.62,
+      durationSec: 1.7,
+      frequency: NOTES.C4,
+      gain: 0.5,
+      decay: 1.6,
+    });
+    addTone(samples, {
+      startSec: 0.62,
+      durationSec: 1.7,
+      frequency: NOTES.C5,
+      gain: 0.8,
+      decay: 1.6,
+    });
+    addTone(samples, {
+      startSec: 0.66,
+      durationSec: 1.7,
+      frequency: NOTES.E5,
+      gain: 0.7,
+      decay: 1.6,
+    });
+    addTone(samples, {
+      startSec: 0.7,
+      durationSec: 1.7,
+      frequency: NOTES.G5,
+      gain: 0.7,
+      decay: 1.6,
+    });
+    addTone(samples, {
+      startSec: 0.74,
+      durationSec: 1.6,
+      frequency: NOTES.C6,
+      gain: 0.55,
+      decay: 1.8,
+    });
     return samples;
   },
 };
@@ -258,7 +324,9 @@ const SOUNDS = {
 // ---------------------------------------------------------------------------
 
 heading('投影用 効果音プレースホルダの生成');
-info(color.dim('自家生成の正弦波です。本番用の音源へ差し替え、LICENSE.md へ出典を記録してください。'));
+info(
+  color.dim('自家生成の正弦波です。本番用の音源へ差し替え、LICENSE.md へ出典を記録してください。'),
+);
 
 step(`出力先: ${OUTPUT_DIR}`);
 mkdirSync(OUTPUT_DIR, { recursive: true });

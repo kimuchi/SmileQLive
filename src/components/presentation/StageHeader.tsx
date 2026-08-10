@@ -67,7 +67,7 @@ export function StageHeader({
         ) : null}
 
         <span className="whitespace-nowrap">{ROOM_PHASE_LABELS[phase]}</span>
-        <span className="whitespace-nowrap font-bold text-white/90">
+        <span className="font-bold whitespace-nowrap text-white/90">
           参加 {formatCount(participantCount)}
         </span>
       </div>

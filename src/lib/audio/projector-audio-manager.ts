@@ -17,12 +17,7 @@
 import { createSoundDedupeStore, type SoundDedupeStore } from '@/lib/audio/sound-dedupe-store';
 
 export type SoundName =
-  | 'question-start'
-  | 'tick'
-  | 'answer-lock'
-  | 'answer-reveal'
-  | 'ranking'
-  | 'finish';
+  'question-start' | 'tick' | 'answer-lock' | 'answer-reveal' | 'ranking' | 'finish';
 
 export const SOUND_NAMES = [
   'question-start',

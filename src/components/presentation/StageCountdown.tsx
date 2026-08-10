@@ -37,10 +37,7 @@ export function StageCountdown({
         </span>
         <span
           aria-live="off"
-          className={cn(
-            'font-bold tabular-nums',
-            urgent ? 'text-red-300' : 'text-white',
-          )}
+          className={cn('font-bold tabular-nums', urgent ? 'text-red-300' : 'text-white')}
           style={{ fontSize: stageSize(STAGE_FONT.hero), lineHeight: 1 }}
         >
           {seconds}

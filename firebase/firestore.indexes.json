@@ -1,0 +1,114 @@
+{
+  "$comment": [
+    "SmileQ Live の複合インデックス定義。",
+    "単一フィールドのインデックスは Firestore が自動作成するため、",
+    "ここには複数フィールドで絞り込み・並べ替えを行うクエリだけを書く。",
+    "デプロイ: npm run rules:deploy"
+  ],
+  "indexes": [
+    {
+      "$comment": "管理画面のクイズ一覧: 自分のクイズを更新日時の新しい順に並べる",
+      "collectionGroup": "quizzes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ownerId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "$comment": "管理画面のクイズ一覧（状態で絞らない場合）",
+      "collectionGroup": "quizzes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ownerId", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "$comment": "問題編集画面: 問題を position 順に取得する",
+      "collectionGroup": "questions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "quizId", "order": "ASCENDING" },
+        { "fieldPath": "position", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "$comment": "ルーム一覧: 自分のルームを作成日時の新しい順に並べる",
+      "collectionGroup": "rooms",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ownerId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "$comment": "参加URLの解決: トークンのハッシュからルームを引く",
+      "collectionGroup": "rooms",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "joinTokenHash", "order": "ASCENDING" },
+        { "fieldPath": "finishedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "$comment": "問題別の集計: 現在問題の回答だけを読む",
+      "collectionGroup": "answers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "questionId", "order": "ASCENDING" },
+        { "fieldPath": "answeredAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "$comment": "ランキング: 参加者を得点順に並べる（同点は所要時間→参加時刻）",
+      "collectionGroup": "members",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "role", "order": "ASCENDING" },
+        { "fieldPath": "totalPoints", "order": "DESCENDING" },
+        { "fieldPath": "correctElapsedMsTotal", "order": "ASCENDING" },
+        { "fieldPath": "joinedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "$comment": "参加者一覧・オンライン人数",
+      "collectionGroup": "members",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "role", "order": "ASCENDING" },
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "lastSeenAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "$comment": "投影用リンクの検証: トークンのハッシュから引く",
+      "collectionGroup": "presentationLinks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tokenHash", "order": "ASCENDING" },
+        { "fieldPath": "expiresAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": [
+    {
+      "$comment": "quizSnapshot は巨大な JSON。検索対象にならないのでインデックスを作らない。",
+      "collectionGroup": "rooms",
+      "fieldPath": "quizSnapshot",
+      "indexes": []
+    },
+    {
+      "$comment": "数値回答は文字列として保存する。範囲検索しないためインデックス不要。",
+      "collectionGroup": "answers",
+      "fieldPath": "numberRaw",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "answers",
+      "fieldPath": "numberNormalized",
+      "indexes": []
+    }
+  ]
+}

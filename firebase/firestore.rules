@@ -1,0 +1,146 @@
+rules_version = '2';
+
+// =============================================================================
+// SmileQ Live — Firestore Security Rules
+// =============================================================================
+// 方針:
+//   * 書き込みはすべて Cloud Run（Admin SDK）経由。クライアントからの書き込みは全拒否。
+//     Admin SDK は Rules を迂回するため、認可はアプリケーション側で行う。
+//     ここは「万一クライアントが直接叩いても 1 件も漏れない」ための最終防壁。
+//   * 参加者へ正解が到達する経路をすべて塞ぐ:
+//       - quizzes/** （正解・解説）           → 参加者は読めない
+//       - rooms/{id} （quizSnapshot を含む）  → 参加者・投影担当は読めない
+//       - 参加者が購読するのは rooms/{id}/public/state だけ
+//   * Firestore はフィールド単位の読み取り制限ができないため、
+//     「公開してよい状態」を別ドキュメントへ分離している（docs/FIRESTORE_MODEL.md）。
+// =============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // -------------------------------------------------------------------------
+    // ヘルパー
+    // -------------------------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    // 管理画面を使える利用者（profiles ドキュメントを持つ = 招待済みの司会者）。
+    function isStaffUser() {
+      return isSignedIn() && exists(/databases/$(database)/documents/profiles/$(uid()));
+    }
+
+    function roomDoc(roomId) {
+      return get(/databases/$(database)/documents/rooms/$(roomId)).data;
+    }
+
+    function isRoomOwner(roomId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/rooms/$(roomId))
+        && roomDoc(roomId).ownerId == uid();
+    }
+
+    function memberDoc(roomId) {
+      return get(/databases/$(database)/documents/rooms/$(roomId)/members/$(uid())).data;
+    }
+
+    function isRoomMember(roomId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/rooms/$(roomId)/members/$(uid()));
+    }
+
+    function hasRoomRole(roomId, roles) {
+      return isRoomMember(roomId) && memberDoc(roomId).role in roles;
+    }
+
+    // -------------------------------------------------------------------------
+    // profiles — 自分の行だけ読める
+    // -------------------------------------------------------------------------
+    match /profiles/{userId} {
+      allow read: if isSignedIn() && userId == uid();
+      allow write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // quizzes — 所有者だけ。参加者には正解・解説が絶対に見えない
+    // -------------------------------------------------------------------------
+    match /quizzes/{quizId} {
+      allow read: if isStaffUser() && resource.data.ownerId == uid();
+      allow write: if false;
+
+      match /questions/{questionId} {
+        allow read: if isStaffUser()
+          && get(/databases/$(database)/documents/quizzes/$(quizId)).data.ownerId == uid();
+        allow write: if false;
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // mediaAssets — 所有者だけ
+    // -------------------------------------------------------------------------
+    match /mediaAssets/{assetId} {
+      allow read: if isStaffUser() && resource.data.ownerId == uid();
+      allow write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // rooms — quizSnapshot（正解を含む）があるため所有者のみ
+    // -------------------------------------------------------------------------
+    match /rooms/{roomId} {
+      allow read: if isSignedIn() && resource.data.ownerId == uid();
+      allow write: if false;
+
+      // 公開状態: 正解情報を一切含まない。参加者・投影担当・司会が購読する。
+      match /public/{docId} {
+        allow read: if isRoomMember(roomId);
+        allow write: if false;
+      }
+
+      // 進捗・集計: 司会と投影担当のみ。
+      // 回答受付中の内訳をここへ書かないことはサーバー側で担保する。
+      match /staff/{docId} {
+        allow read: if hasRoomRole(roomId, ['host', 'presenter']);
+        allow write: if false;
+      }
+
+      // メンバー: 自分の行だけ。司会は全件見られる。
+      match /members/{memberId} {
+        allow read: if (isSignedIn() && memberId == uid()) || isRoomOwner(roomId);
+        allow write: if false;
+      }
+
+      // 回答: 自分の回答だけ。司会は全件見られる。
+      // ドキュメントIDは `${questionId}__${participantId}` なので
+      // 自分の participantId (= uid) で終わるものだけを許可する。
+      match /answers/{answerId} {
+        allow read: if (isSignedIn() && resource.data.participantId == uid())
+          || isRoomOwner(roomId);
+        allow write: if false;
+      }
+
+      // 監査ログ: 司会のみ。
+      match /events/{eventId} {
+        allow read: if isRoomOwner(roomId);
+        allow write: if false;
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // presentationLinks — クライアントからは一切読めない（トークン交換は API 経由）
+    // -------------------------------------------------------------------------
+    match /presentationLinks/{linkId} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // 明示していないものはすべて拒否
+    // -------------------------------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

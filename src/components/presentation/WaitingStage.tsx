@@ -42,13 +42,16 @@ export function WaitingStage({
         </h1>
 
         <p
-          className="font-bold text-brand-200"
+          className="text-brand-200 font-bold"
           style={{ fontSize: stageSize(STAGE_FONT.heading), lineHeight: 1.3 }}
         >
           二次元コードを読んで参加
         </p>
 
-        <p className="text-white/70" style={{ fontSize: stageSize(STAGE_FONT.body), lineHeight: 1.5 }}>
+        <p
+          className="text-white/70"
+          style={{ fontSize: stageSize(STAGE_FONT.body), lineHeight: 1.5 }}
+        >
           スマートフォンのカメラで読み取ると、そのまま参加できます。
           <br />
           アプリのインストールは不要です。
@@ -89,7 +92,12 @@ export function WaitingStage({
         ) : null}
       </div>
 
-      <div className="flex shrink-0 flex-col items-center" style={{ gap: stageSize(20) }}>
+      <div
+        className="flex shrink-0 flex-col items-center"
+        // 二次元コードの幅をステージ基準で固定する。
+        // 投影機の解像度が低くても、はみ出さずに同じ構図で表示される。
+        style={{ gap: stageSize(20), width: stageSize(680) }}
+      >
         {joinUrl ? (
           <QrCode
             // 参加 URL が変わったら、古いコードを DOM ごと作り直して残さない。
@@ -136,7 +144,10 @@ function JoinUrlFallback({ onSetJoinUrl }: { onSetJoinUrl: (value: string) => bo
       <p className="font-bold" style={{ fontSize: stageSize(STAGE_FONT.body) }}>
         参加用の二次元コードがまだ設定されていません
       </p>
-      <p className="text-white/70" style={{ fontSize: stageSize(STAGE_FONT.caption), lineHeight: 1.6 }}>
+      <p
+        className="text-white/70"
+        style={{ fontSize: stageSize(STAGE_FONT.caption), lineHeight: 1.6 }}
+      >
         司会画面で発行した参加 URL を貼り付けてください。
         <br />
         この端末のタブ内にだけ保管し、画面には二次元コードとしてのみ表示します。
@@ -159,7 +170,7 @@ function JoinUrlFallback({ onSetJoinUrl }: { onSetJoinUrl: (value: string) => bo
           }}
           placeholder="https://example.com/j/..."
           className={cn(
-            'w-full rounded-xl border-2 bg-stage-950/60 px-4 py-3 text-white placeholder:text-white/40',
+            'bg-stage-950/60 w-full rounded-xl border-2 px-4 py-3 text-white placeholder:text-white/40',
             invalid ? 'border-red-300' : 'border-white/30',
           )}
         />
@@ -168,10 +179,7 @@ function JoinUrlFallback({ onSetJoinUrl }: { onSetJoinUrl: (value: string) => bo
             この画面と同じサイトの参加 URL を貼り付けてください
           </p>
         ) : null}
-        <button
-          type="submit"
-          className="rounded-xl bg-white px-5 py-3 font-bold text-stage-950"
-        >
+        <button type="submit" className="text-stage-950 rounded-xl bg-white px-5 py-3 font-bold">
           二次元コードを表示する
         </button>
       </form>
