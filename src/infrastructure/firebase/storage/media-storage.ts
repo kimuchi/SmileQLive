@@ -13,11 +13,14 @@ import 'server-only';
  *   同一オブジェクトの再署名を避けるプロセス内キャッシュを持つ。
  */
 
-import { getMediaBucket } from '@/infrastructure/firebase/admin';
+import { getAdminStorage, getMediaBucket } from '@/infrastructure/firebase/admin';
 import { logger } from '@/infrastructure/logging/logger';
 import { buildObjectPath, OUTPUT_MIME_TYPE } from '@/domain/media/image-policy';
 import { AppError } from '@/lib/errors/app-error';
-import type { MediaStorage, UploadProcessedImageInput } from '@/application/ports/media-storage-port';
+import type {
+  MediaStorage,
+  UploadProcessedImageInput,
+} from '@/application/ports/media-storage-port';
 
 export const STORAGE_REF_SCHEME = 'storage://';
 
@@ -32,14 +35,22 @@ export function mediaBucketName(): string {
   return getMediaBucket().name;
 }
 
+/** `@google-cloud/storage` は直接の依存ではないため、型は Admin SDK 経由で導出する。 */
+type MediaBucket = ReturnType<typeof getMediaBucket>;
+
+/** 参照が指すバケット。既定バケット以外の参照（移行途中の古いデータ）も扱えるようにする。 */
+function bucketFor(bucket: string): MediaBucket {
+  const fallback = getMediaBucket();
+  return bucket === fallback.name ? fallback : getAdminStorage().bucket(bucket);
+}
+
 /** `storage://<bucket>/<objectPath>` を組み立てる。 */
 export function buildStorageRef(bucket: string, objectPath: string): string {
   return `${STORAGE_REF_SCHEME}${bucket}/${objectPath}`;
 }
 
 export type ParsedStorageRef =
-  | { kind: 'storage'; bucket: string; objectPath: string }
-  | { kind: 'url'; url: string };
+  { kind: 'storage'; bucket: string; objectPath: string } | { kind: 'url'; url: string };
 
 /**
  * 参照文字列を bucket と objectPath へ分解する。
@@ -106,7 +117,7 @@ export async function deleteObject(objectPath: string): Promise<void> {
   signedUrlCache.delete(cacheKey(parsed.bucket, parsed.objectPath));
 
   try {
-    await getMediaBucket().file(parsed.objectPath).delete();
+    await bucketFor(parsed.bucket).file(parsed.objectPath).delete();
   } catch (error) {
     // 実体が既に無い場合もあるため、削除失敗は警告に留める（メタデータ削除は継続する）。
     logger.warn('storage.remove_failed', {
@@ -143,7 +154,7 @@ async function signOne(bucket: string, objectPath: string): Promise<string | nul
   }
 
   try {
-    const [url] = await getMediaBucket()
+    const [url] = await bucketFor(bucket)
       .file(objectPath)
       .getSignedUrl({
         version: 'v4',

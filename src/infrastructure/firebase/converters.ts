@@ -251,7 +251,9 @@ export function toNumberRule(doc: {
 }
 
 /** NumberRule → ドキュメントの数値カラム群（未使用のモードは null で潰す）。 */
-export function fromNumberRule(rule: NumberRule): Pick<
+export function fromNumberRule(
+  rule: NumberRule,
+): Pick<
   QuestionDoc,
   'numberMode' | 'numberCorrectValue' | 'numberTolerance' | 'numberMinValue' | 'numberMaxValue'
 > {

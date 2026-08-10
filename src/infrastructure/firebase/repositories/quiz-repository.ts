@@ -19,7 +19,6 @@ import 'server-only';
  *   呼び出し側が quizId / ownerId を知っている場合は hints で渡すと 1 回の読み取りで済む。
  */
 
-import type { DocumentData } from 'firebase-admin/firestore';
 import { getDb } from '@/infrastructure/firebase/admin';
 import {
   questionRef,
@@ -57,12 +56,7 @@ import type {
   UpdateQuestionInput,
   UpdateQuizInput,
 } from '@/lib/validation/schemas';
-import type {
-  AdminChoice,
-  AdminQuestion,
-  AdminQuizDetail,
-  QuizListItem,
-} from '@/types/api';
+import type { AdminChoice, AdminQuestion, AdminQuizDetail, QuizListItem } from '@/types/api';
 import type { ChoiceEmbedded, QuestionDoc, QuizDoc } from '@/types/firestore';
 
 /** 問題文も問題画像も無い状態を避けるための既定文言。 */
@@ -126,9 +120,7 @@ async function fetchQuestions(quizId: string): Promise<QuestionDoc[]> {
 
 /** クイズ ID の一覧。ownerId が分かっていれば所有者のものだけへ絞る。 */
 async function listQuizIds(ownerId?: string | null): Promise<string[]> {
-  const query = ownerId
-    ? quizzesCollection().where('ownerId', '==', ownerId)
-    : quizzesCollection();
+  const query = ownerId ? quizzesCollection().where('ownerId', '==', ownerId) : quizzesCollection();
   // 本文は不要なので射影で取得量を抑える。
   const snapshot = await query.select().get();
   return snapshot.docs.map((doc) => doc.id);
@@ -202,7 +194,10 @@ export async function findQuestionByChoiceId(
 }
 
 /** 問題数の再集計。問題の追加・削除・型変更のあとに必ず呼ぶ。 */
-async function refreshQuizCounts(quizId: string, questions?: readonly QuestionDoc[]): Promise<void> {
+async function refreshQuizCounts(
+  quizId: string,
+  questions?: readonly QuestionDoc[],
+): Promise<void> {
   const docs = questions ?? (await fetchQuestions(quizId));
   const choiceCount = docs.filter((question) => question.questionType === 'choice').length;
 
@@ -355,9 +350,7 @@ export async function archiveQuiz(quizId: string): Promise<void> {
  * 公開前検証。
  * PostgreSQL 版にあった DB 側関数は無くなるため、**この検証だけが公開条件の砦**になる。
  */
-export async function validateQuizForPublishById(
-  quizId: string,
-): Promise<PublishValidationResult> {
+export async function validateQuizForPublishById(quizId: string): Promise<PublishValidationResult> {
   const quiz = await requireQuiz(quizId);
   const questions = await fetchQuestions(quizId);
 

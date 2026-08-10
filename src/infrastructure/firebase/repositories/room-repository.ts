@@ -170,10 +170,7 @@ export async function requireRoom(roomId: string): Promise<RoomDoc> {
 
 /** 参加 URL のハッシュからルームを引く（等価検索）。 */
 export async function findRoomByJoinTokenHash(tokenHash: string): Promise<RoomDoc | null> {
-  const snapshot = await roomsCollection()
-    .where('joinTokenHash', '==', tokenHash)
-    .limit(1)
-    .get();
+  const snapshot = await roomsCollection().where('joinTokenHash', '==', tokenHash).limit(1).get();
 
   return snapshot.docs[0]?.data() ?? null;
 }
@@ -314,10 +311,7 @@ export async function touchMemberPresence(roomId: string, memberId: string): Pro
 // ---------------------------------------------------------------------------
 
 export async function countParticipants(roomId: string): Promise<number> {
-  const snapshot = await membersCollection(roomId)
-    .where('role', '==', 'participant')
-    .count()
-    .get();
+  const snapshot = await membersCollection(roomId).where('role', '==', 'participant').count().get();
   return snapshot.data().count;
 }
 

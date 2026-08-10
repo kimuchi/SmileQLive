@@ -208,9 +208,7 @@ export function eventRef(roomId: string, stateVersion: number): DocumentReferenc
 // ---------------------------------------------------------------------------
 
 export function presentationLinksCollection(): CollectionReference<PresentationLinkDoc> {
-  return getDb()
-    .collection(COLLECTIONS.presentationLinks)
-    .withConverter(presentationLinkConverter);
+  return getDb().collection(COLLECTIONS.presentationLinks).withConverter(presentationLinkConverter);
 }
 
 export function presentationLinkRef(linkId: string): DocumentReference<PresentationLinkDoc> {

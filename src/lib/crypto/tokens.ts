@@ -45,12 +45,35 @@ export function isPlausibleToken(value: string): boolean {
   return BASE64URL_PATTERN.test(value);
 }
 
+const HEX_PATTERN = /^[0-9a-fA-F]+$/;
+
+/**
+ * 16進文字列の定数時間比較。
+ *
+ * 注意: `Buffer.from(value, 'hex')` は 16 進として解釈できない文字を黙って捨て、
+ * 不正な入力に対して空バッファを返す。そのままでは「不正な文字列同士」が
+ * 空バッファ比較で一致してしまうため、先に形式を検証する。
+ */
 export function safeEqualHex(a: string, b: string): boolean {
-  if (a.length !== b.length) {
+  if (a.length !== b.length || a.length === 0) {
     return false;
   }
+  // 奇数長は 1 バイトに満たない桁が生じるため受け付けない。
+  if (a.length % 2 !== 0) {
+    return false;
+  }
+  if (!HEX_PATTERN.test(a) || !HEX_PATTERN.test(b)) {
+    return false;
+  }
+
+  const bufferA = Buffer.from(a, 'hex');
+  const bufferB = Buffer.from(b, 'hex');
+  if (bufferA.length !== bufferB.length) {
+    return false;
+  }
+
   try {
-    return timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
+    return timingSafeEqual(bufferA, bufferB);
   } catch {
     return false;
   }
