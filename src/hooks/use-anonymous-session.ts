@@ -16,6 +16,31 @@ import { useOptionalFirebaseAuth } from '@/hooks/use-firebase-client';
  * - **失敗しても例外を投げない。** 参加登録 API 側でも認証は確認されるため、
  *   ここで会場の参加を止めない。戻り値 false は「準備できなかった」だけを意味する。
  */
+/**
+ * 匿名認証の完了を待つ上限。
+ *
+ * 会場では Firebase Auth への到達が遅れることがある。
+ * 無制限に待つと参加者の画面が「読み込んでいます」のまま復帰できなくなるため、
+ * 必ず打ち切って false を返し、呼び出し側が先へ進めるようにする。
+ * 参加登録 API 側でもセッションを確保できるので、ここで止める必要はない。
+ */
+export const ANONYMOUS_SESSION_TIMEOUT_MS = 8_000;
+
+/** 指定時間で必ず決着させる（失敗しても例外にしない）。 */
+async function withTimeout(task: Promise<boolean>, timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), timeoutMs);
+  });
+  try {
+    return await Promise.race([task, timeout]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 export function useEnsureAnonymousSession(): () => Promise<boolean> {
   const auth = useOptionalFirebaseAuth();
 
@@ -25,8 +50,11 @@ export function useEnsureAnonymousSession(): () => Promise<boolean> {
       return false;
     }
     try {
-      await signInAnonymouslyIfNeeded();
-      return true;
+      // 到達できないときに無限に待たないよう、必ず上限を設ける。
+      return await withTimeout(
+        signInAnonymouslyIfNeeded().then(() => true),
+        ANONYMOUS_SESSION_TIMEOUT_MS,
+      );
     } catch {
       // 失敗理由（トークン・ネットワーク）は画面にもログにも出さない。
       return false;

@@ -105,10 +105,14 @@ export function JoinScreen({ joinToken }: { joinToken: string }) {
       // 参加者にログインは求めない。
       // Firestore の購読（Security Rules）とサーバー API の認可のため、
       // 匿名認証 → セッションクッキーだけを用意する。
-      await ensureSessionRef.current();
-      if (cancelled) {
-        return;
-      }
+      //
+      // 認証と参加URLの確認は**並行して**行う。
+      // resolve は認証を必要としないため、認証を待ってから確認すると
+      // 会場で回線が遅いときに待ち時間が二重に積み上がり、
+      // 「このURLは無効」ということすら伝えられないまま画面が止まる。
+      // 認証が要るのは参加登録の時点で、そこで改めてセッションを確保する。
+      const sessionPromise = ensureSessionRef.current();
+      void sessionPromise.catch(() => false);
       try {
         const info = await apiGet<JoinResolveResponse>(
           `/api/join/${encodeURIComponent(joinToken)}/resolve`,
