@@ -89,6 +89,8 @@ npm run deploy           # Cloud Run へデプロイ
 cp deploy/cloud-run.production.example.json deploy/cloud-run.production.json
 # 編集（プロジェクト ID、ドメイン、Firebase の公開設定）
 
+npm run firebase:login                    # 初回のみ（ブラウザが開きます）
+npm run firebase:config                   # Firebase の公開設定をCLIで取得し設定ファイルへ書き込む
 npm run gcp:bootstrap -- production       # API 有効化・SA 作成・Firebase 権限付与
 npm run rules:deploy -- production        # Security Rules とインデックスを反映
 npm run deploy -- production
@@ -135,6 +137,7 @@ npm run domain:map -- production          # カスタムドメイン
 | `npm run emulators` | ローカルエミュレータを起動 |
 | `npm run host:list` / `host:add` / `host:remove` | 司会者の確認・登録・削除 |
 | `npm run domain:map` / `domain:status` | カスタムドメイン設定・確認 |
+| `npm run firebase:config` | Firebase の公開設定を CLI で取得し設定ファイルへ書き込む（GUI 不要） |
 | `npm run gcp:bootstrap` | Google Cloud 初期設定（冪等） |
 
 > `npm` / `pnpm` どちらからでも実行できます。デプロイスクリプトは呼び出し元のパッケージマネージャを自動判定します。

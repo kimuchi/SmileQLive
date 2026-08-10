@@ -225,6 +225,7 @@ cp deploy/cloud-run.staging.example.json deploy/cloud-run.staging.json
 ### 2.5 Google Cloud の初期設定
 
 ```bash
+npm run firebase:config -- production
 npm run gcp:bootstrap -- production
 ```
 

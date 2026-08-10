@@ -38,7 +38,9 @@
     "domain:map": "node scripts/map-domain.mjs",
     "domain:status": "node scripts/map-domain.mjs --status",
     "deploy:doctor": "node scripts/deploy-doctor.mjs",
-    "verify:bundle": "node scripts/verify-bundle.mjs"
+    "verify:bundle": "node scripts/verify-bundle.mjs",
+    "firebase:config": "node scripts/firebase-config.mjs",
+    "firebase:login": "npx --yes firebase-tools@15 login"
   },
   "dependencies": {
     "@hookform/resolvers": "5.7.1",

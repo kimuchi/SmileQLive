@@ -61,6 +61,65 @@ SmileQ Live は永続状態のすべてを **Firestore** に置きます。
 > 実際の保護は **Security Rules とサーバー側の認可**で行います。
 > そのため `deploy/cloud-run.*.json` へ書いて構いません。
 
+### CLI だけで取得する（GUI 不要・推奨）
+
+上の値は**コンソールを開かずに CLI で取得できます**。1 コマンドで設定ファイルまで書き込みます。
+
+```bash
+npm run firebase:login     # 初回のみ（ブラウザが開きます）
+npm run firebase:config    # プロジェクトと Web アプリを選び、設定ファイルへ書き込む
+```
+
+このコマンドが行うこと:
+
+1. `firebase projects:list` でアクセスできるプロジェクトを一覧표示し、選ばせる
+2. `firebase apps:list WEB` で Web アプリを探す
+   （**無ければ `firebase apps:create WEB "SmileQ Live"` で作成**するか確認する）
+3. `firebase apps:sdkconfig WEB <appId>` で公開設定一式を取得する
+4. `deploy/cloud-run.<env>.json` の `firebaseProjectId` / `firebaseApiKey` /
+   `firebaseAuthDomain` / `firebaseStorageBucket` / `firebaseAppId` を書き込む
+   （ファイルが無ければ `*.example.json` から作成する）
+
+よく使うオプション:
+
+```bash
+npm run firebase:config -- --print            # 書き込まず表示だけ
+npm run firebase:config -- --project my-proj  # プロジェクトを直接指定
+npm run firebase:config -- staging            # staging の設定ファイルへ書き込む
+```
+
+ブラウザを開けない環境（SSH 越しなど）では:
+
+```bash
+npx --yes firebase-tools@15 login --no-localhost
+```
+
+#### 手動で同じことをする場合
+
+```bash
+# プロジェクト一覧
+npx --yes firebase-tools@15 projects:list
+
+# Web アプリ一覧（無ければ作成）
+npx --yes firebase-tools@15 apps:list WEB --project <PROJECT_ID>
+npx --yes firebase-tools@15 apps:create WEB "SmileQ Live" --project <PROJECT_ID>
+
+# 公開設定一式（apiKey / authDomain / projectId / storageBucket / appId）
+npx --yes firebase-tools@15 apps:sdkconfig WEB <APP_ID> --project <PROJECT_ID>
+```
+
+#### gcloud だけで API キーを見る場合
+
+`apiKey` の実体は Google Cloud の API キーなので、gcloud でも取得できます。
+
+```bash
+gcloud services api-keys list --project <PROJECT_ID>
+gcloud services api-keys get-key-string <KEY_ID> --project <PROJECT_ID>
+```
+
+ただし Firebase が自動生成したキーを判別しづらいので、
+**`firebase apps:sdkconfig` を使うほうが確実**です。
+
 ---
 
 ## 2. Authentication の設定
