@@ -1,0 +1,16 @@
+# Cloud Build へ送るソースから除外する。
+# 注意: Cloud Build は Dockerfile を使うため、.dockerignore と整合させること。
+.git
+.gitignore
+.github
+.next
+node_modules
+coverage
+playwright-report
+test-results
+docs
+.env*
+!.env.example
+deploy/cloud-run.*.json
+!deploy/cloud-run.*.example.json
+*.tsbuildinfo

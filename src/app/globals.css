@@ -1,0 +1,75 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-brand-50: #eef6ff;
+  --color-brand-100: #d9ebff;
+  --color-brand-200: #bcdcff;
+  --color-brand-300: #8ec6ff;
+  --color-brand-400: #59a5ff;
+  --color-brand-500: #2f82ff;
+  --color-brand-600: #1761f5;
+  --color-brand-700: #124ce1;
+  --color-brand-800: #163fb6;
+  --color-brand-900: #17398f;
+  --color-brand-950: #122457;
+
+  --color-stage-950: #070c1c;
+  --color-stage-900: #0d1530;
+  --color-stage-800: #142046;
+
+  --color-correct: #10b981;
+  --color-incorrect: #94a3b8;
+
+  --font-sans:
+    'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic', Meiryo, system-ui,
+    -apple-system, sans-serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 参加者画面: iOS Safari で入力欄フォーカス時の自動ズームを防ぐ */
+input,
+select,
+textarea,
+button {
+  font-size: 16px;
+}
+
+/* 投影画面 16:9 用ユーティリティ */
+.stage-root {
+  background: radial-gradient(
+    ellipse at top,
+    var(--color-stage-800) 0%,
+    var(--color-stage-950) 70%
+  );
+  color: #fff;
+  min-height: 100dvh;
+}
+
+/* 投影画面のフォントは 1920x1080 基準で cqw ではなく vw ベースに寄せる */
+.stage-scale {
+  container-type: inline-size;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

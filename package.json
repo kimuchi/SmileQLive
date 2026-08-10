@@ -1,0 +1,81 @@
+{
+  "name": "smileq-live",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SmileQ Live - 会場イベント向けリアルタイムクイズシステム",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "node scripts/start.mjs",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "verify": "npm run lint && npm run typecheck && npm run test && npm run build",
+    "db:migrate": "node scripts/db-migrate.mjs",
+    "gcp:bootstrap": "node scripts/bootstrap-gcp.mjs",
+    "gcp:bootstrap:staging": "node scripts/bootstrap-gcp.mjs staging",
+    "gcp:bootstrap:production": "node scripts/bootstrap-gcp.mjs production",
+    "deploy": "node scripts/deploy-cloud-run.mjs",
+    "deploy:staging": "node scripts/deploy-cloud-run.mjs staging",
+    "deploy:production": "node scripts/deploy-cloud-run.mjs production",
+    "domain:map": "node scripts/map-domain.mjs",
+    "domain:status": "node scripts/map-domain.mjs --status",
+    "deploy:doctor": "node scripts/deploy-doctor.mjs",
+    "db:test": "node scripts/test-sql.mjs"
+  },
+  "dependencies": {
+    "@hookform/resolvers": "5.7.1",
+    "@supabase/ssr": "0.12.4",
+    "@supabase/supabase-js": "2.112.2",
+    "decimal.js": "10.6.0",
+    "file-type": "22.0.1",
+    "next": "16.3.0",
+    "qrcode.react": "4.2.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-hook-form": "7.85.0",
+    "server-only": "0.0.1",
+    "sharp": "0.35.3",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "3.3.6",
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/postcss": "4.3.3",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.3",
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "5.1.1",
+    "@vitest/coverage-v8": "4.1.10",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.3.0",
+    "jsdom": "30.0.1",
+    "prettier": "3.9.6",
+    "prettier-plugin-tailwindcss": "0.8.1",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "vite-tsconfig-paths": "6.1.1",
+    "vitest": "4.1.10"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "unrs-resolver",
+      "sharp"
+    ]
+  }
+}

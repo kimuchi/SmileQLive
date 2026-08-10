@@ -1,0 +1,16 @@
+.git
+.github
+.next
+node_modules
+coverage
+playwright-report
+test-results
+tests/e2e
+docs
+.env*
+!.env.example
+deploy/cloud-run.*.json
+!deploy/cloud-run.*.example.json
+npm-debug.log*
+pnpm-debug.log*
+*.tsbuildinfo

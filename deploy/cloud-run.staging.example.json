@@ -1,0 +1,41 @@
+{
+  "$comment": [
+    "このファイルをコピーして deploy/cloud-run.staging.json を作成してください。",
+    "ステージングは customDomain を空にして Cloud Run の既定 URL を使うのが手軽です。",
+    "appBaseUrl を空にすると、デプロイ後に Cloud Run の URL が自動設定されます。"
+  ],
+
+  "projectId": "your-gcp-project-id",
+  "region": "asia-northeast1",
+  "serviceName": "smileq-live-staging",
+  "serviceAccount": "smileq-live-runtime@your-gcp-project-id.iam.gserviceaccount.com",
+
+  "customDomain": "",
+  "domainMode": "domain-mapping",
+  "appBaseUrl": "",
+
+  "supabaseUrl": "https://your-staging-ref.supabase.co",
+  "supabasePublishableKey": "sb_publishable_xxxxxxxxxxxxxxxxxxxx",
+  "supabaseSecretName": "smileq-live-supabase-secret-key-staging",
+
+  "mediaBucket": "quiz-media",
+  "presentationLinkTtlMinutes": 480,
+
+  "minInstances": 0,
+  "maxInstances": 5,
+  "concurrency": 80,
+  "cpu": "1",
+  "memory": "1Gi",
+  "timeout": "60s",
+  "ingress": "all",
+  "logLevel": "debug",
+
+  "allowedBranches": [],
+  "requireCleanTree": false,
+  "runVerifyBeforeDeploy": true,
+
+  "turnstileSiteKey": "",
+  "turnstileSecretName": "",
+
+  "extraEnv": {}
+}

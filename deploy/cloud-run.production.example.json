@@ -1,0 +1,41 @@
+{
+  "$comment": [
+    "このファイルをコピーして deploy/cloud-run.production.json を作成してください。",
+    "実値入りのファイルは .gitignore 済みで、Cloud Build のソースにも含まれません。",
+    "Secret の『値』は絶対にここへ書かないこと（Secret Manager の名前だけを書く）。"
+  ],
+
+  "projectId": "your-gcp-project-id",
+  "region": "asia-northeast1",
+  "serviceName": "smileq-live",
+  "serviceAccount": "smileq-live-runtime@your-gcp-project-id.iam.gserviceaccount.com",
+
+  "customDomain": "quiz.example.jp",
+  "domainMode": "domain-mapping",
+  "appBaseUrl": "https://quiz.example.jp",
+
+  "supabaseUrl": "https://your-project-ref.supabase.co",
+  "supabasePublishableKey": "sb_publishable_xxxxxxxxxxxxxxxxxxxx",
+  "supabaseSecretName": "smileq-live-supabase-secret-key-production",
+
+  "mediaBucket": "quiz-media",
+  "presentationLinkTtlMinutes": 480,
+
+  "minInstances": 1,
+  "maxInstances": 10,
+  "concurrency": 80,
+  "cpu": "1",
+  "memory": "1Gi",
+  "timeout": "60s",
+  "ingress": "all",
+  "logLevel": "info",
+
+  "allowedBranches": ["main"],
+  "requireCleanTree": true,
+  "runVerifyBeforeDeploy": true,
+
+  "turnstileSiteKey": "",
+  "turnstileSecretName": "",
+
+  "extraEnv": {}
+}
