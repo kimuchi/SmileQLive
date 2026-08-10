@@ -139,7 +139,23 @@ POST .../projects/<id>:addFirebase 403
 {"error":{"code":403,"message":"The caller does not have permission"}}
 ```
 
-Firebase の追加には対象プロジェクトの `firebase.projects.update` 権限が必要です。
+`403 PERMISSION_DENIED` は **IAM 権限以外の原因でも返ります**。
+オーナー権限があるのに失敗する場合、次の順に確認してください。
+
+| # | 確認 | コマンド |
+|---|---|---|
+| 1 | Firebase Management API が有効か | `gcloud services enable firebase.googleapis.com --project <ID>` |
+| 2 | CLI の認証スコープ | `npx --yes firebase-tools@15 login --reauth` |
+| 3 | **Firebase 利用規約への同意** | https://console.firebase.google.com/ を一度開く |
+| 4 | 組織ポリシー | `gcloud resource-manager org-policies list --project <ID>` |
+| 5 | IAM ロール | 下記 |
+
+> **3 が最も見落とされます。**
+> その Google アカウント／Workspace 組織で Firebase を一度も使ったことが無い場合、
+> 利用規約の同意が未了で API 側が 403 を返します。
+> **コンソールを一度開いて同意すれば解消**し、以後は CLI だけで進められます。
+> 「GUI 不要」は設定取得の話で、組織で初めて Firebase を使う場合の
+> 初回同意だけは避けられないことがあります。
 
 現在の自分のロールを確認する:
 
