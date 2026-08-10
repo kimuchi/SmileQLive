@@ -35,12 +35,27 @@ export type FirebaseClientConfig = {
   projectId: string;
   storageBucket?: string | undefined;
   appId?: string | undefined;
+  /**
+   * 使用する Firestore データベース ID。
+   * 既定の `(default)` は使わず、SmileQ Live 専用の名前付きデータベースを使う
+   * （同一プロジェクトに既存アプリが同居していてもデータとルールを分離するため）。
+   */
+  firestoreDatabaseId?: string | undefined;
 };
 
+/** 既定のデータベース ID。サーバー側 firestoreDatabaseId() と一致させること。 */
+export const DEFAULT_FIRESTORE_DATABASE_ID = 'smileq-live';
+
 let cachedApp: FirebaseApp | null = null;
+let cachedDatabaseId: string = DEFAULT_FIRESTORE_DATABASE_ID;
+
+function currentDatabaseId(): string {
+  return cachedDatabaseId;
+}
 
 /** Firebase App をシングルトンで初期化する。2 回目以降は既存インスタンスを返す。 */
 export function initializeFirebaseClient(config: FirebaseClientConfig): FirebaseApp {
+  cachedDatabaseId = config.firestoreDatabaseId ?? DEFAULT_FIRESTORE_DATABASE_ID;
   if (cachedApp) {
     return cachedApp;
   }
@@ -91,7 +106,9 @@ export function getFirebaseAuth(config?: FirebaseClientConfig): Auth {
  * 参加者が購読してよいのは `rooms/{roomId}/public/state` だけ（Security Rules で担保済み）。
  */
 export function getFirebaseDb(config?: FirebaseClientConfig): Firestore {
-  return getFirestore(requireApp(config));
+  // 既定の (default) ではなく SmileQ Live 専用の名前付きデータベースを使う。
+  // 同じプロジェクトに既存アプリが同居していても、データとルールは完全に分かれる。
+  return getFirestore(requireApp(config), config?.firestoreDatabaseId ?? currentDatabaseId());
 }
 
 // ---------------------------------------------------------------------------

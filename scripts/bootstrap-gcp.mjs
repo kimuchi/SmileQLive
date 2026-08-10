@@ -318,6 +318,95 @@ if (actAs.ok) {
 }
 
 // ---------------------------------------------------------------------------
+step('SmileQ Live 専用の Firestore データベース');
+
+// 既定の (default) は使わない。既存アプリが同じプロジェクトに同居していても、
+// データ・セキュリティルール・インデックスを完全に分離するため。
+const databaseId = config.firestoreDatabaseId;
+const describeDb = run(
+  'gcloud',
+  ['firestore', 'databases', 'describe', '--database', databaseId, '--project', config.firebaseProjectId, '--format=value(name)'],
+  { capture: true, quiet: true, allowFailure: true },
+);
+
+if (describeDb.ok) {
+  success(`既存のデータベースを使用します: ${databaseId}`);
+} else {
+  info(`データベース「${databaseId}」を作成します（ロケーションは後から変更できません）。`);
+  const created = run(
+    'gcloud',
+    [
+      'firestore',
+      'databases',
+      'create',
+      '--database',
+      databaseId,
+      '--location',
+      config.region,
+      '--type',
+      'firestore-native',
+      '--project',
+      config.firebaseProjectId,
+    ],
+    { allowFailure: true },
+  );
+  if (created.ok) {
+    success(`データベースを作成しました: ${databaseId} (${config.region})`);
+  } else {
+    warn(`データベース「${databaseId}」を作成できませんでした。`);
+    info('手動で作成する場合:');
+    info(
+      `  gcloud firestore databases create --database ${databaseId} --location ${config.region} --type firestore-native --project ${config.firebaseProjectId}`,
+    );
+  }
+}
+
+console.log(
+  `  ${color.dim('※ 既定データベース (default) には触れません。既存アプリのデータとルールは保持されます。')}`,
+);
+
+// ---------------------------------------------------------------------------
+step('画像用の専用 Storage バケット');
+
+// 既存アプリのバケットとルールを共有しないよう、専用バケットを用意する。
+const bucketUri = `gs://${config.mediaBucket}`;
+const describeBucket = run('gcloud', ['storage', 'buckets', 'describe', bucketUri, '--format=value(name)'], {
+  capture: true,
+  quiet: true,
+  allowFailure: true,
+});
+
+if (describeBucket.ok) {
+  success(`既存のバケットを使用します: ${config.mediaBucket}`);
+} else {
+  const createdBucket = run(
+    'gcloud',
+    [
+      'storage',
+      'buckets',
+      'create',
+      bucketUri,
+      '--project',
+      config.firebaseProjectId,
+      '--location',
+      config.region,
+      '--uniform-bucket-level-access',
+      '--public-access-prevention',
+    ],
+    { allowFailure: true },
+  );
+  if (createdBucket.ok) {
+    success(`バケットを作成しました: ${config.mediaBucket}`);
+  } else {
+    warn(`バケット「${config.mediaBucket}」を作成できませんでした。`);
+    info('手動で作成する場合:');
+    info(
+      `  gcloud storage buckets create ${bucketUri} --project ${config.firebaseProjectId} --location ${config.region} --uniform-bucket-level-access --public-access-prevention`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 heading('次の手順');
 
 let stepNo = 1;
@@ -335,8 +424,6 @@ if (config.turnstileSecretName && !secretHasVersion(config.projectId, config.tur
 
 console.log(`  ${stepNo}. Firebase 側の設定（docs/FIREBASE_SETUP.md）:`);
 console.log('       * Google プロバイダと匿名認証を有効化');
-console.log('       * Firestore データベースを作成（ロケーションは後から変更できません）');
-console.log('       * Storage バケットを作成');
 console.log('       * 承認済みドメインへ公開 URL を追加\n');
 stepNo += 1;
 

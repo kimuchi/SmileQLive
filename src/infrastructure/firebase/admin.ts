@@ -85,11 +85,24 @@ export function getFirebaseAdminApp(): App {
 
 let cachedFirestore: Firestore | null = null;
 
+/**
+ * 使用する Firestore データベース ID。
+ *
+ * 既定の `(default)` は使わない。既存アプリと同じプロジェクトへ同居しても、
+ * **データもセキュリティルールもインデックスも完全に分離**するため、
+ * SmileQ Live 専用の名前付きデータベースを使う。
+ * ルールの配信もこのデータベースだけを対象にする（既存アプリを壊さない）。
+ */
+export function firestoreDatabaseId(): string {
+  const value = process.env.FIRESTORE_DATABASE_ID;
+  return value && value.trim().length > 0 ? value.trim() : 'smileq-live';
+}
+
 export function getDb(): Firestore {
   if (cachedFirestore) {
     return cachedFirestore;
   }
-  const db = getFirestore(getFirebaseAdminApp());
+  const db = getFirestore(getFirebaseAdminApp(), firestoreDatabaseId());
   // undefined のフィールドを書き込みエラーにせず無視する。
   // 省略可能な項目（画像なしなど）を毎回 null 埋めしなくてよくなる。
   db.settings({ ignoreUndefinedProperties: true });

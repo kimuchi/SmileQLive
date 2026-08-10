@@ -211,6 +211,10 @@ function normalizeConfig(config, environment) {
       ? String(config.firebaseStorageBucket)
       : `${String(config.firebaseProjectId)}.firebasestorage.app`,
     firebaseAppId: config.firebaseAppId ? String(config.firebaseAppId) : '',
+    // 既定の (default) は使わない。既存アプリと同居してもデータとルールを分離する。
+    firestoreDatabaseId: config.firestoreDatabaseId
+      ? String(config.firestoreDatabaseId)
+      : 'smileq-live',
     allowedAuthDomains: toStringArray(config.allowedAuthDomains),
     mediaBucket: String(config.mediaBucket),
     appBaseUrl: config.appBaseUrl ? String(config.appBaseUrl).replace(/\/+$/, '') : '',
@@ -280,6 +284,7 @@ export function buildRuntimeEnv(config, appBaseUrl) {
     FIREBASE_API_KEY: config.firebaseApiKey,
     FIREBASE_AUTH_DOMAIN: config.firebaseAuthDomain,
     FIREBASE_STORAGE_BUCKET: config.firebaseStorageBucket,
+    FIRESTORE_DATABASE_ID: config.firestoreDatabaseId,
     APP_BASE_URL: appBaseUrl ?? '',
     MEDIA_BUCKET: config.mediaBucket,
     PRESENTATION_LINK_TTL_MINUTES: String(config.presentationLinkTtlMinutes),

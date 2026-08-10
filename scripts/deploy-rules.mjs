@@ -36,8 +36,21 @@ process.chdir(repoRoot);
 const { positional, flags } = parseArgs(process.argv.slice(2));
 const skipConfirm = flags.has('yes') || flags.has('y') || process.env.CI === 'true';
 const dryRun = flags.has('dry-run');
-const DEFAULT_TARGETS = 'firestore:rules,firestore:indexes,storage';
-const only = typeof flags.get('only') === 'string' ? flags.get('only') : DEFAULT_TARGETS;
+/**
+ * 既定の配信対象。
+ *
+ * **既定データベース `(default)` を対象にしない。**
+ * SmileQ Live は専用の名前付きデータベース（既定 'smileq-live'）を使うため、
+ * `--only firestore:<database>` の形で対象を限定する。
+ * これにより、同じプロジェクトに同居している既存アプリのルールとインデックスを
+ * 上書きする事故が構造的に起こらない。
+ *
+ * Storage も同様に、firebase.json の target 'smileq-media' に紐づけた
+ * 専用バケットだけを対象にする。
+ */
+function defaultTargets(databaseId) {
+  return `firestore:${databaseId},storage:smileq-media`;
+}
 
 heading('Security Rules / インデックスの反映');
 
@@ -63,7 +76,7 @@ success(requiredFiles.join(' / '));
 // ---------------------------------------------------------------------------
 step('対象の Firebase プロジェクトを決定');
 
-const { projectId, source, environment } = resolveProject();
+const { projectId, source, environment, databaseId, mediaBucket } = resolveProject();
 
 function resolveProject() {
   // 1. --project で直接指定
@@ -107,12 +120,48 @@ function resolveProject() {
       'Firebase コンソールのプロジェクト ID を設定してください。',
     );
   }
-  return { projectId: String(id), source: path, environment: target };
+  const databaseId = config.firestoreDatabaseId
+    ? String(config.firestoreDatabaseId)
+    : 'smileq-live';
+  return {
+    projectId: String(id),
+    source: path,
+    environment: target,
+    databaseId,
+    mediaBucket: config.mediaBucket ? String(config.mediaBucket) : '',
+  };
 }
 
-info(`プロジェクト: ${projectId}`);
-info(`解決元      : ${source}`);
-info(`対象        : ${only}`);
+const only =
+  typeof flags.get('only') === 'string' ? flags.get('only') : defaultTargets(databaseId);
+
+// 既定データベースを対象にしようとしたら必ず止める。
+// 同じプロジェクトに同居する既存アプリのルールを消してしまうため。
+if (/firestore:\(default\)|(^|,)firestore:rules|(^|,)firestore:indexes|(^|,)firestore(,|$)/.test(only)) {
+  fatal(
+    '既定データベース (default) を対象にしようとしています。',
+    [
+      'SmileQ Live は専用の名前付きデータベースを使います。',
+      '既定データベースへ配信すると、同じプロジェクトに同居している',
+      '既存アプリのセキュリティルールとインデックスを上書きしてしまいます。',
+      '',
+      `正しい対象: firestore:${databaseId}`,
+      '',
+      'どうしても既定データベースを使う場合は、',
+      `deploy/cloud-run.<env>.json の firestoreDatabaseId を "(default)" にしてください`,
+      '（既存アプリのルールを引き継ぐ責任が生じます）。',
+    ].join('\n'),
+  );
+}
+
+info(`プロジェクト  : ${projectId}`);
+info(`解決元        : ${source}`);
+info(`データベース  : ${databaseId}`);
+info(`メディアバケット: ${mediaBucket || '(未設定)'}`);
+info(`対象          : ${only}`);
+console.log(
+  `  ${color.dim('※ 既定データベース (default) には触れません。既存アプリのルールは保持されます。')}`,
+);
 
 // ---------------------------------------------------------------------------
 step('firebase CLI を確認');
@@ -128,6 +177,31 @@ if (hasFirebaseCli) {
 } else {
   info('firebase CLI が無いため npx --yes firebase-tools で実行します（初回は取得に時間がかかります）。');
   console.log(`  ${color.dim('常用する場合は npm install -g firebase-tools を推奨します。')}`);
+}
+
+// firebase.json の storage は target 名で対象バケットを指定している。
+// どのバケットに紐づくかをここで確定させる（既存アプリのバケットに触れないため）。
+if (only.includes('storage') && mediaBucket) {
+  step('Storage の対象バケットを紐づけ');
+  const applied = run(
+    runner.bin,
+    [
+      ...runner.prefix,
+      'target:apply',
+      'storage',
+      'smileq-media',
+      mediaBucket,
+      '--project',
+      projectId,
+    ],
+    { capture: true, quiet: true, allowFailure: true },
+  );
+  if (applied.ok) {
+    success(`smileq-media → ${mediaBucket}`);
+  } else {
+    warn('バケットの紐づけに失敗しました。Storage ルールの配信をスキップします。');
+    info(`手動で紐づける場合: ${runner.bin} ${[...runner.prefix, 'target:apply', 'storage', 'smileq-media', mediaBucket].join(' ')}`);
+  }
 }
 
 const deployArgs = [

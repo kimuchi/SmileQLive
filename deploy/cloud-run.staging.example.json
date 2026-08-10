@@ -19,10 +19,22 @@
   "firebaseApiKey": "AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
   "firebaseAuthDomain": "your-firebase-staging-project.firebaseapp.com",
   "firebaseStorageBucket": "your-firebase-staging-project.firebasestorage.app",
+  "$comment_firestoreDatabaseId": [
+    "SmileQ Live 専用の Firestore データベース ID。既定の (default) は使わない。",
+    "既存アプリと同じプロジェクトへ同居しても、データ・ルール・インデックスを完全に分離するため。",
+    "rules:deploy はこのデータベースだけを対象にし、(default) には触れない。"
+  ],
+  "firestoreDatabaseId": "smileq-live-staging",
+
   "firebaseAppId": "1:000000000000:web:0000000000000000000000",
 
   "allowedAuthDomains": [],
 
+  "$comment_mediaBucket": [
+    "画像用の専用バケット。Firebase 既定バケットとは分ける。",
+    "既存アプリと同じプロジェクトでも、Storage ルールをバケット単位で分離するため。",
+    "rules:deploy はこのバケットだけを対象にする。"
+  ],
   "mediaBucket": "your-firebase-staging-project.firebasestorage.app",
   "presentationLinkTtlMinutes": 480,
 

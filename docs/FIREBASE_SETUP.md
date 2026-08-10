@@ -92,6 +92,76 @@ gcloud services enable firebase.googleapis.com --project <PROJECT_ID>
 
 ---
 
+### 既存アプリと同じプロジェクトへ同居させる（推奨構成）
+
+すでに別のアプリが動いている Google Cloud プロジェクトへ SmileQ Live を同居させられます。
+**ただし既定のまま入れてはいけません。**
+
+> #### 何が危険か
+>
+> `firebase deploy --only firestore:rules` は、対象データベースの
+> **セキュリティルール全体を置き換えます**。
+> 既定データベース `(default)` へ配信すると、
+> **既存アプリのルールが消え、既存アプリが壊れます**（インデックスも同様）。
+
+#### 分離のしくみ
+
+SmileQ Live は既定で次のように、既存アプリと**物理的に分離**されます。
+
+| 対象 | SmileQ Live | 既存アプリ |
+|---|---|---|
+| Firestore データベース | `smileq-live`（名前付き） | `(default)` |
+| Firestore ルール／インデックス | `smileq-live` にのみ適用 | **触れない** |
+| Storage バケット | `<project>-smileq-media`（専用） | 既定バケット |
+| Storage ルール | 専用バケットにのみ適用 | **触れない** |
+| Firebase Authentication | **共有** | 共有 |
+
+Firestore は 1 プロジェクトに複数のデータベースを持て、
+**ルールもインデックスもデータベースごとに独立**します。これを利用しています。
+
+設定は `deploy/cloud-run.<env>.json` の 2 つのキーで決まります。
+
+```jsonc
+{
+  "firestoreDatabaseId": "smileq-live",                    // (default) は使わない
+  "mediaBucket": "idl-application-smileq-media"            // 専用バケット
+}
+```
+
+`npm run gcp:bootstrap` がこの 2 つを自動で作成します。
+
+```bash
+gcloud firestore databases create --database smileq-live --location asia-northeast1 --type firestore-native
+gcloud storage buckets create gs://idl-application-smileq-media --uniform-bucket-level-access --public-access-prevention
+```
+
+#### 事故を構造的に防いでいる箇所
+
+`npm run rules:deploy` は既定データベースを対象にしようとすると**必ず停止**します。
+
+```text
+✖ 既定データベース (default) を対象にしようとしています。
+  既定データベースへ配信すると、同じプロジェクトに同居している
+  既存アプリのセキュリティルールとインデックスを上書きしてしまいます。
+```
+
+配信対象は常に `firestore:smileq-live,storage:smileq-media` の形になり、
+`(default)` と既存バケットには触れません。
+
+#### 共有される部分（Authentication）
+
+Firebase Authentication は**プロジェクト単位**なので既存アプリと共有します。
+影響は次のとおりです。
+
+- 匿名認証を有効にすると、プロジェクト全体で有効になる
+- 利用者アカウントの一覧は共通になる
+- SmileQ Live の司会者判定は `profiles/{uid}` の存在のみで行うため、
+  既存アプリの利用者が管理画面へ入れるわけではない（docs/HOST_ACCESS.md）
+
+既存アプリが Authentication を使っていない場合は、匿名認証の有効化による影響はありません。
+
+---
+
 ### Firebase プロジェクトと Cloud Run プロジェクトは分けてもよい
 
 同じ Google Cloud プロジェクトにすると ADC の権限付与が 1 か所で済むため**推奨**ですが、

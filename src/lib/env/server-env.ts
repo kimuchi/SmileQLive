@@ -172,3 +172,13 @@ export function checkServerConfiguration(): { ok: boolean; missing: string[] } {
 
   return { ok: missing.length === 0, missing };
 }
+
+/**
+ * SmileQ Live 専用の Firestore データベース ID。
+ *
+ * 既定の `(default)` は使わない。既存アプリと同じ Google Cloud プロジェクトへ
+ * 同居しても、データ・セキュリティルール・インデックスを完全に分離するため。
+ */
+export function firestoreDatabaseId(): string {
+  return optional('FIRESTORE_DATABASE_ID', 'smileq-live');
+}

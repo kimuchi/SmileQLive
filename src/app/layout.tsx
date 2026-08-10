@@ -8,6 +8,7 @@ import {
   firebaseAuthDomain,
   firebaseProjectId,
   firebaseStorageBucket,
+  firestoreDatabaseId,
 } from '@/lib/env/server-env';
 import './globals.css';
 
@@ -54,6 +55,7 @@ function buildRuntimeConfig() {
     firebaseProjectId: read(firebaseProjectId),
     firebaseStorageBucket: read(firebaseStorageBucket),
     firebaseAppId: firebaseAppId(),
+    firestoreDatabaseId: firestoreDatabaseId(),
     appBaseUrl: appBaseUrl(),
     allowedAuthDomains: allowedAuthDomains(),
     turnstileSiteKey: process.env.TURNSTILE_SITE_KEY ?? null,

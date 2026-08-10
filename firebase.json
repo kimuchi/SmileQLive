@@ -1,16 +1,17 @@
 {
-  "$comment": [
-    "Firebase CLI の設定。アプリ本体は Cloud Run で動かすため hosting は使わない。",
-    "ここで管理するのは Firestore のルール・インデックスと Storage のルールだけ。",
-    "デプロイ: npm run rules:deploy（対象プロジェクトは deploy/cloud-run.<env>.json から解決）"
+  "firestore": [
+    {
+      "database": "smileq-live",
+      "rules": "firebase/firestore.rules",
+      "indexes": "firebase/firestore.indexes.json"
+    }
   ],
-  "firestore": {
-    "rules": "firebase/firestore.rules",
-    "indexes": "firebase/firestore.indexes.json"
-  },
-  "storage": {
-    "rules": "firebase/storage.rules"
-  },
+  "storage": [
+    {
+      "target": "smileq-media",
+      "rules": "firebase/storage.rules"
+    }
+  ],
   "emulators": {
     "auth": { "port": 9099 },
     "firestore": { "port": 8080 },

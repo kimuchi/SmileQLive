@@ -26,6 +26,8 @@ export type RuntimeConfig = {
   firebaseProjectId: string;
   firebaseStorageBucket: string;
   firebaseAppId?: string | null;
+  /** SmileQ Live 専用の Firestore データベース ID（既定の (default) は使わない）。 */
+  firestoreDatabaseId: string;
   appBaseUrl: string;
   /** 司会ログインで許可するメールドメイン。画面表示と hd ヒントにのみ使う。 */
   allowedAuthDomains: string[];
@@ -59,6 +61,7 @@ function toFirebaseClientConfig(input: {
   projectId: string;
   storageBucket: string;
   appId: string | null;
+  firestoreDatabaseId: string;
 }): FirebaseClientConfig {
   if (!input.apiKey || !input.authDomain || !input.projectId) {
     throw new Error(
@@ -71,6 +74,7 @@ function toFirebaseClientConfig(input: {
     projectId: input.projectId,
     storageBucket: input.storageBucket.length > 0 ? input.storageBucket : undefined,
     appId: input.appId ?? undefined,
+    firestoreDatabaseId: input.firestoreDatabaseId,
   };
 }
 
@@ -82,6 +86,7 @@ function useFirebaseClientConfig(): FirebaseClientConfig {
     firebaseProjectId,
     firebaseStorageBucket,
     firebaseAppId,
+    firestoreDatabaseId,
   } = useRuntimeConfig();
 
   return useMemo(
@@ -92,8 +97,16 @@ function useFirebaseClientConfig(): FirebaseClientConfig {
         projectId: firebaseProjectId,
         storageBucket: firebaseStorageBucket,
         appId: firebaseAppId ?? null,
+        firestoreDatabaseId,
       }),
-    [firebaseApiKey, firebaseAuthDomain, firebaseProjectId, firebaseStorageBucket, firebaseAppId],
+    [
+      firebaseApiKey,
+      firebaseAuthDomain,
+      firebaseProjectId,
+      firebaseStorageBucket,
+      firebaseAppId,
+      firestoreDatabaseId,
+    ],
   );
 }
 
