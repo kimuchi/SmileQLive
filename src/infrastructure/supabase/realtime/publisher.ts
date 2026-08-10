@@ -68,10 +68,12 @@ async function publish(
 function withTimeout(promise: Promise<void>): Promise<void> {
   return new Promise<void>((resolve) => {
     const timer = setTimeout(() => resolve(), SEND_TIMEOUT_MS);
-    void promise.finally(() => {
-      clearTimeout(timer);
-      resolve();
-    });
+    promise
+      .catch(() => undefined)
+      .finally(() => {
+        clearTimeout(timer);
+        resolve();
+      });
   });
 }
 

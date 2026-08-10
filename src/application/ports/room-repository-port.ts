@@ -7,12 +7,7 @@
 import type { QuizSnapshot } from '@/domain/quiz/quiz-snapshot';
 import type { RoomAction } from '@/domain/room/state-machine';
 import type { RoomListItem } from '@/types/api';
-import type {
-  PresentationLinkRow,
-  RoomMemberRole,
-  RoomMemberRow,
-  RoomRow,
-} from '@/types/database';
+import type { PresentationLinkRow, RoomMemberRole, RoomMemberRow, RoomRow } from '@/types/database';
 
 export type CreateRoomDbInput = {
   ownerId: string;

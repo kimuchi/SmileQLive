@@ -10,15 +10,13 @@ import 'server-only';
  * - 回答レスポンスに正誤を含めない（正解発表前に漏らさない）。
  */
 
-import {
-  NumberNormalizationError,
-  normalizeNumberAnswer,
-} from '@/domain/answer/number-normalizer';
+import { NumberNormalizationError, normalizeNumberAnswer } from '@/domain/answer/number-normalizer';
 import type { AnswerBreakdown } from '@/domain/answer/answer-dto';
 import { findSnapshotQuestion } from '@/domain/quiz/quiz-snapshot';
 import { rankParticipants, topRanking, type RankedParticipant } from '@/domain/room/scoring';
 import { acceptsAnswers, revealsAnswer, showsBreakdown } from '@/domain/room/state-machine';
 import { parseQuizSnapshot } from '@/application/services/quiz-snapshot-codec';
+import { toMyAnswerDto } from '@/application/services/answer-mapper';
 import { answerRepository } from '@/infrastructure/supabase/repositories/answer-repository';
 import { roomRepository } from '@/infrastructure/supabase/repositories/room-repository';
 import { buildEnvelope, eventPublisher } from '@/infrastructure/supabase/realtime/publisher';
@@ -154,31 +152,15 @@ export async function getMyResult(roomId: string): Promise<MyResultResponse> {
   let rank: number | null = null;
   if (revealsAnswer(room.phase)) {
     const scores = await answerRepository.getLeaderboard(roomId);
-    rank = rankParticipants(scores).find((entry) => entry.participantId === member.id)?.rank ?? null;
+    rank =
+      rankParticipants(scores).find((entry) => entry.participantId === member.id)?.rank ?? null;
   }
-
-  const myAnswer = stored
-    ? stored.answerType === 'choice' && stored.choiceId
-      ? ({
-          questionId: stored.questionId,
-          type: 'choice' as const,
-          choiceId: stored.choiceId,
-          answeredAt: stored.answeredAt,
-        } as const)
-      : ({
-          questionId: stored.questionId,
-          type: 'number' as const,
-          raw: stored.numberRaw ?? '',
-          normalizedText: stored.numberValue ?? '',
-          answeredAt: stored.answeredAt,
-        } as const)
-    : null;
 
   const revealed = revealsAnswer(room.phase);
 
   return {
     questionId,
-    myAnswer,
+    myAnswer: toMyAnswerDto(stored),
     // 正解発表前は絶対に正誤を返さない。
     isCorrect: revealed && stored ? stored.isCorrect : null,
     pointsAwarded: revealed && stored ? stored.pointsAwarded : null,
@@ -213,10 +195,7 @@ export async function getBreakdown(
  * ランキング。
  * 参加者からも呼べるが、正解発表前のフェーズでは空配列を返す。
  */
-export async function getLeaderboard(
-  roomId: string,
-  limit?: number,
-): Promise<RankedParticipant[]> {
+export async function getLeaderboard(roomId: string, limit?: number): Promise<RankedParticipant[]> {
   const { member, room } = await requireRoomMember(roomId, ['host', 'presenter', 'participant']);
 
   if (member.role === 'participant' && !revealsAnswer(room.phase)) {

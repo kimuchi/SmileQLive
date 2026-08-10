@@ -56,10 +56,7 @@ export async function createQuiz(input: CreateQuizInput): Promise<AdminQuizDetai
   return quizRepository.createQuiz(user.id, input);
 }
 
-export async function updateQuiz(
-  quizId: string,
-  input: UpdateQuizInput,
-): Promise<AdminQuizDetail> {
+export async function updateQuiz(quizId: string, input: UpdateQuizInput): Promise<AdminQuizDetail> {
   await requireQuizOwner(quizId);
   return quizRepository.updateQuiz(quizId, input);
 }

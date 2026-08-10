@@ -12,9 +12,13 @@ import 'server-only';
  */
 
 import { headers } from 'next/headers';
-import type { MyAnswer, RevealInfo } from '@/domain/answer/answer-dto';
+import type { RevealInfo } from '@/domain/answer/answer-dto';
 import { describeNumberRule } from '@/domain/answer/number-judgement';
-import { toPublicQuestion, type PublicImage, type PublicQuestion } from '@/domain/quiz/public-question';
+import {
+  toPublicQuestion,
+  type PublicImage,
+  type PublicQuestion,
+} from '@/domain/quiz/public-question';
 import type { Question } from '@/domain/quiz/question';
 import {
   findSnapshotQuestion,
@@ -34,6 +38,7 @@ import {
   type RoomPhase,
 } from '@/domain/room/state-machine';
 import { buildSnapshotForQuiz } from '@/application/services/quiz-service';
+import { toMyAnswerDto } from '@/application/services/answer-mapper';
 import { parseQuizSnapshot } from '@/application/services/quiz-snapshot-codec';
 import { resolveQuestionMedia } from '@/application/services/media-service';
 import { answerRepository } from '@/infrastructure/supabase/repositories/answer-repository';
@@ -51,7 +56,12 @@ import {
   requireRoomOwner,
 } from '@/lib/auth/session';
 import { ensureAuthSession } from '@/lib/auth/anonymous';
-import { createJoinToken, createPresentationToken, hashToken, isPlausibleToken } from '@/lib/crypto/tokens';
+import {
+  createJoinToken,
+  createPresentationToken,
+  hashToken,
+  isPlausibleToken,
+} from '@/lib/crypto/tokens';
 import { AppError } from '@/lib/errors/app-error';
 import { appBaseUrl, presentationLinkTtlMinutes } from '@/lib/env/server-env';
 import type { RoomActionInput } from '@/lib/validation/schemas';
@@ -221,41 +231,57 @@ type SnapshotBaseParts = {
   /** メディア URL 解決済みの現在問題（生のドメイン型。正解情報を含む）。 */
   resolvedQuestion: Question | null;
   publicQuestion: PublicQuestion | null;
+  /** メディア URL 解決済みの次問題。投影の先読み用（参加者へは返さない）。 */
+  resolvedNextQuestion: Question | null;
 };
 
-async function loadSnapshotParts(room: RoomRow): Promise<SnapshotBaseParts> {
+/**
+ * 現在問題と次問題のメディア URL を **1 回の署名要求**でまとめて解決する。
+ * 署名 URL の発行はネットワーク往復を伴うため、Snapshot 生成ごとに重複させない。
+ */
+async function loadSnapshotParts(
+  room: RoomRow,
+  options: { includeNext?: boolean } = {},
+): Promise<SnapshotBaseParts> {
   const snapshot = snapshotOf(room);
-  const raw = currentQuestionOf(room, snapshot);
-  if (!raw) {
-    return { room, snapshot, resolvedQuestion: null, publicQuestion: null };
+  const current = currentQuestionOf(room, snapshot);
+  const next = options.includeNext
+    ? (questionAtPosition(snapshot, (room.current_question_position ?? 0) + 1) ?? null)
+    : null;
+
+  const targets: Question[] = [];
+  if (current) {
+    targets.push(current);
   }
-  const [resolved] = await resolveQuestionMedia([raw]);
-  const resolvedQuestion = resolved ?? raw;
+  if (next) {
+    targets.push(next);
+  }
+
+  const resolved = targets.length > 0 ? await resolveQuestionMedia(targets) : [];
+
+  let cursor = 0;
+  const resolvedQuestion = current ? (resolved[cursor++] ?? current) : null;
+  const resolvedNextQuestion = next ? (resolved[cursor++] ?? next) : null;
+
   return {
     room,
     snapshot,
     resolvedQuestion,
-    publicQuestion: toPublicQuestion(resolvedQuestion),
+    publicQuestion: resolvedQuestion ? toPublicQuestion(resolvedQuestion) : null,
+    resolvedNextQuestion,
   };
 }
 
 /** 投影担当が先読みすべき画像 URL（現在問題＋次問題）。参加者へは返さない。 */
-async function buildPreloadUrls(room: RoomRow, snapshot: QuizSnapshot): Promise<string[]> {
-  const targets: Question[] = [];
-  const current = currentQuestionOf(room, snapshot);
-  if (current) {
-    targets.push(current);
+function buildPreloadUrls(parts: SnapshotBaseParts): string[] {
+  const urls: string[] = [];
+  if (parts.resolvedQuestion) {
+    urls.push(...collectImageUrls(parts.resolvedQuestion, true));
   }
-  const next = questionAtPosition(snapshot, (room.current_question_position ?? 0) + 1);
-  if (next) {
-    targets.push(next);
+  if (parts.resolvedNextQuestion) {
+    urls.push(...collectImageUrls(parts.resolvedNextQuestion, true));
   }
-  if (targets.length === 0) {
-    return [];
-  }
-
-  const resolved = await resolveQuestionMedia(targets);
-  return [...new Set(resolved.flatMap((question) => collectImageUrls(question, true)))];
+  return [...new Set(urls)];
 }
 
 export async function getStaffSnapshot(
@@ -267,9 +293,11 @@ export async function getStaffSnapshot(
       ? await requireRoomMember(roomId, ['host'])
       : await requireRoomMember(roomId, ['host', 'presenter']);
 
-  void roomRepository.touchMemberPresence(member.id);
+  await roomRepository.touchMemberPresence(member.id);
 
-  const { snapshot, resolvedQuestion, publicQuestion } = await loadSnapshotParts(room);
+  // 投影の先読みのため次問題まで解決する（司会・投影のみ）。
+  const parts = await loadSnapshotParts(room, { includeNext: true });
+  const { snapshot, resolvedQuestion, publicQuestion } = parts;
   const phase: RoomPhase = room.phase;
 
   const participantCount = await roomRepository.countParticipants(roomId);
@@ -288,14 +316,12 @@ export async function getStaffSnapshot(
         )
       : null;
 
-  const reveal = revealsAnswer(phase) && resolvedQuestion ? buildRevealInfo(resolvedQuestion) : null;
+  const reveal =
+    revealsAnswer(phase) && resolvedQuestion ? buildRevealInfo(resolvedQuestion) : null;
 
   const leaderboard =
     phase === 'scoreboard' || phase === 'finished'
-      ? topRanking(
-          await answerRepository.getLeaderboard(roomId),
-          snapshot.settings.leaderboardSize,
-        )
+      ? topRanking(await answerRepository.getLeaderboard(roomId), snapshot.settings.leaderboardSize)
       : null;
 
   const base: StaffSnapshot = {
@@ -318,7 +344,7 @@ export async function getStaffSnapshot(
     reveal,
     leaderboard,
     availableActions: availableActions(phase),
-    preloadImageUrls: await buildPreloadUrls(room, snapshot),
+    preloadImageUrls: buildPreloadUrls(parts),
   };
 
   if (audience !== 'host') {
@@ -342,42 +368,9 @@ export async function getStaffSnapshot(
   };
 }
 
-function toMyAnswer(
-  questionId: string,
-  stored: {
-    answerType: 'choice' | 'number';
-    choiceId: string | null;
-    numberRaw: string | null;
-    numberValue: string | null;
-    answeredAt: string;
-  } | null,
-): MyAnswer | null {
-  if (!stored) {
-    return null;
-  }
-  if (stored.answerType === 'choice') {
-    if (!stored.choiceId) {
-      return null;
-    }
-    return {
-      questionId,
-      type: 'choice',
-      choiceId: stored.choiceId,
-      answeredAt: stored.answeredAt,
-    };
-  }
-  return {
-    questionId,
-    type: 'number',
-    raw: stored.numberRaw ?? '',
-    normalizedText: stored.numberValue ?? '',
-    answeredAt: stored.answeredAt,
-  };
-}
-
 export async function getParticipantSnapshot(roomId: string): Promise<ParticipantSnapshot> {
   const { member, room } = await requireParticipant(roomId);
-  void roomRepository.touchMemberPresence(member.id);
+  await roomRepository.touchMemberPresence(member.id);
 
   const { snapshot, resolvedQuestion, publicQuestion } = await loadSnapshotParts(room);
   const phase: RoomPhase = room.phase;
@@ -410,7 +403,8 @@ export async function getParticipantSnapshot(roomId: string): Promise<Participan
       };
     }
 
-    if (phase === 'scoreboard' && snapshot.settings.showLeaderboard) {
+    // ランキングは「ランキング表示」フェーズと終了後だけ。設定で無効なら出さない。
+    if ((phase === 'scoreboard' || phase === 'finished') && snapshot.settings.showLeaderboard) {
       leaderboard = ranked.slice(0, Math.max(0, snapshot.settings.leaderboardSize));
     }
   }
@@ -432,7 +426,7 @@ export async function getParticipantSnapshot(roomId: string): Promise<Participan
       nickname: member.nickname ?? '参加者',
     },
     participantCount,
-    myAnswer: resolvedQuestion ? toMyAnswer(resolvedQuestion.id, storedAnswer) : null,
+    myAnswer: toMyAnswerDto(storedAnswer),
     reveal,
     myResult,
     leaderboard,

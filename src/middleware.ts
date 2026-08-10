@@ -21,7 +21,12 @@ function requiresHostSession(pathname: string): boolean {
   if (PUBLIC_ADMIN_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`))) {
     return false;
   }
-  return pathname === '/admin' || pathname.startsWith('/admin/') || pathname === '/host' || pathname.startsWith('/host/');
+  return (
+    pathname === '/admin' ||
+    pathname.startsWith('/admin/') ||
+    pathname === '/host' ||
+    pathname.startsWith('/host/')
+  );
 }
 
 export async function middleware(request: NextRequest) {

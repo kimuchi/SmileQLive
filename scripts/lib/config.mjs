@@ -237,15 +237,30 @@ export function buildRuntimeEnv(config, appBaseUrl) {
 
 /**
  * gcloud の辞書型フラグ値を組み立てる。
- * 値にカンマが含まれても壊れないよう、代替デリミタ構文 (^@^) を使う。
+ *
+ * 既定の区切りはカンマだが、値にカンマが含まれると壊れる。
+ * その場合は gcloud の代替デリミタ構文 `^<区切り>^key=value<区切り>key=value` を使い、
+ * どの値にも現れない文字を区切りとして選ぶ。
  */
+const DELIMITER_CANDIDATES = [',', '@', '|', '#', ';', '~', '%'];
+
 export function toGcloudDict(record) {
   const entries = Object.entries(record).filter(([, value]) => value !== undefined);
-  const hasComma = entries.some(([, value]) => String(value).includes(','));
-  const pairs = entries.map(([key, value]) => `${key}=${value}`);
+  const values = entries.map(([, value]) => String(value));
 
-  if (!hasComma) {
-    return pairs.join(',');
+  const delimiter = DELIMITER_CANDIDATES.find(
+    (candidate) => !values.some((value) => value.includes(candidate)),
+  );
+
+  if (!delimiter) {
+    // 候補がすべて使われている場合は、そのままでは安全に渡せない。
+    fatal(
+      '環境変数の値に特殊文字が多く、gcloud へ安全に渡せません。',
+      `対象: ${entries.map(([key]) => key).join(', ')}\n` +
+        'extraEnv の値を見直すか、Secret Manager 経由で渡してください。',
+    );
   }
-  return `^@^${pairs.join('@')}`;
+
+  const pairs = entries.map(([key, value]) => `${key}=${value}`);
+  return delimiter === ',' ? pairs.join(',') : `^${delimiter}^${pairs.join(delimiter)}`;
 }

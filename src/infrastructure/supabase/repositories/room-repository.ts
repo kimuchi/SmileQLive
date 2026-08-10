@@ -182,10 +182,7 @@ export async function getRoomMembers(
   return data ?? [];
 }
 
-export async function getMember(
-  roomId: string,
-  authUserId: string,
-): Promise<RoomMemberRow | null> {
+export async function getMember(roomId: string, authUserId: string): Promise<RoomMemberRow | null> {
   const admin = createSupabaseAdminClient();
   const { data, error } = await admin
     .from('room_members')
@@ -262,15 +259,19 @@ export async function countAnswers(roomId: string, questionId: string): Promise<
   return count ?? 0;
 }
 
+/**
+ * 在席時刻の更新。表示補助のための情報なので、失敗しても進行を妨げない。
+ * 呼び出し側が await しないケースがあるため、この関数は決して throw しない。
+ */
 export async function touchMemberPresence(memberId: string): Promise<void> {
-  const admin = createSupabaseAdminClient();
-  const { error } = await admin
-    .from('room_members')
-    .update({ last_seen_at: new Date().toISOString(), is_active: true })
-    .eq('id', memberId);
-  // presence の更新失敗は進行を妨げない。
-  if (error) {
-    return;
+  try {
+    const admin = createSupabaseAdminClient();
+    await admin
+      .from('room_members')
+      .update({ last_seen_at: new Date().toISOString(), is_active: true })
+      .eq('id', memberId);
+  } catch {
+    // 意図的に無視する。
   }
 }
 

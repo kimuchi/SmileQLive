@@ -24,11 +24,7 @@ export function formatInteger(value: number | null | undefined, fallback = '—'
 /**
  * 件数表示。例: formatCount(12) → 「12人」 / formatCount(3, '問') → 「3問」
  */
-export function formatCount(
-  value: number | null | undefined,
-  unit = '人',
-  fallback = '—',
-): string {
+export function formatCount(value: number | null | undefined, unit = '人', fallback = '—'): string {
   if (!isFiniteNumber(value)) {
     return fallback;
   }

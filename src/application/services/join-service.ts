@@ -14,10 +14,7 @@ import { ensureAuthSession } from '@/lib/auth/anonymous';
 import { AppError } from '@/lib/errors/app-error';
 import { logger } from '@/infrastructure/logging/logger';
 import { createSupabaseServerClient } from '@/infrastructure/supabase/server';
-import {
-  assertRpcOk,
-  throwIfDbError,
-} from '@/infrastructure/supabase/repositories/db-errors';
+import { assertRpcOk, throwIfDbError } from '@/infrastructure/supabase/repositories/db-errors';
 import { roomRepository } from '@/infrastructure/supabase/repositories/room-repository';
 import { parseQuizSnapshot } from '@/application/services/quiz-snapshot-codec';
 import { hashToken, isPlausibleToken } from '@/lib/crypto/tokens';

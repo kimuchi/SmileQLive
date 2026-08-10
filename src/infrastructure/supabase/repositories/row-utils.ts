@@ -50,11 +50,7 @@ export function readInt(row: Record<string, unknown>, key: string, fallback: num
   return fallback;
 }
 
-export function readBoolean(
-  row: Record<string, unknown>,
-  key: string,
-  fallback: boolean,
-): boolean {
+export function readBoolean(row: Record<string, unknown>, key: string, fallback: boolean): boolean {
   const value = row[key];
   return typeof value === 'boolean' ? value : fallback;
 }

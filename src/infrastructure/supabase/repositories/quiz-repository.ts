@@ -339,10 +339,7 @@ export async function getQuizDetail(
   return buildQuizDetail(quiz, options);
 }
 
-async function buildQuizDetail(
-  quiz: QuizRow,
-  options: QuizReadOptions,
-): Promise<AdminQuizDetail> {
+async function buildQuizDetail(quiz: QuizRow, options: QuizReadOptions): Promise<AdminQuizDetail> {
   const questions = await fetchQuestionRows(quiz.id);
   const choices = await fetchChoiceRows(questions.map((question) => question.id));
 
@@ -410,10 +407,7 @@ export async function createQuiz(
   return buildQuizDetail(data, {});
 }
 
-export async function updateQuiz(
-  quizId: string,
-  input: UpdateQuizInput,
-): Promise<AdminQuizDetail> {
+export async function updateQuiz(quizId: string, input: UpdateQuizInput): Promise<AdminQuizDetail> {
   const admin = createSupabaseAdminClient();
   const patch: Partial<QuizRow> = {};
   if (input.title !== undefined) {
@@ -572,7 +566,8 @@ function buildQuestionPatch(
       input.revealImageAlt !== undefined
         ? input.revealImageAlt
         : (previous?.reveal_image_alt ?? null),
-    explanation: input.explanation !== undefined ? input.explanation : (previous?.explanation ?? null),
+    explanation:
+      input.explanation !== undefined ? input.explanation : (previous?.explanation ?? null),
     time_limit_seconds:
       input.timeLimitSeconds ?? previous?.time_limit_seconds ?? DEFAULT_TIME_LIMIT_SECONDS,
     points: input.points ?? previous?.points ?? DEFAULT_POINTS,

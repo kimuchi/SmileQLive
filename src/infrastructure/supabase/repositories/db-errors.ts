@@ -101,7 +101,9 @@ export function assertRpcOk(payload: unknown): void {
     return;
   }
 
-  if (payload.ok === false || payload.success === false || payload.error !== undefined) {
+  // `error: null` は成功扱い。明示的な失敗フラグがあるときだけエラーとする。
+  const hasError = payload.error !== undefined && payload.error !== null;
+  if (payload.ok === false || payload.success === false || hasError) {
     const candidates = [payload.code, payload.error_code, payload.errorCode, payload.error];
     for (const candidate of candidates) {
       if (typeof candidate === 'string' && isAppErrorCode(candidate)) {
