@@ -10,7 +10,8 @@
  * オプション:
  *   --yes        確認プロンプトを省略（CI 用）
  *   --dry-run    実行せずコマンドだけ表示
- *   --only       対象を絞る（既定: firestore:rules,firestore:indexes,storage）
+ *   --only       対象を絞る（既定: firestore:<database>,storage）
+ *   --allow-default-bucket  Firebase 既定バケットへの配信を許可（既定では拒否）
  *
  * Rules は「万一クライアントが直接 Firestore を叩いても正解が漏れない」ための最終防壁です
  * （docs/FIRESTORE_MODEL.md §4）。アプリのデプロイとは別に、**必ずここから反映**してください。
@@ -150,6 +151,35 @@ if (/firestore:\(default\)|(^|,)firestore:rules|(^|,)firestore:indexes|(^|,)fire
       'どうしても既定データベースを使う場合は、',
       `deploy/cloud-run.<env>.json の firestoreDatabaseId を "(default)" にしてください`,
       '（既存アプリのルールを引き継ぐ責任が生じます）。',
+    ].join('\n'),
+  );
+}
+
+// Storage も同じ理由で、Firebase 既定バケットを対象にしたら止める。
+// 既定バケットは既存アプリが使っている可能性が高く、ルールを上書きしてしまう。
+const defaultBuckets = [`${projectId}.firebasestorage.app`, `${projectId}.appspot.com`];
+if (
+  mediaBucket &&
+  defaultBuckets.includes(mediaBucket) &&
+  /(^|,)storage(:|,|$)/.test(only) &&
+  !flags.has('allow-default-bucket')
+) {
+  fatal(
+    `Firebase 既定バケット (${mediaBucket}) へ Storage ルールを配信しようとしています。`,
+    [
+      'SmileQ Live は画像用の専用バケットを使います。',
+      '既定バケットへ配信すると、同じプロジェクトに同居している',
+      '既存アプリの Storage ルールを上書きしてしまいます。',
+      '',
+      `正しい設定: "mediaBucket": "${projectId}-smileq-media"`,
+      '  npm run firebase:config   … 専用バケット名を設定ファイルへ書き込む',
+      '  npm run gcp:bootstrap     … そのバケットを作成する',
+      '',
+      'Firestore のルールだけ先に反映する場合:',
+      `  npm run rules:deploy -- --only firestore:${databaseId}`,
+      '',
+      '既定バケットを使うと分かったうえで実行する場合のみ:',
+      '  npm run rules:deploy -- --allow-default-bucket',
     ].join('\n'),
   );
 }

@@ -35,7 +35,7 @@
     "既存アプリと同じプロジェクトでも、Storage ルールをバケット単位で分離するため。",
     "rules:deploy はこのバケットだけを対象にする。"
   ],
-  "mediaBucket": "your-firebase-staging-project.firebasestorage.app",
+  "mediaBucket": "your-firebase-staging-project-smileq-media",
   "presentationLinkTtlMinutes": 480,
 
   "minInstances": 0,

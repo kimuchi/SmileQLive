@@ -137,7 +137,7 @@ gcloud storage buckets create gs://idl-application-smileq-media --uniform-bucket
 
 #### 事故を構造的に防いでいる箇所
 
-`npm run rules:deploy` は既定データベースを対象にしようとすると**必ず停止**します。
+`npm run rules:deploy` は、既存アプリ側を対象にしようとすると**必ず停止**します。
 
 ```text
 ✖ 既定データベース (default) を対象にしようとしています。
@@ -145,8 +145,23 @@ gcloud storage buckets create gs://idl-application-smileq-media --uniform-bucket
   既存アプリのセキュリティルールとインデックスを上書きしてしまいます。
 ```
 
-配信対象は常に `firestore:smileq-live,storage:smileq-media` の形になり、
-`(default)` と既存バケットには触れません。
+```text
+✖ Firebase 既定バケット (idl-application.firebasestorage.app) へ
+  Storage ルールを配信しようとしています。
+```
+
+配信対象は常に `firestore:smileq-live,storage:<専用バケット>` の形になり、
+`(default)` と既定バケットには触れません。
+
+- `firebase.json` の `storage.bucket` は**プレースホルダのまま**にしてあります。
+  手作業で `firebase deploy` を実行しても、既存アプリのバケットへは当たりません。
+  実際の配信では `rules:deploy` が `.firebase/smileq-deploy.json` を生成し、
+  `--config` で対象を確定させます。
+- `npm run firebase:config` は `mediaBucket` が既定バケットを指していたら
+  専用バケット名へ書き換えます。
+- 既定バケットを使うと分かったうえで配信する場合だけ
+  `npm run rules:deploy -- --allow-default-bucket` を使います
+  （既存アプリの Storage ルールを引き継ぐ責任が生じます）。
 
 #### 共有される部分（Authentication）
 
@@ -300,13 +315,21 @@ npm run firebase:config    # プロジェクトと Web アプリを選び、設�
 
 このコマンドが行うこと:
 
-1. `firebase projects:list` でアクセスできるプロジェクトを一覧표示し、選ばせる
+1. `firebase projects:list` でアクセスできるプロジェクトを一覧表示し、選ばせる
 2. `firebase apps:list WEB` で Web アプリを探す
    （**無ければ `firebase apps:create WEB "SmileQ Live"` で作成**するか確認する）
 3. `firebase apps:sdkconfig WEB <appId>` で公開設定一式を取得する
 4. `deploy/cloud-run.<env>.json` の `firebaseProjectId` / `firebaseApiKey` /
    `firebaseAuthDomain` / `firebaseStorageBucket` / `firebaseAppId` を書き込む
    （ファイルが無ければ `*.example.json` から作成する）
+5. `mediaBucket` を **専用バケット `<project>-smileq-media`** に設定する
+   （既定バケットのままだと、既存アプリの Storage ルールを上書きしてしまうため）
+
+> 成否は firebase CLI の**終了コードではなく `--json` の出力内容**で判定します。
+> CLI は正しい設定を返しながら 0 以外で終了することがあり
+> （npx ラッパー経由の終了コード伝播など）、終了コードだけで判断すると
+> **取得できている設定を捨ててしまう**ためです。
+> 中身が正しく終了コードだけが 0 以外だった場合は ▲ で通知したうえで続行します。
 
 よく使うオプション:
 

@@ -207,9 +207,10 @@ cp deploy/cloud-run.staging.example.json deploy/cloud-run.staging.json
   "firebaseAuthDomain": "my-firebase-project.firebaseapp.com",
   "firebaseStorageBucket": "my-firebase-project.firebasestorage.app",
   "firebaseAppId": "1:000000000000:web:....",    // ← 任意
+  "firestoreDatabaseId": "smileq-live",          // ← 専用 DB。(default) は使わない
 
   "allowedAuthDomains": [],                      // ← 空 = ドメイン制限なし
-  "mediaBucket": "my-firebase-project.firebasestorage.app",
+  "mediaBucket": "my-firebase-project-smileq-media",   // ← 専用バケット。既定バケットとは分ける
 
   "minInstances": 1,                             // ← 本番は 1 以上を推奨
   "maxInstances": 10,

@@ -114,6 +114,28 @@ if (available.length > 0) {
       ? config.firebaseAuthDomain
       : `${config.firebaseAuthDomain} — 例: ${config.firebaseProjectId}.firebaseapp.com`,
   );
+  // 既存アプリと同じ Firebase プロジェクトへ同居しても壊さないための 2 点
+  // （docs/FIREBASE_SETUP.md「分離のしくみ」）。
+  const usesNamedDatabase = config.firestoreDatabaseId !== '(default)';
+  check(
+    'Firestore は専用データベース',
+    usesNamedDatabase,
+    usesNamedDatabase
+      ? config.firestoreDatabaseId
+      : '(default) は既存アプリのルールとインデックスを上書きします',
+  );
+  const defaultBuckets = [
+    `${config.firebaseProjectId}.firebasestorage.app`,
+    `${config.firebaseProjectId}.appspot.com`,
+  ];
+  const usesDedicatedBucket = !defaultBuckets.includes(config.mediaBucket);
+  check(
+    'Storage は専用バケット',
+    usesDedicatedBucket,
+    usesDedicatedBucket
+      ? config.mediaBucket
+      : `${config.mediaBucket} は Firebase 既定バケットです — 例: ${config.firebaseProjectId}-smileq-media`,
+  );
   check(
     '司会ログインの許可ドメイン',
     true,

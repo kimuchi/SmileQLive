@@ -18,9 +18,12 @@
  *   firebase apps:create WEB "<name>" ...      … Web アプリが無い場合に作成
  *   firebase apps:sdkconfig WEB <appId> ...    … 公開設定一式を取得
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
+import { cliJson } from './lib/cli-json.mjs';
 import { configPath, ENVIRONMENTS, parseArgs } from './lib/config.mjs';
 import { color, fatal, heading, info, step, success, warn } from './lib/log.mjs';
 import { commandExists, detectPackageManager, run } from './lib/proc.mjs';
@@ -50,8 +53,45 @@ if (!hasFirebaseCli) {
   info(`firebase CLI が無いため ${cli.bin} 経由で実行します（初回は取得に時間がかかります）。`);
 }
 
+/**
+ * firebase CLI をリポジトリの外で実行するための作業ディレクトリ。
+ *
+ * ここで使うコマンド（projects / apps 系）は firebase.json を必要としない。
+ * それにもかかわらずリポジトリ直下で実行すると CLI が firebase.json を読み込んでしまう。
+ * このリポジトリの firebase.json は storage.bucket を意図的にプレースホルダのままにしてあり
+ * （誤った手動デプロイを止めるため — scripts/deploy-rules.mjs）、
+ * 設定取得とは無関係な検証の警告や異常終了を招く。最初から見えない場所で実行する。
+ */
+const cliCwd = mkdtempSync(join(tmpdir(), 'smileq-firebase-'));
+process.on('exit', () => {
+  rmSync(cliCwd, { recursive: true, force: true });
+});
+
 function firebase(args, { capture = true, allowFailure = false } = {}) {
-  return run(cli.bin, [...cli.prefix, ...args], { capture, quiet: true, allowFailure });
+  return run(cli.bin, [...cli.prefix, ...args], {
+    capture,
+    quiet: true,
+    allowFailure,
+    cwd: cliCwd,
+  });
+}
+
+/** 中身は正しいのに終了コードだけが 0 以外だった場合に、黙って隠さず記録する。 */
+function noteExitCodeMismatch(cmdResult, label) {
+  if (cmdResult.ok) {
+    return;
+  }
+  warn(
+    `${label}: firebase CLI は終了コード ${cmdResult.status ?? '不明'} を返しましたが、` +
+      '有効な JSON が得られたため続行します。',
+  );
+  const line = String(cmdResult.stderr ?? '')
+    .split(/\r?\n/)
+    .map((value) => value.trim())
+    .find((value) => value.length > 0 && !/^(npm |pnpm |\(node:)/.test(value));
+  if (line) {
+    info(`  stderr: ${line}`);
+  }
 }
 
 /**
@@ -65,7 +105,13 @@ function firebase(args, { capture = true, allowFailure = false } = {}) {
  * 分類を誤らないよう、直近のエラー行をここから読み取る。
  */
 function readDebugLogTail(maxLines = 400) {
-  const candidates = ['firebase-debug.log', 'firebase-debug.log.1'];
+  // CLI は実行時の作業ディレクトリへ書くため、そちらを先に見る。
+  const candidates = [
+    join(cliCwd, 'firebase-debug.log'),
+    join(cliCwd, 'firebase-debug.log.1'),
+    'firebase-debug.log',
+    'firebase-debug.log.1',
+  ];
   for (const file of candidates) {
     if (!existsSync(file)) {
       continue;
@@ -128,20 +174,29 @@ success(loginCheck.stdout.split(/\r?\n/).find((line) => line.includes('@')) ?? '
 step('プロジェクトを決定');
 let projectId = typeof flags.get('project') === 'string' ? flags.get('project') : '';
 
-if (!projectId) {
-  const list = firebase(['projects:list', '--json'], { allowFailure: true });
-  let projects = [];
-  if (list.ok) {
-    try {
-      const parsed = JSON.parse(list.stdout);
-      projects = (parsed.result ?? []).map((item) => ({
-        id: item.projectId,
-        name: item.displayName ?? '',
-      }));
-    } catch {
-      // JSON でなければ後段の対話入力へ回す。
-    }
+/** projects:list は 2 箇所で使うため 1 回だけ実行して使い回す。 */
+let projectsCache = null;
+function listProjects() {
+  if (projectsCache) {
+    return projectsCache;
   }
+  const cmdResult = firebase(['projects:list', '--json'], { allowFailure: true });
+  const parsed = cliJson(cmdResult);
+  if (parsed.ok) {
+    noteExitCodeMismatch(cmdResult, 'projects:list');
+  }
+  projectsCache = {
+    ok: parsed.ok,
+    message: parsed.message,
+    projects: Array.isArray(parsed.result)
+      ? parsed.result.map((item) => ({ id: item.projectId, name: item.displayName ?? '' }))
+      : [],
+  };
+  return projectsCache;
+}
+
+if (!projectId) {
+  const { projects } = listProjects();
 
   if (projects.length === 0) {
     warn('プロジェクト一覧を取得できませんでした。');
@@ -191,19 +246,11 @@ function isFirebaseNotEnabled(result) {
   return /Firebase project .* not found/i.test(output) || /not a Firebase project/i.test(output);
 }
 
-const projectCheck = firebase(['projects:list', '--json'], { allowFailure: true });
-let firebaseEnabled = false;
-if (projectCheck.ok) {
-  try {
-    const parsed = JSON.parse(projectCheck.stdout);
-    firebaseEnabled = (parsed.result ?? []).some((item) => item.projectId === projectId);
-  } catch {
-    // 判定できないときは、後続の API 呼び出しの結果で切り分ける。
-    firebaseEnabled = true;
-  }
-} else {
-  firebaseEnabled = true;
-}
+const projectCheck = listProjects();
+// 一覧を取得できなかったときは、ここで判定せず後続の API 呼び出しの結果で切り分ける。
+const firebaseEnabled = projectCheck.ok
+  ? projectCheck.projects.some((item) => item.id === projectId)
+  : true;
 
 if (!firebaseEnabled) {
   warn(`${projectId} に Firebase が追加されていません。`);
@@ -232,13 +279,14 @@ if (!firebaseEnabled) {
 
   step('Firebase を追加');
   const added = firebase(['projects:addfirebase', projectId, '--json'], { allowFailure: true });
-  if (!added.ok) {
+  const addedJson = cliJson(added);
+  if (!addedJson.ok) {
     reportFailure(added, ['projects:addfirebase', projectId]);
 
     // CLI の標準出力には詳細が出ないため、デバッグログも合わせて判定する。
     const debugLog = readDebugLogTail();
     const apiError = extractApiError(debugLog);
-    const output = `${added.stdout ?? ''}\n${added.stderr ?? ''}\n${apiError.text}`;
+    const output = `${added.stdout ?? ''}\n${added.stderr ?? ''}\n${addedJson.message}\n${apiError.text}`;
 
     if (apiError.body) {
       console.error(`  API の応答: ${apiError.body}`);
@@ -312,6 +360,7 @@ if (!firebaseEnabled) {
       ].join('\n'),
     );
   }
+  noteExitCodeMismatch(added, 'projects:addfirebase');
   success(`${projectId} へ Firebase を追加しました。`);
 }
 
@@ -321,21 +370,19 @@ const appsResult = firebase(['apps:list', 'WEB', '--project', projectId, '--json
   allowFailure: true,
 });
 
-let apps = [];
-if (appsResult.ok) {
-  try {
-    const parsed = JSON.parse(appsResult.stdout);
-    apps = (parsed.result ?? []).map((item) => ({
-      appId: item.appId,
-      displayName: item.displayName ?? '',
-    }));
-  } catch {
-    // 後段で作成を促す。
-  }
+const appsJson = cliJson(appsResult);
+if (appsJson.ok) {
+  noteExitCodeMismatch(appsResult, 'apps:list');
 }
+const apps = Array.isArray(appsJson.result)
+  ? appsJson.result.map((item) => ({ appId: item.appId, displayName: item.displayName ?? '' }))
+  : [];
 
 let appId = '';
 if (apps.length === 0) {
+  if (appsJson.message) {
+    warn(`Web アプリ一覧を取得できませんでした: ${appsJson.message}`);
+  }
   warn('この プロジェクトに Web アプリが登録されていません。');
   const shouldCreate =
     flags.has('yes') || !isInteractive()
@@ -353,8 +400,13 @@ if (apps.length === 0) {
     ['apps:create', 'WEB', 'SmileQ Live', '--project', projectId, '--json'],
     { allowFailure: true },
   );
-  if (!created.ok) {
+  const createdJson = cliJson(created);
+  if (!createdJson.ok) {
     reportFailure(created, ['apps:create', 'WEB', 'SmileQ Live', '--project', projectId]);
+    if (createdJson.message) {
+      console.error(`  CLI のエラー: ${createdJson.message}`);
+      console.error('');
+    }
     if (isFirebaseNotEnabled(created)) {
       fatal(
         `${projectId} に Firebase が追加されていません。`,
@@ -383,11 +435,8 @@ if (apps.length === 0) {
       ].join('\n'),
     );
   }
-  try {
-    appId = JSON.parse(created.stdout).result?.appId ?? '';
-  } catch {
-    /* 次の分岐で拾う */
-  }
+  noteExitCodeMismatch(created, 'apps:create');
+  appId = createdJson.result?.appId ?? '';
   if (!appId) {
     fatal('作成した Web アプリの appId を取得できませんでした。');
   }
@@ -416,22 +465,25 @@ if (apps.length === 0) {
 
 // ---------------------------------------------------------------------------
 step('公開設定を取得');
-const sdkConfig = firebase(['apps:sdkconfig', 'WEB', appId, '--project', projectId, '--json'], {
+const sdkResult = firebase(['apps:sdkconfig', 'WEB', appId, '--project', projectId, '--json'], {
   allowFailure: true,
 });
 
-if (!sdkConfig.ok) {
-  reportFailure(sdkConfig, ['apps:sdkconfig', 'WEB', appId, '--project', projectId]);
+// 判定は終了コードではなく出力内容で行う（cliJson の説明を参照）。
+// CLI が正しい設定を返しているのに「取得できませんでした」と言わないため。
+const sdkJson = cliJson(sdkResult);
+if (!sdkJson.ok) {
+  reportFailure(sdkResult, ['apps:sdkconfig', 'WEB', appId, '--project', projectId]);
+  if (sdkJson.message) {
+    console.error(`  CLI のエラー: ${sdkJson.message}`);
+    console.error('');
+  }
   fatal('公開設定を取得できませんでした。');
 }
+noteExitCodeMismatch(sdkResult, 'apps:sdkconfig');
 
-let config;
-try {
-  const parsed = JSON.parse(sdkConfig.stdout);
-  config = parsed.result?.sdkConfig ?? parsed.result ?? parsed;
-} catch {
-  fatal('公開設定を JSON として解釈できませんでした。');
-}
+const payload = sdkJson.result ?? {};
+const config = payload.sdkConfig ?? payload;
 
 const resolved = {
   firebaseProjectId: config.projectId ?? projectId,
@@ -481,14 +533,46 @@ if (!existsSync(path)) {
 const current = JSON.parse(readFileSync(path, 'utf8'));
 const updated = { ...current, ...resolved };
 
-// mediaBucket が雛形のままなら、実際のバケット名へそろえる。
-if (!current.mediaBucket || String(current.mediaBucket).includes('your-firebase-project-id')) {
-  updated.mediaBucket = resolved.firebaseStorageBucket;
+/**
+ * 画像用の専用バケット名。
+ *
+ * Firebase の既定バケット（<project>.firebasestorage.app）は**使わない**。
+ * 同じプロジェクトで既存アプリが動いている場合、既定バケットを対象に
+ * Storage ルールを配信すると既存アプリのルールを上書きしてしまうため、
+ * バケットごと分けてルールもデータも独立させる（docs/FIREBASE_SETUP.md）。
+ * このバケットは npm run gcp:bootstrap が作成する。
+ */
+const dedicatedMediaBucket = `${resolved.firebaseProjectId}-smileq-media`;
+
+const currentMediaBucket = String(current.mediaBucket ?? '').trim();
+const isPlaceholder =
+  currentMediaBucket.length === 0 || /your-(firebase|gcp)/.test(currentMediaBucket);
+const isSharedDefaultBucket =
+  currentMediaBucket === resolved.firebaseStorageBucket ||
+  currentMediaBucket === `${resolved.firebaseProjectId}.firebasestorage.app` ||
+  currentMediaBucket === `${resolved.firebaseProjectId}.appspot.com`;
+
+if (isPlaceholder || isSharedDefaultBucket) {
+  updated.mediaBucket = dedicatedMediaBucket;
+  if (isSharedDefaultBucket) {
+    warn(`mediaBucket が Firebase 既定バケット (${currentMediaBucket}) を指していました。`);
+    info('既定バケットへ Storage ルールを配信すると既存アプリのルールを上書きします。');
+    info(`専用バケットへ変更しました: ${dedicatedMediaBucket}`);
+    info('意図的に既定バケットを使う場合は、設定ファイルを直接書き換えてください。');
+  }
 }
 
 writeFileSync(path, `${JSON.stringify(updated, null, 2)}\n`);
 success(`deploy/cloud-run.${targetEnv}.json を更新しました`);
 
+console.log('');
+console.log('  既存アプリと分離する設定:');
+console.log(
+  `    firestoreDatabaseId … ${color.bold(updated.firestoreDatabaseId ?? 'smileq-live')}  ${color.dim('（既定 (default) は使わない）')}`,
+);
+console.log(
+  `    mediaBucket         … ${color.bold(updated.mediaBucket)}  ${color.dim('（gcp:bootstrap が作成）')}`,
+);
 console.log('');
 console.log('  残りの設定（Google Cloud 側）:');
 console.log(`    projectId       … ${color.bold(updated.projectId)}`);
