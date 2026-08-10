@@ -30,7 +30,17 @@ export function configExists(environment) {
  * CLI 引数からフラグと位置引数を取り出す。
  * `--key=value` と `--key value` の両方に対応する（後者は値を取るフラグのみ）。
  */
-const VALUE_FLAGS = new Set(['env', 'url', 'project-ref', 'mode', 'service', 'domain']);
+const VALUE_FLAGS = new Set([
+  'env',
+  'url',
+  'mode',
+  'service',
+  'domain',
+  'project', // rules:deploy / host:* で Firebase プロジェクトを直接指定する
+  'only', // rules:deploy の対象を絞る
+  'name', // host:add の表示名
+  'uid', // host:remove で uid を直接指定する
+]);
 
 export function parseArgs(argv) {
   const positional = [];
@@ -100,14 +110,21 @@ export function resolveEnvironment(positional, flags) {
   return { environment: 'production', inferred: true };
 }
 
+/**
+ * 必須キー。
+ *
+ * Firebase 版では**サーバー用の秘密情報が存在しない**ため、Secret Manager 関連のキーは必須ではない。
+ * Admin SDK は Cloud Run 実行サービスアカウントの ADC で認証する（docs/FIRESTORE_MODEL.md §6）。
+ * `firebaseApiKey` は公開前提の識別子であって秘密鍵ではないので、設定ファイルへ書いてよい。
+ */
 const REQUIRED_KEYS = [
   'projectId',
   'region',
   'serviceName',
   'serviceAccount',
-  'supabaseUrl',
-  'supabasePublishableKey',
-  'supabaseSecretName',
+  'firebaseProjectId',
+  'firebaseApiKey',
+  'firebaseAuthDomain',
   'mediaBucket',
 ];
 
@@ -143,14 +160,41 @@ export function loadDeployConfig(environment) {
     );
   }
 
-  if (String(config.supabaseSecretName).startsWith('sb_secret')) {
+  // Firebase のサービスアカウント秘密鍵を設定ファイルへ貼ってしまう事故を止める。
+  // Cloud Run では ADC を使うため、そもそも秘密鍵は不要（docs/FIRESTORE_MODEL.md §6）。
+  const serialized = JSON.stringify(config);
+  if (serialized.includes('-----BEGIN PRIVATE KEY-----') || serialized.includes('"private_key"')) {
     fatal(
-      'supabaseSecretName に Secret の「値」が入っています。',
+      'デプロイ設定へサービスアカウントの秘密鍵が含まれています。',
+      [
+        'Cloud Run では秘密鍵を使いません。実行サービスアカウントの ADC で認証します。',
+        'この設定ファイルから鍵を削除し、漏洩した鍵は Google Cloud コンソールで無効化してください。',
+      ].join('\n'),
+    );
+  }
+
+  if (config.turnstileSecretName && String(config.turnstileSecretName).length > 60) {
+    fatal(
+      'turnstileSecretName に Secret の「値」が入っている可能性があります。',
       'ここには Secret Manager 上の「シークレット名」だけを書いてください。値は JSON へ書かないこと。',
     );
   }
 
   return normalizeConfig(config, environment);
+}
+
+/** 文字列配列として正規化する（未設定・不正値は空配列）。 */
+function toStringArray(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter((item) => item.length > 0);
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  }
+  return [];
 }
 
 function normalizeConfig(config, environment) {
@@ -160,9 +204,14 @@ function normalizeConfig(config, environment) {
     region: String(config.region),
     serviceName: String(config.serviceName),
     serviceAccount: String(config.serviceAccount),
-    supabaseUrl: String(config.supabaseUrl).replace(/\/+$/, ''),
-    supabasePublishableKey: String(config.supabasePublishableKey),
-    supabaseSecretName: String(config.supabaseSecretName),
+    firebaseProjectId: String(config.firebaseProjectId),
+    firebaseApiKey: String(config.firebaseApiKey),
+    firebaseAuthDomain: String(config.firebaseAuthDomain),
+    firebaseStorageBucket: config.firebaseStorageBucket
+      ? String(config.firebaseStorageBucket)
+      : `${String(config.firebaseProjectId)}.firebasestorage.app`,
+    firebaseAppId: config.firebaseAppId ? String(config.firebaseAppId) : '',
+    allowedAuthDomains: toStringArray(config.allowedAuthDomains),
     mediaBucket: String(config.mediaBucket),
     appBaseUrl: config.appBaseUrl ? String(config.appBaseUrl).replace(/\/+$/, '') : '',
     customDomain: config.customDomain ? String(config.customDomain).trim() : '',
@@ -215,19 +264,33 @@ function normalizeConfig(config, environment) {
   return normalized;
 }
 
-/** APP_BASE_URL を含む Cloud Run 実行時環境変数を組み立てる。 */
+/**
+ * APP_BASE_URL を含む Cloud Run 実行時環境変数を組み立てる。
+ *
+ * ここに**サーバー用の秘密情報は入らない**。Firestore / Auth / Storage への認証は
+ * Cloud Run 実行サービスアカウントの ADC で行う（docs/FIRESTORE_MODEL.md §6）。
+ * FIREBASE_API_KEY は公開前提の識別子なので、環境変数として渡してよい。
+ */
 export function buildRuntimeEnv(config, appBaseUrl) {
   const env = {
     NODE_ENV: 'production',
     APP_ENV: config.environment,
     HOSTNAME: '0.0.0.0',
-    SUPABASE_URL: config.supabaseUrl,
-    SUPABASE_PUBLISHABLE_KEY: config.supabasePublishableKey,
+    FIREBASE_PROJECT_ID: config.firebaseProjectId,
+    FIREBASE_API_KEY: config.firebaseApiKey,
+    FIREBASE_AUTH_DOMAIN: config.firebaseAuthDomain,
+    FIREBASE_STORAGE_BUCKET: config.firebaseStorageBucket,
     APP_BASE_URL: appBaseUrl ?? '',
-    QUIZ_MEDIA_BUCKET: config.mediaBucket,
+    MEDIA_BUCKET: config.mediaBucket,
     PRESENTATION_LINK_TTL_MINUTES: String(config.presentationLinkTtlMinutes),
     LOG_LEVEL: config.logLevel,
     NEXT_TELEMETRY_DISABLED: '1',
+    ...(config.firebaseAppId ? { FIREBASE_APP_ID: config.firebaseAppId } : {}),
+    // 未設定なら「ドメイン制限なし」。空文字を渡すとその意図が読み取れないため、値がある時だけ渡す
+    // （docs/HOST_ACCESS.md — 司会者権限は profiles/{uid} の存在で決まる）。
+    ...(config.allowedAuthDomains.length > 0
+      ? { ALLOWED_AUTH_DOMAINS: config.allowedAuthDomains.join(',') }
+      : {}),
     ...(config.turnstileSiteKey ? { TURNSTILE_SITE_KEY: config.turnstileSiteKey } : {}),
     ...config.extraEnv,
   };

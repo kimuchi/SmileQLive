@@ -19,7 +19,9 @@
 
 - [ ] `npm run deploy:doctor` が通る
 - [ ] 本番の `/api/health` が 200 を返す
-- [ ] 管理画面へログインできる
+- [ ] 管理画面へログインできる（司会者全員の `profiles/{uid}` が登録済み）
+- [ ] **Security Rules とインデックスを反映済み**（`npm run rules:deploy -- production`）
+      — 複合インデックスの構築には数分かかり、構築中はクエリが失敗します
 - [ ] Cloud Run の **最小インスタンスが 1 以上**（開催日は 1 以上にする）
 
 ```bash
@@ -133,14 +135,23 @@ gcloud run services update smileq-live \
   --min-instances 0 --region asia-northeast1 --project <PROJECT>
 ```
 
-### 参加者情報の削除例
+### 参加者情報の削除・匿名化
 
-```sql
--- ニックネームを匿名化（回答データと得点は残す）
-update public.room_members
-set nickname = '参加者' || substr(id::text, 1, 8)
-where room_id = '<ROOM_ID>' and role = 'participant';
+ニックネームは `rooms/{roomId}/members/{memberId}` の `nickname` / `nicknameLower` に入っています。
+回答データと得点（`totalPoints` / `correctCount`）は残したまま、表示名だけを匿名化します。
+
+**Firebase コンソールから手作業で消さないでください。** 件数が多く、消し漏れが起きます。
+Admin SDK を使うスクリプト（`scripts/host-admin.mjs` と同じ ADC の作法）で一括処理してください。
+
+```text
+rooms/{roomId}/members を role=='participant' で読み、
+  nickname       → '参加者' + memberId の先頭 8 文字
+  nicknameLower  → 同じ値の小文字
+へ一括更新する（バッチ書き込みは 500 件ずつ）
 ```
+
+匿名認証ユーザー自体の整理は Firebase コンソールの
+**Authentication → ユーザー**、または Admin SDK の `deleteUsers()` で行います。
 
 ---
 
@@ -156,8 +167,22 @@ where room_id = '<ROOM_ID>' and role = 'participant';
 | コンテナ起動失敗 | 0 | Cloud Logging |
 | `/api/health` | 常に 200 | 稼働監視 |
 | 回答 API の 409 / 422 / 429 | 急増しない | ログのフィルタ |
-| Realtime 送信失敗 | 0 に近い | `severity=WARNING` のログ |
 | 画像変換失敗 | 0 | `errorCode=MEDIA_PROCESSING_FAILED` |
+
+Firestore 固有の指標:
+
+| 指標 | 目安 | 確認方法 |
+|---|---|---|
+| ドキュメント書き込み回数 | 想定（参加人数 × 問題数 + 状態遷移）から外れない | Cloud Monitoring `firestore.googleapis.com/document/write_count` |
+| ドキュメント読み取り回数 | 急増しない（費用に直結） | `firestore.googleapis.com/document/read_count` |
+| トランザクションの競合 | 開催中に増え続けない | ログの `STATE_VERSION_CONFLICT` |
+| **`PERMISSION_DENIED`** | **0**（出たら Rules と実装の不一致） | `errorCode` のフィルタ |
+| インデックス未整備 | 0 | ログの `FAILED_PRECONDITION` / `requires an index` |
+| 進捗ドキュメントの書き込み競合 | 発生しない | `severity=WARNING` のログ |
+
+> **`PERMISSION_DENIED` と `requires an index` は開催中に出てはいけない種類のエラー**です。
+> 前者は Rules を反映し忘れたか実装がずれた合図、後者はインデックス未反映の合図で、
+> どちらも「前日までに `npm run rules:deploy` を実行したか」で防げます。
 
 ### 5.2 ログの見方
 
@@ -181,9 +206,12 @@ userId / roomId / questionId / action / stateVersion / result / errorCode / dura
 ```
 
 **記録されないもの**（意図的に除外しています）:
-Supabase Secret Key、Auth アクセストークン、参加トークン平文、投影トークン平文、
+Firebase の ID トークン・セッションクッキー、参加トークン平文、投影トークン平文、
 正解発表前の正解データ、数値回答の生入力。
 参加 URL は `/j/[redacted]` にマスクされます。
+
+> Firebase 版には**サーバー用の秘密情報がそもそも存在しません**（Cloud Run の ADC で認証）。
+> 「鍵がログへ出た」という事故の余地自体を無くしています。
 
 ### 5.3 推奨アラート
 
@@ -192,7 +220,9 @@ Supabase Secret Key、Auth アクセストークン、参加トークン平文�
 | 5xx 率が 5 分間 5% 超 | 即時 |
 | `/api/health` が 2 回連続失敗 | 即時 |
 | コンテナ起動失敗 | 即時 |
+| `PERMISSION_DENIED` が 1 件でも発生 | 即時（Rules の反映漏れ） |
 | インスタンス数が `maxInstances` に到達 | 開催中のみ |
+| Firestore の読み取り回数が想定の 3 倍 | 日次（費用の異常検知） |
 
 開催前後の時間帯だけでも通知先を確認しておいてください。
 
@@ -205,7 +235,12 @@ Supabase Secret Key、Auth アクセストークン、参加トークン平文�
 | Cloud Run `minInstances` | 1 | 0 |
 | Cloud Run `maxInstances` | 10 | 5 |
 | ロードバランサ | 使う場合は常時課金 | 停止するなら削除が必要 |
-| Supabase | プランに依存 | — |
+| Firestore | 読み書き回数とストレージの従量課金 | 使わなければほぼ 0 |
+| Cloud Storage | 画像のストレージと転送 | 古いイベントの画像を整理 |
+
+Firestore は**読み取り回数**が費用の主因です。参加者画面のポーリングを増やしたり、
+不要なドキュメントを購読したりすると、人数に比例して跳ね上がります。
+購読対象を `rooms/{id}/public/state` に限る設計は、秘匿だけでなく費用面の理由でもあります。
 
 `minInstances=0` にすると、最初のアクセスでコールドスタートが発生します（数秒）。
 イベント当日は必ず 1 以上にしてください。

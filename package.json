@@ -22,7 +22,13 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build && npm run verify:bundle",
-    "db:migrate": "node scripts/db-migrate.mjs",
+    "test:rules": "node scripts/test-rules.mjs",
+    "test:emulator": "node scripts/test-emulator.mjs",
+    "emulators": "npx --yes firebase-tools emulators:start",
+    "rules:deploy": "node scripts/deploy-rules.mjs",
+    "host:list": "node scripts/host-admin.mjs list",
+    "host:add": "node scripts/host-admin.mjs add",
+    "host:remove": "node scripts/host-admin.mjs remove",
     "gcp:bootstrap": "node scripts/bootstrap-gcp.mjs",
     "gcp:bootstrap:staging": "node scripts/bootstrap-gcp.mjs staging",
     "gcp:bootstrap:production": "node scripts/bootstrap-gcp.mjs production",
@@ -32,7 +38,6 @@
     "domain:map": "node scripts/map-domain.mjs",
     "domain:status": "node scripts/map-domain.mjs --status",
     "deploy:doctor": "node scripts/deploy-doctor.mjs",
-    "db:test": "node scripts/test-sql.mjs",
     "verify:bundle": "node scripts/verify-bundle.mjs"
   },
   "dependencies": {

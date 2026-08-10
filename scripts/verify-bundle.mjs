@@ -5,7 +5,7 @@
  *   npm run verify:bundle        （pnpm build のあとに実行する）
  *
  * 検査内容:
- *   1. クライアントバンドルへ Supabase Secret Key が含まれないこと
+ *   1. クライアントバンドルへ Firebase のサービスアカウント秘密鍵が含まれないこと
  *   2. ビルド時に環境変数の値が埋め込まれていないこと
  *      （同一イメージを staging / production で再利用するための前提）
  *   3. 参加者向けの経路へ音声処理が混入していないこと
@@ -13,6 +13,10 @@
  *
  * 「書いたつもり」ではなく実際の成果物を検査するため、
  * リファクタリングで壊れたときに確実に気付ける。
+ *
+ * なお `FIREBASE_API_KEY` は**秘密情報ではない**（公開前提の識別子。
+ * docs/FIRESTORE_MODEL.md §6）ため、クライアントに含まれていても問題ない。
+ * ここで守るのは「サーバーだけが持つべき鍵」と「ビルド時埋め込みをしないこと」の 2 点。
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -78,37 +82,52 @@ function scanClient(label, matcher, { allow = () => false } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-step('1. Supabase Secret Key がクライアントへ含まれないこと');
+step('1. Firebase のサービスアカウント秘密鍵がクライアントへ含まれないこと');
 
-// supabase-js 自身がキー種別を判定するために "sb_secret_" という
-// リテラルを持っているため、プレフィックスだけの一致は許容し、
-// 「実際の値らしき文字列」を検出する。
-scanClient('SUPABASE_SECRET_KEY という識別子が無い', (c) => c.includes('SUPABASE_SECRET_KEY'));
-scanClient('Secret Key の実値らしき文字列が無い', (c) => /sb_secret_[A-Za-z0-9_-]{8,}/.test(c));
-scanClient('service_role JWT が無い', (c) => /"role"\s*:\s*"service_role"/.test(c));
+// Cloud Run では ADC を使うため、そもそもリポジトリにも実行環境にも秘密鍵は存在しない。
+// 「うっかり鍵ファイルを import した」事故を、実際の成果物で検出する。
+scanClient('PEM 形式の秘密鍵が無い', (c) => c.includes('-----BEGIN PRIVATE KEY-----'));
+scanClient('RSA 秘密鍵が無い', (c) => c.includes('-----BEGIN RSA PRIVATE KEY-----'));
+scanClient('サービスアカウント JSON の private_key が無い', (c) =>
+  /"private_key"\s*:\s*"/.test(c),
+);
+scanClient('サービスアカウント JSON の client_email が無い', (c) =>
+  /"client_email"\s*:\s*"[^"]+@[^"]+\.iam\.gserviceaccount\.com"/.test(c),
+);
+scanClient('FIREBASE_SERVICE_ACCOUNT_JSON という識別子が無い', (c) =>
+  c.includes('FIREBASE_SERVICE_ACCOUNT_JSON'),
+);
+scanClient('GOOGLE_APPLICATION_CREDENTIALS という識別子が無い', (c) =>
+  c.includes('GOOGLE_APPLICATION_CREDENTIALS'),
+);
 
 // 実行時に注入した値を渡して検査したい場合（CI 用）
-const secretValue = process.env.SUPABASE_SECRET_KEY;
-if (secretValue && secretValue.length >= 12) {
-  scanClient('注入された Secret Key の実値が無い', (c) => c.includes(secretValue));
+const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+if (serviceAccountJson && serviceAccountJson.length >= 32) {
+  scanClient('注入されたサービスアカウント JSON の実値が無い', (c) =>
+    c.includes(serviceAccountJson),
+  );
 } else {
-  info(color.dim('SUPABASE_SECRET_KEY 未設定のため、実値との照合はスキップしました。'));
+  info(
+    color.dim(
+      'FIREBASE_SERVICE_ACCOUNT_JSON 未設定のため、実値との照合はスキップしました（Cloud Run では ADC を使うため通常は未設定）。',
+    ),
+  );
 }
 
 // ---------------------------------------------------------------------------
 step('2. ビルド時に環境変数が埋め込まれていないこと');
 
 // NEXT_PUBLIC_* を使っていない = 同じイメージを staging / production で使い回せる。
-scanClient('NEXT_PUBLIC_SUPABASE_* が埋め込まれていない', (c) =>
-  c.includes('NEXT_PUBLIC_SUPABASE'),
-);
+// Firebase の公開設定は RuntimeConfig（Server Component がリクエスト時に読む）から渡す。
+scanClient('NEXT_PUBLIC_FIREBASE_* が埋め込まれていない', (c) => c.includes('NEXT_PUBLIC_FIREBASE'));
 
-const publishableValue = process.env.SUPABASE_PUBLISHABLE_KEY;
-if (publishableValue && publishableValue.length >= 12) {
-  scanClient(
-    'Publishable Key がビルド時に焼き込まれていない（実行時に渡す）',
-    (c) => c.includes(publishableValue),
-  );
+// 実行時に渡すべき値がビルド時に焼き込まれていないことを、実値でも確かめる（CI 用）。
+for (const name of ['FIREBASE_API_KEY', 'FIREBASE_PROJECT_ID', 'FIREBASE_AUTH_DOMAIN']) {
+  const value = process.env[name];
+  if (value && value.length >= 12) {
+    scanClient(`${name} の実値が焼き込まれていない（実行時に渡す）`, (c) => c.includes(value));
+  }
 }
 
 // ---------------------------------------------------------------------------

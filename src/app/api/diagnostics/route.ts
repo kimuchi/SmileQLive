@@ -1,11 +1,11 @@
 import { headers } from 'next/headers';
-import { createSupabaseAdminClient } from '@/infrastructure/supabase/admin';
+import { getDb, getMediaBucket } from '@/infrastructure/firebase/admin';
 import { requireHostUser } from '@/lib/auth/session';
 import {
   appBaseUrl,
   appEnvironment,
   checkServerConfiguration,
-  quizMediaBucket,
+  mediaBucket as configuredMediaBucket,
 } from '@/lib/env/server-env';
 import { jsonOk } from '@/lib/errors/api-response';
 import { isCaptchaConfigured } from '@/lib/http/captcha';
@@ -16,7 +16,7 @@ import type { DiagnosticsResponse } from '@/types/api';
  * 構成診断（司会・管理者専用）。
  *
  * - /api/health とは別物。health は Cloud Run の起動プローブ用で DB へ接続しない。
- *   こちらは Supabase への軽い疎通確認まで行う。
+ *   こちらは Firestore / Cloud Storage への軽い疎通確認まで行う。
  * - 失敗しても 200 で返し、checks の ok=false と status='degraded' で伝える
  *   （運用者が原因を切り分けられるようにするため）。
  * - Secret Key・トークンの値そのものは絶対に返さない。
@@ -36,48 +36,42 @@ function briefly(error: unknown): string {
   return message.length > 200 ? `${message.slice(0, 200)}…` : message;
 }
 
-/** Supabase への軽い疎通確認。行データは取得せず件数だけ問い合わせる。 */
-async function checkSupabase(): Promise<Check[]> {
-  let admin: ReturnType<typeof createSupabaseAdminClient>;
-  try {
-    admin = createSupabaseAdminClient();
-  } catch (error) {
-    return [
-      check(
-        'supabase_connection',
-        false,
-        `Supabase クライアントを作成できません: ${briefly(error)}`,
-      ),
-      check('storage_bucket', false, '疎通確認をスキップしました'),
-    ];
-  }
-
+/**
+ * Firestore / Cloud Storage への軽い疎通確認。
+ *
+ * 行データは読まず、存在確認と件数だけを問い合わせる。
+ * Firebase 版はサーバー用の秘密情報を持たないため、
+ * 「認証情報が正しいか」ではなく「実行サービスアカウントに権限があるか」を見ることになる。
+ */
+async function checkFirebase(): Promise<Check[]> {
   const results: Check[] = [];
 
   try {
-    const { error } = await admin
-      .from('rooms')
-      .select('id', { count: 'exact', head: true })
-      .limit(1);
+    // 1 件も読まずに疎通だけ確認する（count 集計はドキュメントを転送しない）。
+    const snapshot = await getDb().collection('rooms').count().get();
     results.push(
-      error
-        ? check('supabase_connection', false, `rooms を参照できません: ${briefly(error.message)}`)
-        : check('supabase_connection', true, 'rooms への読み取りに成功しました'),
+      check('firestore_connection', true, `rooms への読み取りに成功しました（${snapshot.data().count} 件）`),
     );
   } catch (error) {
-    results.push(check('supabase_connection', false, briefly(error)));
+    results.push(
+      check(
+        'firestore_connection',
+        false,
+        `Firestore を参照できません: ${briefly(error)}。実行サービスアカウントに roles/datastore.user が必要です`,
+      ),
+    );
   }
 
-  const bucket = quizMediaBucket();
+  const bucketName = configuredMediaBucket();
   try {
-    const { error } = await admin.storage.getBucket(bucket);
+    const [exists] = await getMediaBucket().exists();
     results.push(
-      error
-        ? check('storage_bucket', false, `バケット「${bucket}」を確認できません`)
-        : check('storage_bucket', true, `バケット「${bucket}」を確認しました`),
+      exists
+        ? check('storage_bucket', true, `バケット「${bucketName}」を確認しました`)
+        : check('storage_bucket', false, `バケット「${bucketName}」が存在しません`),
     );
   } catch (error) {
-    results.push(check('storage_bucket', false, `バケット「${bucket}」: ${briefly(error)}`));
+    results.push(check('storage_bucket', false, `バケット「${bucketName}」: ${briefly(error)}`));
   }
 
   return results;
@@ -99,7 +93,7 @@ export const GET = withRoute<DiagnosticsResponse>('diagnostics', async () => {
         ? '必須の環境変数が揃っています'
         : `未設定: ${configuration.missing.join(', ')}`,
     ),
-    ...(await checkSupabase()),
+    ...(await checkFirebase()),
     check(
       'app_base_url',
       environment === 'local' || Boolean(process.env.APP_BASE_URL),

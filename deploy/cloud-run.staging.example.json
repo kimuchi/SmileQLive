@@ -2,7 +2,8 @@
   "$comment": [
     "このファイルをコピーして deploy/cloud-run.staging.json を作成してください。",
     "ステージングは customDomain を空にして Cloud Run の既定 URL を使うのが手軽です。",
-    "appBaseUrl を空にすると、デプロイ後に Cloud Run の URL が自動設定されます。"
+    "appBaseUrl を空にすると、デプロイ後に Cloud Run の URL が自動設定されます。",
+    "Firebase プロジェクトは本番と分けることを強く推奨します（Firestore を共有しない）。"
   ],
 
   "projectId": "your-gcp-project-id",
@@ -14,11 +15,15 @@
   "domainMode": "domain-mapping",
   "appBaseUrl": "",
 
-  "supabaseUrl": "https://your-staging-ref.supabase.co",
-  "supabasePublishableKey": "sb_publishable_xxxxxxxxxxxxxxxxxxxx",
-  "supabaseSecretName": "smileq-live-supabase-secret-key-staging",
+  "firebaseProjectId": "your-firebase-staging-project",
+  "firebaseApiKey": "AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+  "firebaseAuthDomain": "your-firebase-staging-project.firebaseapp.com",
+  "firebaseStorageBucket": "your-firebase-staging-project.firebasestorage.app",
+  "firebaseAppId": "1:000000000000:web:0000000000000000000000",
 
-  "mediaBucket": "quiz-media",
+  "allowedAuthDomains": [],
+
+  "mediaBucket": "your-firebase-staging-project.firebasestorage.app",
   "presentationLinkTtlMinutes": 480,
 
   "minInstances": 0,

@@ -54,12 +54,14 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
 
       # 実値のデプロイ設定はリポジトリへコミットしないため、ここで組み立てる。
-      # Secret の「値」は含めず、Secret Manager 上の名前だけを渡す。
+      # Firebase 版はサーバー用の秘密情報を持たない（Cloud Run の ADC で認証する）ため、
+      # ここに現れる値はすべて「公開してよい設定」だけ。GitHub Secrets は使わない。
       - name: デプロイ設定を生成
         run: |
           node -e '
             const fs = require("node:fs");
             const env = process.env;
+            const projectId = env.FIREBASE_PROJECT_ID || env.GCP_PROJECT_ID;
             const config = {
               projectId: env.GCP_PROJECT_ID,
               region: env.GCP_REGION || "asia-northeast1",
@@ -68,14 +70,19 @@ jobs:
               customDomain: env.CUSTOM_DOMAIN || "",
               domainMode: env.DOMAIN_MODE || "domain-mapping",
               appBaseUrl: env.APP_BASE_URL || "",
-              supabaseUrl: env.SUPABASE_URL,
-              supabasePublishableKey: env.SUPABASE_PUBLISHABLE_KEY,
-              supabaseSecretName: env.SUPABASE_SECRET_NAME,
-              mediaBucket: env.QUIZ_MEDIA_BUCKET || "quiz-media",
+              firebaseProjectId: projectId,
+              firebaseApiKey: env.FIREBASE_API_KEY,
+              firebaseAuthDomain: env.FIREBASE_AUTH_DOMAIN || `${projectId}.firebaseapp.com`,
+              firebaseStorageBucket: env.FIREBASE_STORAGE_BUCKET || `${projectId}.firebasestorage.app`,
+              firebaseAppId: env.FIREBASE_APP_ID || "",
+              allowedAuthDomains: (env.ALLOWED_AUTH_DOMAINS || "").split(",").map((s) => s.trim()).filter(Boolean),
+              mediaBucket: env.MEDIA_BUCKET || `${projectId}.firebasestorage.app`,
               minInstances: Number(env.MIN_INSTANCES || 0),
               maxInstances: Number(env.MAX_INSTANCES || 10),
               concurrency: Number(env.CONCURRENCY || 80),
               logLevel: env.LOG_LEVEL || "info",
+              turnstileSiteKey: env.TURNSTILE_SITE_KEY || "",
+              turnstileSecretName: env.TURNSTILE_SECRET_NAME || "",
               requireCleanTree: false,
               runVerifyBeforeDeploy: true,
               allowedBranches: []
@@ -90,14 +97,24 @@ jobs:
           CUSTOM_DOMAIN: ${{ vars.CUSTOM_DOMAIN }}
           DOMAIN_MODE: ${{ vars.DOMAIN_MODE }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
-          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
-          SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
-          SUPABASE_SECRET_NAME: ${{ vars.SUPABASE_SECRET_NAME }}
-          QUIZ_MEDIA_BUCKET: ${{ vars.QUIZ_MEDIA_BUCKET }}
+          FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+          FIREBASE_API_KEY: ${{ vars.FIREBASE_API_KEY }}
+          FIREBASE_AUTH_DOMAIN: ${{ vars.FIREBASE_AUTH_DOMAIN }}
+          FIREBASE_STORAGE_BUCKET: ${{ vars.FIREBASE_STORAGE_BUCKET }}
+          FIREBASE_APP_ID: ${{ vars.FIREBASE_APP_ID }}
+          ALLOWED_AUTH_DOMAINS: ${{ vars.ALLOWED_AUTH_DOMAINS }}
+          MEDIA_BUCKET: ${{ vars.MEDIA_BUCKET }}
           MIN_INSTANCES: ${{ vars.MIN_INSTANCES }}
           MAX_INSTANCES: ${{ vars.MAX_INSTANCES }}
           CONCURRENCY: ${{ vars.CONCURRENCY }}
           LOG_LEVEL: ${{ vars.LOG_LEVEL }}
+          TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
+          TURNSTILE_SECRET_NAME: ${{ vars.TURNSTILE_SECRET_NAME }}
+
+      # Rules は「クライアントが直接 Firestore を叩いても正解が漏れない」ための最終防壁。
+      # アプリより先に反映する（新しいルールが要るデータ構造へ先に移らないため）。
+      - name: Security Rules とインデックスを反映
+        run: node scripts/deploy-rules.mjs "$TARGET_ENV" --yes
 
       - name: デプロイ
         run: node scripts/deploy-cloud-run.mjs "$TARGET_ENV" --yes

@@ -8,14 +8,19 @@
 参加者スマートフォン ─┐
 投影ブラウザ          ├─ HTTPS ─ Cloud Run / Next.js 16 (standalone)
 司会ブラウザ          ┘                  │
-                                          ├─ Supabase PostgreSQL   (唯一の正しい永続状態)
-ブラウザ ─ Supabase Realtime ────────────┤  Supabase Auth          (司会=恒久 / 参加者=匿名)
-                                          ├─ Supabase Storage      (最適化済み画像)
-Cloud Run ────────────────────────────────┘  Secret Manager        (サーバー用シークレット)
+                                         │  すべての書き込み（Admin SDK / ADC）
+                                         ├────────────► Firestore        (唯一の正しい永続状態)
+                                         ├────────────► Firebase Auth    (司会=Google / 参加者=匿名)
+                                         └────────────► Cloud Storage    (最適化済み画像)
+
+ブラウザ ─ onSnapshot（読み取りのみ）──────────────────► rooms/{id}/public/state
+                                                          ※ Security Rules が最終防壁
 ```
 
 - ブラウザは **Cloud Run 経由で HTTP API** を呼びます。
-- **Realtime だけは Supabase へ直接接続**します。これにより Cloud Run の各インスタンスが WebSocket 状態を持たず、複数インスタンスへスケールしても動作が一致します。
+- **状態の受信だけは Firestore へ直接接続**（`onSnapshot`）します。これにより Cloud Run の各インスタンスが WebSocket 状態を持たず、複数インスタンスへスケールしても動作が一致します。
+- **クライアントからの Firestore 書き込みは一切ありません。** 書き込みはすべて Admin SDK 経由です。
+- Admin SDK は Cloud Run 実行サービスアカウントの **ADC** で認証します。**サーバー用の秘密情報はありません**（docs/FIRESTORE_MODEL.md §6）。
 - Cloud Run のローカルメモリ・ローカルディスクを永続保存先として使いません。
 
 ---
@@ -24,12 +29,15 @@ Cloud Run ───────────────────────�
 
 | 層 | 役割 |
 |---|---|
-| Cloud Run / Next.js | 画面、Route Handler、認可、入力検証、画像変換、参加 URL 処理、状態遷移の呼び出し |
-| PostgreSQL | クイズ、ルーム、参加者、回答、監査ログの永続化。**状態遷移と回答登録の最終判定** |
-| Supabase Auth | 司会者の恒久認証、参加者の匿名認証 |
-| Supabase Realtime | 状態変更・回答進捗の通知（**保存先ではない**） |
-| Supabase Storage | WebP 化された画像 |
-| Secret Manager | `SUPABASE_SECRET_KEY` |
+| Cloud Run / Next.js | 画面、Route Handler、**認可**、入力検証、画像変換、参加 URL 処理、状態遷移、正誤判定 |
+| Firestore | クイズ、ルーム、参加者、回答、監査ログの永続化。トランザクションによる原子性 |
+| Firebase Auth | 司会者の Google 認証、参加者の匿名認証、セッションクッキー |
+| Cloud Storage | WebP 化された画像（署名付き URL で配信） |
+| Security Rules | **最終防壁**。クライアントが直接叩いても正解が漏れないことを担保 |
+
+> **Admin SDK は Security Rules を迂回します。**
+> したがって認可は必ずアプリケーション側で行います。
+> Rules は「アプリを通らない経路」を塞ぐためのものであり、アプリの認可の代わりにはなりません。
 
 ---
 
@@ -50,13 +58,17 @@ src/
 │  ├─ answer/                数値正規化、正誤判定、回答 DTO
 │  └─ media/                 画像ポリシー
 ├─ application/              ユースケース（サービス層）
-├─ infrastructure/           Supabase・ログの実装（差し替え可能に隔離）
+├─ infrastructure/           Firebase・ログの実装（差し替え可能に隔離）
+│  ├─ firebase/admin.ts      Admin SDK（ADC で初期化）
+│  ├─ firebase/client.ts     ブラウザ用 SDK（読み取り専用）
+│  ├─ firebase/repositories/ Firestore アクセス
+│  └─ logging/               構造化ログとマスク
 ├─ lib/                      認証、HTTP、検証、暗号、環境変数、音声
-└─ types/                    API 契約と DB 型
+└─ types/                    API 契約と Firestore ドキュメント型
 ```
 
 依存の向きは **app → application → domain**、`infrastructure` は `application` から使われます。
-`domain` は Next.js にも Supabase にも依存しません。
+`domain` は Next.js にも Firebase にも依存しません（バックエンドを差し替えてもそのまま使えます）。
 
 ---
 
@@ -91,47 +103,56 @@ finished
 
 必須条件:
 
-- `question_open` へ移る際に **DB 時刻**を基準として `answer_deadline_at` を設定する
-- 回答受付可否は DB 上の状態と期限で判断する
+- `question_open` へ移る際に **サーバー時刻（Cloud Run の `Date.now()`）** を基準として `answerDeadlineAt` を設定する
+- 回答受付可否は Firestore 上の状態と期限で判断する（参加者端末の時計は信用しない）
 - 締切操作と時間切れ処理は**冪等**（複数端末から同時に呼ばれても 1 回だけ進む）
 - 正解発表は `question_locked` からだけ実行できる
-- すべての状態変更で `state_version` を 1 増やす
-- 司会 API は `expectedVersion` を受け取り、古い画面からの操作を **409** で拒否する
+- すべての状態変更で `stateVersion` を 1 増やす
+- 司会 API は `expectedVersion` を受け取り、古い画面からの操作を **409**（`STATE_VERSION_CONFLICT`）で拒否する
+- `rooms/{id}` と `rooms/{id}/public/state` を**必ず同じトランザクションで**更新する
 
 ---
 
-## 5. Realtime 設計
+## 5. 状態配信設計（Firestore `onSnapshot`）
+
+Supabase 版では「Realtime は通知だけ、実データは API」でしたが、
+Firestore では**購読対象のドキュメントそのものが実データ**です。
+そのため「参加者に見せてよい状態」だけを別ドキュメントへ複製しています。
 
 ### 原則
 
-1. **DB 更新を先に成功させ、その後に Realtime を送る**
-2. Broadcast 送信に失敗しても DB 状態を失わない（ロールバックしない）
-3. 再接続時は必ず Snapshot API を呼ぶ
-4. **Broadcast だけから現在状態を組み立てない**
-5. イベントへ画像バイナリ・参加トークンを含めない
-6. 各状態イベントへ `stateVersion` を含める
+1. **書き込みはすべてサーバー（Admin SDK）から**。クライアントは読み取りのみ
+2. `rooms/{id}` と `rooms/{id}/public/state` は同じトランザクションで更新する
+3. 再接続時・バージョンの飛びを検知したときは Snapshot API を呼ぶ
+4. **購読データだけから現在状態を組み立てない**（Snapshot が基準）
+5. 公開ドキュメントへ画像バイナリ・参加トークン・正解を含めない
+6. 公開ドキュメントは常に `stateVersion` を持つ
 
-### チャンネルと権限
+### 購読対象と権限
 
-| 役割 | `room:<id>:public` | `room:<id>:staff` | Broadcast 送信 |
-|---|:---:|:---:|:---:|
-| 参加者 | 購読可 | 不可 | 不可 |
-| 投影担当 | 購読可 | 購読可 | 不可 |
-| 司会者 | 購読可 | 購読可 | サーバーのみ |
+| 役割 | `rooms/{id}` | `public/state` | `staff/progress` | 書き込み |
+|---|:---:|:---:|:---:|:---:|
+| 参加者 | **不可** | 購読可 | 不可 | 不可 |
+| 投影担当 | **不可** | 購読可 | 購読可 | 不可 |
+| 司会者 | 所有ルームのみ | 購読可 | 購読可 | 不可（API 経由） |
 
-クライアント用の Broadcast 送信ポリシーは作りません。
+`rooms/{id}` には `quizSnapshot`（正解・解説・正解画像 URL）が入っています。
+Firestore の Security Rules は**フィールド単位の読み取り制限ができない**ため、
+ドキュメントを読めれば正解も読めてしまいます。だからドキュメントごと分けています。
+
+対応表の正本は [docs/FIRESTORE_MODEL.md](./FIRESTORE_MODEL.md) §4 と `firebase/firestore.rules` です。
 
 ### 接続手順
 
 ```text
-1. 認証と room_members 登録を完了
-2. private channel へ subscribe
-3. SUBSCRIBED を確認
+1. 認証（司会=Google / 参加者=匿名）とセッションクッキー交換を完了
+2. rooms/{id}/members への登録を完了
+3. rooms/{id}/public/state を onSnapshot で購読
 4. Snapshot API を取得
 5. Snapshot の stateVersion を現在値とする
-6. 以後のイベントを反映
+6. 以後のスナップショットを反映
 7. バージョンの飛びを検知したら Snapshot を再取得
-8. CHANNEL_ERROR / TIMED_OUT / CLOSED は指数バックオフで再接続
+8. 接続エラーは指数バックオフで再接続（SDK が自動再接続する場合も Snapshot は取り直す）
 ```
 
 ---
@@ -142,11 +163,12 @@ finished
 |---|---|
 | API レスポンス | 参加者向けは `toPublicQuestion()` を通した DTO のみ返す |
 | Snapshot | `phase < answer_revealed` では `reveal` / `breakdown` を `null` |
-| Realtime | public イベントには phase と questionId だけ。詳細は Snapshot で取得 |
-| RLS | 参加者は `questions` / `choices` / `rooms.quiz_snapshot` を SELECT できない |
-| 画像 | 正解解説画像の URL を正解発表まで参加者へ返さない |
+| 購読データ | `public/state` には phase と questionId だけ。問題文・選択肢・正解を含めない |
+| Security Rules | 参加者は `rooms/{id}`（`quizSnapshot`）と `quizzes/**` へ**到達できない** |
+| 画像 | 正解解説画像の URL を正解発表まで参加者へ返さない（Storage は直接読み取り不可） |
 | ファイル名 | 保存パスに `correct` / `answer` 等の語を含めない |
 | テスト | `toPublicQuestion()` の出力を JSON 文字列化して正解語が含まれないことを検査 |
+| Rules 検証 | `npm run test:rules` でエミュレータへ実際に適用し、参加者が読めないことを確認 |
 
 **CSS で隠すだけの実装は禁止**です。
 
@@ -158,7 +180,8 @@ finished
 入力 → NFKC 正規化 → 空白・カンマ・アンダースコア除去 → 形式検証（指数表記は拒否）
      → 桁数検証（整数+小数で 30 桁 / 小数 10 桁）→ Decimal 化
      → サーバーへ raw と normalizedText を両方送る
-     → PostgreSQL numeric(30,10) で最終判定（両端を含む）
+     → Cloud Run 上の decimal.js で最終判定（両端を含む）
+     → Firestore へ **文字列のまま**保存（numberRaw / numberNormalized）
 ```
 
 | 判定方法 | 条件 |
@@ -167,31 +190,47 @@ finished
 | 許容誤差 | `abs(answer - correct) <= tolerance` |
 | 範囲指定 | `answer between min and max` |
 
-- **JavaScript の `number` で正誤を決めません。**
+- **JavaScript の `number` で正誤を決めません。** 判定は `judgeNumberAnswer()`（decimal.js）だけが行います。
+- **Firestore の number 型へ入れません。** Firestore の数値は倍精度浮動小数点しか持たず、
+  `numeric(30,10)` 相当の精度を保てないためです。必ず文字列で保存します。
 - 生の入力文字列と正規化後の値を両方保存し、本人の結果画面には生入力を表示、投影集計には正規化値を使います。
+
+> **PostgreSQL 版から失われた多層防御**
+> Supabase 版は「サーバーの decimal.js」と「DB の `numeric`」で二重に判定していました。
+> Firebase 版はサーバー側の 1 回だけです。
+> ただし参加者は回答ドキュメントを直接書き込めない（Rules で拒否）ため、
+> 「クライアントが正誤を詐称する」経路は残りません。
+> これは Firebase 採用に伴う既知のトレードオフです（docs/FIRESTORE_MODEL.md §1）。
 
 ---
 
 ## 8. 回答登録
 
-PostgreSQL 関数 `submit_answer()` で原子的に処理します。Route Handler で SELECT と INSERT を並べません。
+Firestore の `runTransaction` で原子的に処理します。Route Handler で読み取りと書き込みを素朴に並べません。
 
 ```text
-1. auth.uid() から参加者を特定
-2. 対象ルームの有効な participant か確認
-3. rooms 行を FOR UPDATE でロックし phase='question_open' を確認
-4. current_question_id の一致を確認
-5. DB 時刻が answer_deadline_at 以前か確認
-6. quiz_snapshot から現在問題を取得
-7. 問題型と送信値の組合せを確認（クライアントの answer_type は使わない）
-8. 選択式なら choice_id が現在問題の選択肢か確認
-9. 数値式なら numeric として検証
-10. スナップショットの正解条件で正誤を判定
-11. elapsed_ms を DB 時刻で計算
+1. セッションクッキーから uid を特定
+2. rooms/{roomId}/members/{uid} が有効な participant か確認
+3. rooms/{roomId} を読み、phase='question_open' を確認
+4. currentQuestionId の一致を確認
+5. サーバー時刻（Date.now()）が answerDeadlineAt 以前か確認
+6. quizSnapshot から現在問題を取得
+7. 問題型と送信値の組合せを確認（クライアントの answerType は使わない）
+8. 選択式なら choiceId が現在問題の選択肢か確認
+9. 数値式なら文字列として正規化・検証（Decimal 化）
+10. スナップショットの正解条件で正誤を判定（decimal.js）
+11. elapsedMs をサーバー時刻で計算
 12. 得点を計算（正解 → points / 不正解 → 0）
-13. answers へ INSERT（UNIQUE 違反は二重回答）
-14. 回答済み人数を返す
+13. answers/{questionId}__{participantId} を create()（既存なら二重回答）
+14. 同じトランザクションで members/{uid} の得点合計を加算
+15. 回答済み人数を返す
 ```
+
+### 1 参加者・1 問につき 1 回答
+
+ドキュメント ID を `${questionId}__${participantId}` に固定し、`create()` で書き込みます。
+既に存在すれば `ALREADY_EXISTS` になるため、`UNIQUE` 制約と同じ強さの保証が
+**追加の読み取りなしで**得られます。
 
 参加者端末の時計・表示状態・送信された正解情報を信用しません。
 
@@ -199,24 +238,27 @@ PostgreSQL 関数 `submit_answer()` で原子的に処理します。Route Handl
 
 ## 9. タイマー
 
-- サーバーが `answer_deadline_at` を設定し、Snapshot とイベントへ `serverTime` を含める
+- サーバーが `answerDeadlineAt` を設定し、Snapshot と `public/state` へ `serverTime` を含める
 - クライアントは `serverOffsetMs = serverTime - localNow` を推定し、表示だけをローカル更新
-- **毎秒の DB 更新・Realtime 送信を行わない**
+- **毎秒の Firestore 書き込みを行わない**（書き込み回数がそのまま費用と遅延になります）
 - 残り 0 秒で投影／司会画面が冪等な締切 API を呼ぶ
-- 締切 API が呼ばれなくても、回答 API が DB 時刻で期限切れ回答を拒否する
+- 締切 API が呼ばれなくても、回答 API がサーバー時刻で期限切れ回答を拒否する
 
 ---
 
 ## 10. 性能と費用の設計
 
-- 回答は 1 人 1 問 1 INSERT
+- 回答は 1 人 1 問 1 ドキュメント作成
 - 回答受付中は内訳を計算・送信しない（合計回答数のみ）
 - 締切／正解発表時に問題型別の集計を 1 回だけ計算
-- 参加者画面から定期ポーリングしない（Realtime 切断時だけ Snapshot 再取得）
+- 参加者画面から定期ポーリングしない（購読が切れたときだけ Snapshot 再取得）
 - 画像は WebP・長辺 1600px 以下（選択肢は 1000px 以下）
 - 投影画面は次に使う画像と効果音を事前読込
-- `answers(room_id, question_id)` などへ索引を配置
-- 200 人を超える場合は回答進捗イベントを 250〜500ms 単位で集約
+- 複合インデックスは `firebase/firestore.indexes.json` で管理する（コンソールで手作業に作らない）
+- **進捗ドキュメントへの書き込み集中を避ける**（Firestore は 1 ドキュメントあたりの書き込み頻度に上限があります）
+  - `answeredCount` の更新は 400ms のスロットリングで間引く
+  - 正確な件数が要る場面（締切・正解発表・司会 Snapshot）では `count()` 集計クエリでその場で数える
+  - 参加者ごとの得点合計は `members/{memberId}` へ回答と同じトランザクションで加算する
 
 ---
 
@@ -228,17 +270,21 @@ PostgreSQL 関数 `submit_answer()` で原子的に処理します。Route Handl
 - 本番ビルドは Cloud Build で行い、開発 PC の CPU アーキテクチャに依存しない
 - Vercel 固有 API / Vercel KV / Vercel Edge Runtime へ依存しない
 - Next.js は標準 Node.js サーバーとして動作させる
-- DB / Realtime / Storage へのアクセスは `infrastructure` 層へ隔離する
+- Firestore / Auth / Storage へのアクセスは `infrastructure` 層へ隔離する
+- Firebase Hosting / Cloud Functions へ依存しない（アプリ本体は Cloud Run で動かす）
 
 ---
 
 ## 12. 禁止している実装
 
 - 回答数取得のための 1 秒間隔ポーリング
-- カウントダウンの毎秒 DB 書き込み
+- カウントダウンの毎秒 Firestore 書き込み
 - Cloud Run インスタンスのメモリだけにルーム状態を保持する実装
-- ブラウザへ Supabase Secret Key を渡す実装
+- **クライアントから Firestore へ書き込む実装**（書き込みは Admin SDK 経由のみ）
+- **参加者に `rooms/{id}` や `quizzes/**` を購読させる実装**（正解が入っています）
+- サービスアカウントの秘密鍵をリポジトリ・コンテナ・ブラウザへ置く実装
 - 参加者へ正解情報を先送りし CSS だけで隠す実装
 - 参加者画面と投影画面で音声モジュールを共用する実装
 - ルームコード入力を参加の標準導線に戻す実装
 - JavaScript の `number` だけで小数の正誤判定を行う実装
+- 数値回答を Firestore の number 型で保存する実装

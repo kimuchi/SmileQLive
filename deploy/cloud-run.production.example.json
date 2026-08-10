@@ -2,7 +2,10 @@
   "$comment": [
     "このファイルをコピーして deploy/cloud-run.production.json を作成してください。",
     "実値入りのファイルは .gitignore 済みで、Cloud Build のソースにも含まれません。",
-    "Secret の『値』は絶対にここへ書かないこと（Secret Manager の名前だけを書く）。"
+    "Firebase 版ではサーバー用の秘密情報がありません（Cloud Run の ADC で認証）。",
+    "firebaseApiKey は公開前提の識別子であって秘密鍵ではないため、ここへ書いて構いません。",
+    "サービスアカウントの秘密鍵 (private_key) は絶対にここへ書かないこと。",
+    "customDomain / appBaseUrl はこのプロジェクトの本番ドメイン q.iefainavi.net を既定値にしています。"
   ],
 
   "projectId": "your-gcp-project-id",
@@ -10,15 +13,24 @@
   "serviceName": "smileq-live",
   "serviceAccount": "smileq-live-runtime@your-gcp-project-id.iam.gserviceaccount.com",
 
-  "customDomain": "quiz.example.jp",
+  "customDomain": "q.iefainavi.net",
   "domainMode": "domain-mapping",
-  "appBaseUrl": "https://quiz.example.jp",
+  "appBaseUrl": "https://q.iefainavi.net",
 
-  "supabaseUrl": "https://your-project-ref.supabase.co",
-  "supabasePublishableKey": "sb_publishable_xxxxxxxxxxxxxxxxxxxx",
-  "supabaseSecretName": "smileq-live-supabase-secret-key-production",
+  "firebaseProjectId": "your-firebase-project-id",
+  "firebaseApiKey": "AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+  "firebaseAuthDomain": "your-firebase-project-id.firebaseapp.com",
+  "firebaseStorageBucket": "your-firebase-project-id.firebasestorage.app",
+  "firebaseAppId": "1:000000000000:web:0000000000000000000000",
 
-  "mediaBucket": "quiz-media",
+  "$comment_allowedAuthDomains": [
+    "司会ログインを許可するメールドメイン。空配列なら「ドメイン制限なし」。",
+    "制限の有無にかかわらず、管理画面を使えるのは profiles/{uid} がある利用者だけです",
+    "（docs/HOST_ACCESS.md）。"
+  ],
+  "allowedAuthDomains": [],
+
+  "mediaBucket": "your-firebase-project-id.firebasestorage.app",
   "presentationLinkTtlMinutes": 480,
 
   "minInstances": 1,
@@ -34,6 +46,10 @@
   "requireCleanTree": true,
   "runVerifyBeforeDeploy": true,
 
+  "$comment_turnstile": [
+    "参加登録の CAPTCHA を使う場合だけ設定します。既定では Secret Manager は不要です。",
+    "turnstileSecretName には Secret Manager 上の『名前』だけを書くこと（値は書かない）。"
+  ],
   "turnstileSiteKey": "",
   "turnstileSecretName": "",
 

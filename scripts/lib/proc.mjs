@@ -19,7 +19,7 @@ const isWindows = process.platform === 'win32';
  * Node.js は .cmd / .bat を shell: false で起動できない仕様のため、
  * これらだけは cmd.exe 経由で起動する必要がある。
  */
-const CMD_WRAPPED = new Set(['gcloud', 'pnpm', 'npm', 'npx', 'yarn', 'supabase']);
+const CMD_WRAPPED = new Set(['gcloud', 'pnpm', 'npm', 'npx', 'yarn', 'firebase']);
 
 /** Windows 用に実行ファイル名を補正する。 */
 export function binName(name) {

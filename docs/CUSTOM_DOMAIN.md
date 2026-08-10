@@ -204,16 +204,22 @@ npm run deploy -- production
 
 参加用二次元コードは `APP_BASE_URL` を基準に生成されます。ここが古いままだと QR が旧 URL を指します。
 
-### 4.2 Supabase Auth の許可 URL を更新
+### 4.2 Firebase Authentication の承認済みドメインを更新
 
-Supabase ダッシュボード → **Authentication → URL Configuration**
+Firebase コンソール → **Authentication → Settings → 承認済みドメイン**
 
-| 項目 | 設定値 |
-|---|---|
-| Site URL | `https://quiz.example.jp` |
-| Redirect URLs | `https://quiz.example.jp/**` |
+登録するもの:
 
-ステージングの URL も併記しておくと開発が楽になります。
+```text
+quiz.example.jp                （カスタムドメイン）
+smileq-live-xxxxx.a.run.app    （Cloud Run の既定 URL。切り分け用に残しておくと便利）
+localhost                      （既定で入っています）
+```
+
+**ここに無いドメインからは司会者の Google ログインが失敗します**
+（`auth/unauthorized-domain`）。ドメインを変えたら必ず更新してください。
+
+ステージングの URL も登録しておくと開発が楽になります。
 
 ### 4.3 既存ルームの二次元コードを再発行
 

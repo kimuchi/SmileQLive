@@ -97,14 +97,29 @@ if (available.length > 0) {
   config = loadDeployConfig(environment);
   info(`診断対象: ${environment} (${config.projectId} / ${config.serviceName})`);
 
-  check('supabaseUrl', /^https:\/\/.+\.supabase\.co$/.test(config.supabaseUrl), config.supabaseUrl);
-  const publishableOk =
-    !config.supabasePublishableKey.startsWith('sb_secret') &&
-    !config.supabasePublishableKey.startsWith('service_role');
+  check('firebaseProjectId', Boolean(config.firebaseProjectId), config.firebaseProjectId);
+  // apiKey は公開前提の識別子。ここでは「秘密鍵を貼っていないか」だけを見る。
+  const apiKeyOk =
+    config.firebaseApiKey.length > 0 && !config.firebaseApiKey.includes('BEGIN PRIVATE KEY');
   check(
-    'Publishable Key が公開用キーであること',
-    publishableOk,
-    publishableOk ? '' : 'Secret Key を JSON へ書かないでください（Secret Manager を使う）',
+    'firebaseApiKey が公開用の識別子であること',
+    apiKeyOk,
+    apiKeyOk ? '' : 'サービスアカウントの秘密鍵を JSON へ書かないでください（Cloud Run は ADC で認証）',
+  );
+  const authDomainOk = /^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(config.firebaseAuthDomain);
+  check(
+    'firebaseAuthDomain',
+    authDomainOk,
+    authDomainOk
+      ? config.firebaseAuthDomain
+      : `${config.firebaseAuthDomain} — 例: ${config.firebaseProjectId}.firebaseapp.com`,
+  );
+  check(
+    '司会ログインの許可ドメイン',
+    true,
+    config.allowedAuthDomains.length > 0
+      ? config.allowedAuthDomains.join(', ')
+      : '制限なし（管理画面を使えるのは profiles/{uid} がある利用者だけ — docs/HOST_ACCESS.md）',
   );
   check(
     'appBaseUrl',
@@ -142,19 +157,46 @@ if (config && gcloudProbe.ok) {
     check('プロジェクトへのアクセス', projectOk, config.projectId);
 
     if (projectOk) {
+      // Firebase 版はサーバー用の秘密情報を持たない。Secret Manager は Turnstile 利用時のみ。
+      if (config.turnstileSecretName) {
+        check(
+          'Secret が存在する',
+          secretExists(config.projectId, config.turnstileSecretName),
+          config.turnstileSecretName,
+        );
+        const hasSecretValue = secretHasVersion(config.projectId, config.turnstileSecretName);
+        check(
+          'Secret に値がある',
+          hasSecretValue,
+          hasSecretValue
+            ? ''
+            : `gcloud secrets versions add ${config.turnstileSecretName} --project ${config.projectId} --data-file=-`,
+        );
+      } else {
+        check('Secret Manager', true, '不要（Cloud Run の実行サービスアカウントで認証）');
+      }
+
+      // Firestore が作られていないと、デプロイは通っても起動直後に必ず失敗する。
+      const firestoreOk = run(
+        'gcloud',
+        [
+          'firestore',
+          'databases',
+          'describe',
+          '--project',
+          config.firebaseProjectId,
+          '--format=value(name)',
+        ],
+        { capture: true, quiet: true, allowFailure: true },
+      ).ok;
       check(
-        'Secret が存在する',
-        secretExists(config.projectId, config.supabaseSecretName),
-        config.supabaseSecretName,
+        'Firestore データベース',
+        firestoreOk,
+        firestoreOk
+          ? config.firebaseProjectId
+          : 'まだ作成されていません（docs/FIREBASE_SETUP.md §4。ロケーションは後から変更できません）',
       );
-      const hasSecretValue = secretHasVersion(config.projectId, config.supabaseSecretName);
-      check(
-        'Secret に値がある',
-        hasSecretValue,
-        hasSecretValue
-          ? ''
-          : `gcloud secrets versions add ${config.supabaseSecretName} --project ${config.projectId} --data-file=-`,
-      );
+
       const url = serviceExists(config.projectId, config.region, config.serviceName);
       check('Cloud Run サービス', Boolean(url), url || '未作成（初回デプロイで作成されます）');
     }

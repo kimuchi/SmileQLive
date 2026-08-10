@@ -64,6 +64,7 @@ if (inferred) {
 info(`プロジェクト : ${config.projectId}`);
 info(`リージョン   : ${config.region}`);
 info(`サービス     : ${config.serviceName}`);
+info(`Firebase     : ${config.firebaseProjectId}`);
 info(`公開URL      : ${config.appBaseUrl || '(Cloud Run の既定 URL を使用)'}`);
 if (config.customDomain) {
   info(`カスタムドメイン: ${config.customDomain} (${config.domainMode})`);
@@ -105,29 +106,35 @@ if (git) {
 
 // ---------------------------------------------------------------------------
 step('Secret Manager を確認');
-if (!secretExists(config.projectId, config.supabaseSecretName)) {
-  fatal(
-    `Secret が存在しません: ${config.supabaseSecretName}`,
-    [
-      '先に初期設定を実行してください:',
-      `  npm run gcp:bootstrap -- ${environment}`,
-      '',
-      'その後、Supabase の Secret Key を登録してください（値はリポジトリへ書かないこと）:',
-      `  gcloud secrets versions add ${config.supabaseSecretName} --project ${config.projectId} --data-file=-`,
-    ].join('\n'),
-  );
+// Firebase 版ではサーバー用の秘密情報が無い（Cloud Run の ADC で Firestore / Auth / Storage を使う）。
+// Secret Manager が要るのは Turnstile を使う場合だけ（docs/FIRESTORE_MODEL.md §6）。
+if (!config.turnstileSecretName) {
+  success('Secret Manager は不要です（Cloud Run の実行サービスアカウントで認証します）');
+} else {
+  if (!secretExists(config.projectId, config.turnstileSecretName)) {
+    fatal(
+      `Secret が存在しません: ${config.turnstileSecretName}`,
+      [
+        '先に初期設定を実行してください:',
+        `  npm run gcp:bootstrap -- ${environment}`,
+        '',
+        'その後、Turnstile の Secret Key を登録してください（値はリポジトリへ書かないこと）:',
+        `  gcloud secrets versions add ${config.turnstileSecretName} --project ${config.projectId} --data-file=-`,
+      ].join('\n'),
+    );
+  }
+  if (!secretHasVersion(config.projectId, config.turnstileSecretName)) {
+    fatal(
+      `Secret に値が登録されていません: ${config.turnstileSecretName}`,
+      [
+        'Turnstile のサーバー専用 Secret Key を登録してください:',
+        `  gcloud secrets versions add ${config.turnstileSecretName} --project ${config.projectId} --data-file=-`,
+        '（実行後、値を貼り付けて Ctrl+D / Windows は Ctrl+Z Enter）',
+      ].join('\n'),
+    );
+  }
+  success(`Secret を確認しました: ${config.turnstileSecretName}`);
 }
-if (!secretHasVersion(config.projectId, config.supabaseSecretName)) {
-  fatal(
-    `Secret に値が登録されていません: ${config.supabaseSecretName}`,
-    [
-      'Supabase のサーバー専用 Secret Key を登録してください:',
-      `  gcloud secrets versions add ${config.supabaseSecretName} --project ${config.projectId} --data-file=-`,
-      '（実行後、値を貼り付けて Ctrl+D / Windows は Ctrl+Z Enter）',
-    ].join('\n'),
-  );
-}
-success(`Secret を確認しました: ${config.supabaseSecretName}`);
 
 // ---------------------------------------------------------------------------
 step('デプロイ前チェック (lint / typecheck / test / build)');
@@ -174,10 +181,11 @@ step('Cloud Run へデプロイ');
 const resolvedAppBaseUrl = config.appBaseUrl || existingUrl || '';
 const runtimeEnv = buildRuntimeEnv(config, resolvedAppBaseUrl);
 
-const secrets = { SUPABASE_SECRET_KEY: `${config.supabaseSecretName}:latest` };
-if (config.turnstileSecretName) {
-  secrets.TURNSTILE_SECRET_KEY = `${config.turnstileSecretName}:latest`;
-}
+// マウントする秘密情報は Turnstile だけ。無ければ --clear-secrets を付け、
+// 以前のリビジョンが持っていたシークレットマウントが残らないようにする。
+const secrets = config.turnstileSecretName
+  ? { TURNSTILE_SECRET_KEY: `${config.turnstileSecretName}:latest` }
+  : null;
 
 const baseArgs = [
   'run',
@@ -214,8 +222,7 @@ const baseArgs = [
   String(config.timeout),
   '--set-env-vars',
   toGcloudDict(runtimeEnv),
-  '--set-secrets',
-  toGcloudDict(secrets),
+  ...(secrets ? ['--set-secrets', toGcloudDict(secrets)] : ['--clear-secrets']),
   '--labels',
   `app=smileq-live,env=${environment}`,
 ];
@@ -240,7 +247,8 @@ if (dryRun) {
   info(color.dim('dry-run: 次のコマンドを実行します'));
   console.log(`\n  gcloud ${[...baseArgs, ...optionalArgs].join(' ')}\n`);
 } else {
-  runWithOptionalFlags(baseArgs, optionalArgs, { secrets: [config.supabasePublishableKey] });
+  // 伏せるべき値は無い（FIREBASE_API_KEY は公開前提の識別子。秘密鍵は一切渡さない）。
+  runWithOptionalFlags(baseArgs, optionalArgs);
   success('デプロイが完了しました');
 }
 
@@ -337,7 +345,10 @@ console.log(`  ヘルス      : ${(finalUrl || '') + '/api/health'}`);
 console.log(`  管理画面    : ${(finalUrl || '') + '/admin/login'}`);
 console.log(`  ログ        : gcloud run services logs tail ${config.serviceName} --project ${config.projectId} --region ${config.region}`);
 console.log('');
-console.log(color.dim('  Supabase Auth の Redirect URL に上記ドメインが登録されているか確認してください。'));
+console.log(
+  color.dim('  Firebase Authentication の「承認済みドメイン」に上記ドメインがあるか確認してください。'),
+);
+console.log(color.dim('  Security Rules / インデックスを変更した場合は npm run rules:deploy も実行してください。'));
 console.log('');
 
 // ---------------------------------------------------------------------------

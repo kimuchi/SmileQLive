@@ -44,6 +44,32 @@ jobs:
       - name: Build
         run: pnpm build
 
+      # ビルド成果物に秘密鍵が無いこと、ビルド時に環境変数が焼き込まれていないことを実物で確認する。
+      - name: Bundle safety check
+        run: pnpm verify:bundle
+
+  rules:
+    name: Security Rules (emulator)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      # Firestore / Auth エミュレータは JVM 上で動く。
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: pnpm install --frozen-lockfile
+      # firebase/firestore.rules は「正解を漏らさない」最終防壁なので、
+      # 机上確認ではなく実際のエミュレータへ適用して検証する。
+      - run: pnpm test:rules
+      # トランザクションの不変条件（1参加者1問1回答・stateVersion 競合・締切）も実測する。
+      - run: pnpm test:emulator
+
   audit:
     name: dependency audit
     runs-on: ubuntu-latest
@@ -59,7 +85,7 @@ jobs:
       - run: pnpm audit --audit-level moderate
 
   e2e-smoke:
-    name: E2E (Supabase 不要のスモークのみ)
+    name: E2E (バックエンド不要のスモークのみ)
     runs-on: ubuntu-latest
     env:
       NEXT_TELEMETRY_DISABLED: '1'
