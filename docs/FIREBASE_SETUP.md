@@ -92,6 +92,75 @@ gcloud services enable firebase.googleapis.com --project <PROJECT_ID>
 
 ---
 
+### Firebase プロジェクトと Cloud Run プロジェクトは分けてもよい
+
+同じ Google Cloud プロジェクトにすると ADC の権限付与が 1 か所で済むため**推奨**ですが、
+**必須ではありません**。既存プロジェクトへ Firebase を追加する権限が無い場合、
+自分が管理できる別プロジェクトで Firebase を使う構成でも動きます。
+
+```bash
+# 自分がオーナーになる新しい Firebase プロジェクトを作る
+npx --yes firebase-tools@15 projects:create smileq-live --display-name "SmileQ Live"
+npm run firebase:config -- --project=smileq-live
+```
+
+この場合、`deploy/cloud-run.production.json` は次のように**別々の ID**になります。
+
+```jsonc
+{
+  "projectId": "idl-application",        // Cloud Run を動かす GCP プロジェクト
+  "firebaseProjectId": "smileq-live",    // Firestore / Auth / Storage のプロジェクト
+  "serviceAccount": "smileq-live-runtime@idl-application.iam.gserviceaccount.com"
+}
+```
+
+**追加で必要な作業**は 1 つだけです。Cloud Run の実行サービスアカウントへ、
+Firebase 側プロジェクトの権限を付与します。
+
+```bash
+FB=smileq-live
+SA=smileq-live-runtime@idl-application.iam.gserviceaccount.com
+
+for ROLE in roles/datastore.user roles/firebaseauth.admin roles/storage.objectAdmin; do
+  gcloud projects add-iam-policy-binding "$FB" \
+    --member="serviceAccount:$SA" --role="$ROLE" --condition=None
+done
+```
+
+> `npm run gcp:bootstrap` は `projectId` 側へ権限を付けます。
+> プロジェクトを分ける場合は、上のコマンドで `firebaseProjectId` 側にも付与してください。
+
+---
+
+### 権限が足りないと言われたら
+
+```text
+POST .../projects/<id>:addFirebase 403
+{"error":{"code":403,"message":"The caller does not have permission"}}
+```
+
+Firebase の追加には対象プロジェクトの `firebase.projects.update` 権限が必要です。
+
+現在の自分のロールを確認する:
+
+```bash
+gcloud projects get-iam-policy <PROJECT_ID> \
+  --flatten="bindings[].members" \
+  --filter="bindings.members:$(gcloud config get-value account)" \
+  --format="value(bindings.role)"
+```
+
+管理者に依頼する場合:
+
+```bash
+gcloud projects add-iam-policy-binding <PROJECT_ID> \
+  --member="user:<あなたのメール>" --role="roles/firebase.admin"
+```
+
+権限をもらえない場合は、上の「プロジェクトを分ける」構成が回避策になります。
+
+---
+
 ### CLI だけで取得する（GUI 不要・推奨）
 
 上の値は**コンソールを開かずに CLI で取得できます**。1 コマンドで設定ファイルまで書き込みます。

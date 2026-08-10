@@ -207,15 +207,63 @@ if (!firebaseEnabled) {
   const added = firebase(['projects:addfirebase', projectId, '--json'], { allowFailure: true });
   if (!added.ok) {
     reportFailure(added, ['projects:addfirebase', projectId]);
+
+    const output = `${added.stdout ?? ''}\n${added.stderr ?? ''}`;
+    const permissionDenied =
+      /PERMISSION_DENIED/i.test(output) ||
+      /does not have permission/i.test(output) ||
+      /HTTP Error: 403/i.test(output);
+    const serviceDisabled = /SERVICE_DISABLED/i.test(output) || /has not been used in project/i.test(output);
+
+    if (serviceDisabled) {
+      fatal(
+        'Firebase Management API が有効になっていません。',
+        [
+          '次を実行してから、もう一度お試しください:',
+          `  gcloud services enable firebase.googleapis.com --project ${projectId}`,
+        ].join('\n'),
+      );
+    }
+
+    if (permissionDenied) {
+      fatal(
+        `${projectId} へ Firebase を追加する権限がありません。`,
+        [
+          'Firebase の追加には、対象プロジェクトに対する firebase.projects.update 権限が要ります。',
+          '',
+          '── 現在の自分のロールを確認する ──',
+          `  gcloud projects get-iam-policy ${projectId} \\`,
+          '    --flatten="bindings[].members" \\',
+          `    --filter="bindings.members:$(gcloud config get-value account)" \\`,
+          '    --format="value(bindings.role)"',
+          '',
+          '── 対処1: 管理者にロールを付けてもらう（推奨）──',
+          '  次のいずれかを付与してもらってください。',
+          `    gcloud projects add-iam-policy-binding ${projectId} \\`,
+          '      --member="user:<あなたのメール>" --role="roles/firebase.admin"',
+          '  もしくはオーナー権限。',
+          '',
+          '── 対処2: 自分が権限を持つ新しい Firebase プロジェクトを作る ──',
+          '  Cloud Run と同じプロジェクトである必要はありません。',
+          '  別プロジェクトでも、Cloud Run の実行サービスアカウントに',
+          '  Firebase 側の権限を与えれば動きます（docs/FIREBASE_SETUP.md 参照）。',
+          `    ${cli.bin} ${[...cli.prefix, 'projects:create', 'smileq-live', '--display-name', '"SmileQ Live"'].join(' ')}`,
+          `    npm run firebase:config -- --project=smileq-live`,
+          '',
+          '── 対処3: GUI で追加してもらう ──',
+          '  https://console.firebase.google.com/ → プロジェクトを追加 →',
+          `  「既存の Google Cloud プロジェクト」から ${projectId} を選ぶ`,
+          '  （この操作にも同じ権限が必要です）',
+        ].join('\n'),
+      );
+    }
+
     fatal(
       'Firebase を追加できませんでした。',
       [
-        'よくある原因:',
-        '  * このアカウントに対象プロジェクトの編集権限が無い',
-        '    （必要: roles/editor もしくは roles/owner）',
-        '  * Firebase Management API が無効',
-        `    gcloud services enable firebase.googleapis.com --project ${projectId}`,
+        '考えられる原因:',
         '  * 組織ポリシーで Firebase の利用が制限されている',
+        '  * プロジェクトが削除保留中',
         '',
         'GUI で追加する場合:',
         '  https://console.firebase.google.com/ → プロジェクトを追加 →',
