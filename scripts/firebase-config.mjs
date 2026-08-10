@@ -54,6 +54,32 @@ function firebase(args, { capture = true, allowFailure = false } = {}) {
   return run(cli.bin, [...cli.prefix, ...args], { capture, quiet: true, allowFailure });
 }
 
+/**
+ * 失敗した firebase コマンドの出力を、原因が分かる形で表示する。
+ *
+ * npm / pnpm 経由だと大量の warn が混ざるため、それらを除いて
+ * 実際のエラー行だけを残す（原因が埋もれると利用者が対処できない）。
+ */
+function reportFailure(result, args) {
+  const noise = /^(npm |pnpm |\(node:|\s*$)/;
+  const lines = `${result.stdout ?? ''}\n${result.stderr ?? ''}`
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0 && !noise.test(line));
+
+  console.error('');
+  console.error(`  実行したコマンド: firebase ${args.join(' ')}`);
+  if (lines.length > 0) {
+    console.error('  出力:');
+    for (const line of lines.slice(0, 15)) {
+      console.error(`    ${line}`);
+    }
+  } else {
+    console.error('  出力: （エラーメッセージが得られませんでした）');
+  }
+  console.error('');
+}
+
 // ---------------------------------------------------------------------------
 step('ログイン状態を確認');
 const loginCheck = firebase(['login:list'], { allowFailure: true });
@@ -162,8 +188,19 @@ if (apps.length === 0) {
     { allowFailure: true },
   );
   if (!created.ok) {
-    console.error(created.stderr);
-    fatal('Web アプリを作成できませんでした。');
+    reportFailure(created, ['apps:create', 'WEB', 'SmileQ Live', '--project', projectId]);
+    fatal(
+      'Web アプリを作成できませんでした。',
+      [
+        'よくある原因:',
+        '  * このアカウントに Firebase プロジェクトの編集権限が無い',
+        '    （必要なロール: roles/firebase.developAdmin もしくは編集者）',
+        '  * 対象プロジェクトで Firebase が有効化されていない',
+        '',
+        '手動で作成する場合:',
+        `  ${cli.bin} ${[...cli.prefix, 'apps:create', 'WEB', '"SmileQ Live"', '--project', projectId].join(' ')}`,
+      ].join('\n'),
+    );
   }
   try {
     appId = JSON.parse(created.stdout).result?.appId ?? '';
@@ -203,7 +240,7 @@ const sdkConfig = firebase(['apps:sdkconfig', 'WEB', appId, '--project', project
 });
 
 if (!sdkConfig.ok) {
-  console.error(sdkConfig.stderr);
+  reportFailure(sdkConfig, ['apps:sdkconfig', 'WEB', appId, '--project', projectId]);
   fatal('公開設定を取得できませんでした。');
 }
 

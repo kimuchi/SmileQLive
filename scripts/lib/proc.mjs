@@ -30,15 +30,49 @@ export function binName(name) {
 }
 
 /**
- * この実行ファイルの起動に shell が必要か。
- *
- * Windows の .cmd ラッパーだけ true になる。macOS / Linux では常に false で、
- * 「OS 固有シェルを前提とするデプロイ処理を作らない」という方針を保つ。
- * shell: true で起動する場合も、引数は Node.js が自動エスケープするため
- * 文字列連結でコマンドを組み立てることはしない。
+ * この実行ファイルの起動に cmd.exe を挟む必要があるか。
+ * Windows の .cmd ラッパーだけ true になる。
  */
 function needsShell(name) {
   return isWindows && CMD_WRAPPED.has(name);
+}
+
+/**
+ * cmd.exe へ渡す引数を安全に引用する。
+ *
+ * `shell: true` + 引数配列は Node.js が引数を**連結するだけでエスケープしない**ため、
+ * 空白を含む引数（例: "SmileQ Live"）が複数の引数へ割れてしまう
+ * （Node 22 以降は DEP0190 として警告も出る）。
+ * そのため自前で引用し、`cmd /d /s /c "..."` へ verbatim で渡す。
+ */
+function quoteForCmd(value) {
+  const text = String(value);
+  if (text.length === 0) {
+    return '""';
+  }
+  // 引用が不要な安全な文字だけなら、そのまま渡す。
+  if (!/[\s"&|<>^()%!,;=]/.test(text)) {
+    return text;
+  }
+  // 閉じ引用符の直前のバックスラッシュは倍にする必要がある（Windows の引数解析規則）。
+  const escaped = text
+    .replace(/(\\*)"/g, '$1$1\\"')
+    .replace(/(\\+)$/, '$1$1');
+  return `"${escaped}"`;
+}
+
+/**
+ * Windows で .cmd を起動するための spawnSync 引数を組み立てる。
+ * `cmd /d /s /c "<引用済みコマンド>"` の形にし、windowsVerbatimArguments で
+ * Node 側の再解釈を止める（Node 自身の shell:true 実装と同じ方式）。
+ */
+function buildWindowsInvocation(resolved, args) {
+  const commandLine = [resolved, ...args].map(quoteForCmd).join(' ');
+  return {
+    file: process.env.ComSpec || 'cmd.exe',
+    args: ['/d', '/s', '/c', `"${commandLine}"`],
+    options: { windowsVerbatimArguments: true, shell: false },
+  };
 }
 
 /**
@@ -54,10 +88,14 @@ function needsShell(name) {
 export function probeCommand(name) {
   const resolved = binName(name);
 
-  const direct = spawnSync(resolved, ['--version'], {
+  const probe = needsShell(name)
+    ? buildWindowsInvocation(resolved, ['--version'])
+    : { file: resolved, args: ['--version'], options: { shell: false } };
+
+  const direct = spawnSync(probe.file, probe.args, {
     stdio: ['ignore', 'pipe', 'pipe'],
     encoding: 'utf8',
-    shell: needsShell(name),
+    ...probe.options,
     timeout: 30_000,
   });
 
@@ -133,12 +171,16 @@ export function run(name, args, options = {}) {
     console.log(`    ${color.dim(`$ ${name} ${printable}`)}`);
   }
 
-  const result = spawnSync(binName(name), args, {
+  // Windows の .cmd ラッパーだけ cmd.exe 経由。引数は自前で引用する
+  // （shell: true は引数をエスケープせず連結するため、空白を含む値が壊れる）。
+  const invocation = needsShell(name)
+    ? buildWindowsInvocation(binName(name), args)
+    : { file: binName(name), args, options: { shell: false } };
+
+  const result = spawnSync(invocation.file, invocation.args, {
     stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
     encoding: capture ? 'utf8' : undefined,
-    // Windows の .cmd ラッパーのみ cmd.exe 経由。引数は配列のまま渡し、
-    // Node.js に自動エスケープさせる（文字列連結でコマンドを作らない）。
-    shell: needsShell(name),
+    ...invocation.options,
     cwd,
     env: env ? { ...process.env, ...env } : process.env,
   });
