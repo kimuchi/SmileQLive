@@ -150,6 +150,83 @@ if (!projectId) {
 success(`プロジェクト: ${projectId}`);
 
 // ---------------------------------------------------------------------------
+step('Firebase が有効になっているか確認');
+
+/**
+ * Google Cloud プロジェクトに Firebase リソースが追加されているか。
+ *
+ * GCP プロジェクトが存在していても Firebase が未追加だと、
+ * Firebase Management API は 404 "Firebase project <番号> not found" を返す。
+ * この状態は権限不足と紛らわしいので、明示的に切り分ける。
+ */
+function isFirebaseNotEnabled(result) {
+  const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+  return /Firebase project .* not found/i.test(output) || /not a Firebase project/i.test(output);
+}
+
+const projectCheck = firebase(['projects:list', '--json'], { allowFailure: true });
+let firebaseEnabled = false;
+if (projectCheck.ok) {
+  try {
+    const parsed = JSON.parse(projectCheck.stdout);
+    firebaseEnabled = (parsed.result ?? []).some((item) => item.projectId === projectId);
+  } catch {
+    // 判定できないときは、後続の API 呼び出しの結果で切り分ける。
+    firebaseEnabled = true;
+  }
+} else {
+  firebaseEnabled = true;
+}
+
+if (!firebaseEnabled) {
+  warn(`${projectId} に Firebase が追加されていません。`);
+  info('Google Cloud プロジェクトとしては存在しますが、Firebase リソースが未追加の状態です。');
+  info('（この状態でも Cloud Run などは使えるため、権限不足と紛らわしくなります）');
+  console.log('');
+
+  const shouldAdd =
+    flags.has('yes') || !isInteractive()
+      ? true
+      : await confirmYesNo(`${projectId} へ Firebase を追加しますか？`, true);
+
+  if (!shouldAdd) {
+    fatal(
+      'Firebase が有効でないと設定を取得できません。',
+      [
+        'CLI で追加する場合:',
+        `  ${cli.bin} ${[...cli.prefix, 'projects:addfirebase', projectId].join(' ')}`,
+        '',
+        'GUI で追加する場合:',
+        '  https://console.firebase.google.com/ → プロジェクトを追加 →',
+        `  「既存の Google Cloud プロジェクト」から ${projectId} を選ぶ`,
+      ].join('\n'),
+    );
+  }
+
+  step('Firebase を追加');
+  const added = firebase(['projects:addfirebase', projectId, '--json'], { allowFailure: true });
+  if (!added.ok) {
+    reportFailure(added, ['projects:addfirebase', projectId]);
+    fatal(
+      'Firebase を追加できませんでした。',
+      [
+        'よくある原因:',
+        '  * このアカウントに対象プロジェクトの編集権限が無い',
+        '    （必要: roles/editor もしくは roles/owner）',
+        '  * Firebase Management API が無効',
+        `    gcloud services enable firebase.googleapis.com --project ${projectId}`,
+        '  * 組織ポリシーで Firebase の利用が制限されている',
+        '',
+        'GUI で追加する場合:',
+        '  https://console.firebase.google.com/ → プロジェクトを追加 →',
+        `  「既存の Google Cloud プロジェクト」から ${projectId} を選ぶ`,
+      ].join('\n'),
+    );
+  }
+  success(`${projectId} へ Firebase を追加しました。`);
+}
+
+// ---------------------------------------------------------------------------
 step('Web アプリを決定');
 const appsResult = firebase(['apps:list', 'WEB', '--project', projectId, '--json'], {
   allowFailure: true,
@@ -189,6 +266,21 @@ if (apps.length === 0) {
   );
   if (!created.ok) {
     reportFailure(created, ['apps:create', 'WEB', 'SmileQ Live', '--project', projectId]);
+    if (isFirebaseNotEnabled(created)) {
+      fatal(
+        `${projectId} に Firebase が追加されていません。`,
+        [
+          'Google Cloud プロジェクトは存在しますが、Firebase リソースが未追加です。',
+          '',
+          'CLI で追加する場合:',
+          `  ${cli.bin} ${[...cli.prefix, 'projects:addfirebase', projectId].join(' ')}`,
+          '',
+          'GUI で追加する場合:',
+          '  https://console.firebase.google.com/ → プロジェクトを追加 →',
+          `  「既存の Google Cloud プロジェクト」から ${projectId} を選ぶ`,
+        ].join('\n'),
+      );
+    }
     fatal(
       'Web アプリを作成できませんでした。',
       [

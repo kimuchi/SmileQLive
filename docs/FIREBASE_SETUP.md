@@ -61,6 +61,37 @@ SmileQ Live は永続状態のすべてを **Firestore** に置きます。
 > 実際の保護は **Security Rules とサーバー側の認可**で行います。
 > そのため `deploy/cloud-run.*.json` へ書いて構いません。
 
+### 既存の Google Cloud プロジェクトに Firebase を追加する
+
+すでに Google Cloud プロジェクトがある場合（Cloud Run と同じプロジェクトを使いたい等）、
+そのプロジェクトへ **Firebase リソースを追加**する必要があります。
+
+GCP プロジェクトが存在していても Firebase が未追加だと、次のエラーになります。
+
+```text
+Firebase project 461269261166 not found.
+```
+
+プロジェクト**番号**で「not found」と言われるのが特徴で、権限不足と紛らわしいですが別物です。
+`npm run firebase:config` はこの状態を検出して、追加するか確認します。
+
+手動で追加する場合:
+
+```bash
+npx --yes firebase-tools@15 projects:addfirebase <PROJECT_ID>
+```
+
+うまくいかない場合は Firebase Management API を有効にしてから再実行してください。
+
+```bash
+gcloud services enable firebase.googleapis.com --project <PROJECT_ID>
+```
+
+> `firebase projects:list` は **Firebase が有効なプロジェクトだけ**を返します。
+> 一覧に出てこない = まだ Firebase が追加されていない、と判断できます。
+
+---
+
 ### CLI だけで取得する（GUI 不要・推奨）
 
 上の値は**コンソールを開かずに CLI で取得できます**。1 コマンドで設定ファイルまで書き込みます。
