@@ -109,7 +109,8 @@ npm run domain:map -- production          # カスタムドメイン
 | `pnpm lint` / `pnpm typecheck` | 静的検査 |
 | `pnpm test` / `pnpm test:coverage` | 単体・統合テスト |
 | `pnpm test:e2e` | E2E テスト |
-| `pnpm verify` | lint → typecheck → test → build |
+| `pnpm verify` | lint → typecheck → test → build → 成果物検査 |
+| `npm run verify:bundle` | ビルド成果物に Secret Key・音声処理・コード入力が無いことを検査 |
 | `npm run deploy` | Cloud Run へデプロイ |
 | `npm run deploy -- staging` | ステージングへデプロイ |
 | `npm run deploy -- --dry-run` | 実行される gcloud コマンドの確認 |

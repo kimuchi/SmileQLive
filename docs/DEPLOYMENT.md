@@ -214,7 +214,7 @@ npm run deploy -- staging --skip-verify
 | 1 | `gcloud` の存在・ログイン・プロジェクトアクセスを確認 | 対処コマンドを表示して停止 |
 | 2 | Git の状態確認（**本番のみ**: 作業ツリーがクリーン / 許可ブランチ） | 停止 |
 | 3 | Secret の存在と値の有無を確認 | 登録コマンドを表示して停止 |
-| 4 | `npm run verify`（lint → typecheck → test → build） | 停止 |
+| 4 | `npm run verify`（lint → typecheck → test → build → 成果物検査） | 停止 |
 | 5 | **本番のみ**: `production` と入力させる確認 | 停止 |
 | 6 | `gcloud run deploy --source .`（Cloud Build でイメージ作成） | 停止 |
 | 7 | `APP_BASE_URL` の確定（カスタムドメイン → 設定値 → Cloud Run URL） | — |
@@ -378,6 +378,7 @@ npm run gcp:bootstrap -- production
 npm run db:migrate -- --status
 npm run db:test                    # DB 関数のスモークテスト（ローカル PostgreSQL）
 
-npm run verify                     # lint + typecheck + test + build
+npm run verify                     # lint + typecheck + test + build + 成果物検査
+npm run verify:bundle              # ビルド成果物の安全性検査のみ
 npm run test:e2e                   # E2E（docs/E2E.md 参照）
 ```
