@@ -75,7 +75,12 @@ export function useRoomSnapshot<T extends RoomSnapshotBase>(
   const inFlightRef = useRef<Promise<void> | null>(null);
   const queuedRef = useRef(false);
   /** 反映済みの stateVersion。飛びの判定と、古い応答の破棄に使う。 */
-  const stateVersionRef = useRef<number | null>(null);
+  // ルームが切り替わると版番号もリセットする必要があるため、
+  // どのルームの版番号かをキーと一緒に保持する（リセットは非同期処理の中で行う）。
+  const stateVersionRef = useRef<{ key: string; value: number | null }>({
+    key: `${roomId}|${endpoint}`,
+    value: null,
+  });
 
   useEffect(() => {
     mountedRef.current = true;
@@ -84,12 +89,16 @@ export function useRoomSnapshot<T extends RoomSnapshotBase>(
     };
   }, []);
 
-  // ルームや取得先が変わったら状態を捨てる。
-  useEffect(() => {
-    stateVersionRef.current = null;
+  // ルームや取得先が変わったら、前のルームの状態を即座に捨てる。
+  // effect で行うと「前のルームの Snapshot が 1 フレーム見える」ため、
+  // React 公式の「props 変更時に state を調整する」パターンでレンダー中に捨てる。
+  const sourceKey = `${roomId}|${endpoint}`;
+  const [lastSourceKey, setLastSourceKey] = useState(sourceKey);
+  if (lastSourceKey !== sourceKey) {
+    setLastSourceKey(sourceKey);
     setSnapshot(null);
     setError(null);
-  }, [roomId, endpoint]);
+  }
 
   const fetchOnce = useCallback(async (): Promise<void> => {
     try {
@@ -102,13 +111,17 @@ export function useRoomSnapshot<T extends RoomSnapshotBase>(
         setError(toUserErrorMessage(null));
         return;
       }
-      const current = stateVersionRef.current;
+      // ルームが切り替わっていたら版番号を捨ててから比較する。
+      if (stateVersionRef.current.key !== sourceKey) {
+        stateVersionRef.current = { key: sourceKey, value: null };
+      }
+      const current = stateVersionRef.current.value;
       // 遅れて届いた古い Snapshot で巻き戻さない。
       if (current !== null && next.stateVersion < current) {
         setError(null);
         return;
       }
-      stateVersionRef.current = next.stateVersion;
+      stateVersionRef.current = { key: sourceKey, value: next.stateVersion };
       setSnapshot(next);
       setError(null);
     } catch (caught) {
@@ -117,7 +130,7 @@ export function useRoomSnapshot<T extends RoomSnapshotBase>(
       }
       setError(toUserErrorMessage(caught));
     }
-  }, [endpoint]);
+  }, [endpoint, sourceKey]);
 
   const refresh = useCallback(async (): Promise<void> => {
     if (!enabled) {
@@ -153,20 +166,25 @@ export function useRoomSnapshot<T extends RoomSnapshotBase>(
     refreshRef.current = refresh;
   }, [refresh]);
 
-  // 初回取得。
+  // 初回取得（ルーム・取得先が変わったときも）。
   useEffect(() => {
+    // 前のルームの stateVersion が残っていると、新しいルームの Snapshot を
+    // 「古い応答」と誤判定して捨ててしまうため必ず戻す。
+    stateVersionRef.current = { key: sourceKey, value: null };
     if (!enabled || roomId.length === 0) {
       return;
     }
     void refreshRef.current();
-  }, [enabled, roomId, endpoint]);
+  }, [enabled, roomId, endpoint, sourceKey]);
 
   const handleEvent = useCallback(
     (envelope: RoomEventEnvelope) => {
       if (envelope.roomId !== roomId) {
         return;
       }
-      const known = stateVersionRef.current;
+      const tracked = stateVersionRef.current;
+      // 反映済みの版番号は「同じルーム・同じ取得先」のときだけ意味を持つ。
+      const known = tracked.key === sourceKey ? tracked.value : null;
       // すでに同じか新しい状態を持っているなら取り直さない。
       if (known !== null && envelope.stateVersion <= known) {
         return;
@@ -174,7 +192,7 @@ export function useRoomSnapshot<T extends RoomSnapshotBase>(
       // known + 1 でなければイベントが欠落している。いずれにせよ Snapshot が正。
       void refreshRef.current();
     },
-    [roomId],
+    [roomId, sourceKey],
   );
 
   const previousStatusRef = useRef<RoomChannelStatus>('connecting');
