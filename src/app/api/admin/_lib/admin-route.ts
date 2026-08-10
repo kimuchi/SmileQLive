@@ -76,7 +76,7 @@ export function parseValue<T>(schema: ZodType<T>, value: unknown): T {
  */
 export async function loadAdminQuestion(questionId: string): Promise<AdminQuestion> {
   const { question } = await requireQuestionOwner(questionId);
-  const quiz = await getQuiz(question.quiz_id);
+  const quiz = await getQuiz(question.quizId);
 
   const found = quiz.questions.find((item) => item.id === questionId);
   if (!found) {

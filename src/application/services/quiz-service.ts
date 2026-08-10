@@ -3,19 +3,36 @@ import 'server-only';
 /**
  * クイズ編集のユースケース。
  *
- * - すべての操作で所有権を検証してからリポジトリを呼ぶ。
- * - 公開判定はアプリ側の validateQuizForPublish() に加え、
- *   DB 側の validate_quiz_for_publish() の結果も（取得できれば）併合する。
- *   アプリ検証だけを唯一の防波堤にしない。
+ * - すべての操作で所有権を検証してからリポジトリを呼ぶ
+ *   （Admin SDK は Security Rules を迂回するため、認可は必ずアプリ側で行う）。
+ * - 公開判定は **サーバー側の validateQuizForPublish() だけ**が砦になる。
+ *   PostgreSQL 版にあった DB 側の再検証は Firebase では存在しない
+ *   （docs/FIRESTORE_MODEL.md §1 の既知のトレードオフ）。
+ * - 問題・選択肢は `quizzes/{quizId}/questions/{questionId}` にあり、
+ *   questionId だけでは親クイズが分からない。認可で得た quizId / ownerId を
+ *   ヒントとしてリポジトリへ渡し、走査のための読み取りを増やさない。
  */
 
 import { validateQuizForPublish, type PublishIssue } from '@/domain/quiz/publish-validation';
 import type { QuizSnapshot } from '@/domain/quiz/quiz-snapshot';
 import { buildQuizSnapshot } from '@/application/services/quiz-snapshot-codec';
-import { createSupabaseAdminClient } from '@/infrastructure/supabase/admin';
-import { logger } from '@/infrastructure/logging/logger';
-import { isRecord } from '@/infrastructure/supabase/repositories/row-utils';
-import { quizRepository } from '@/infrastructure/supabase/repositories/quiz-repository';
+import {
+  addChoice as addChoiceRepo,
+  archiveQuiz as archiveQuizRepo,
+  createQuestion as createQuestionRepo,
+  createQuiz as createQuizRepo,
+  deleteChoice as deleteChoiceRepo,
+  deleteQuestion as deleteQuestionRepo,
+  duplicateQuiz as duplicateQuizRepo,
+  getQuizDetail,
+  listQuizzes as listQuizzesRepo,
+  publishQuiz as publishQuizRepo,
+  reorderChoices as reorderChoicesRepo,
+  reorderQuestions as reorderQuestionsRepo,
+  updateQuestion as updateQuestionRepo,
+  updateQuiz as updateQuizRepo,
+  validateQuizForPublishById,
+} from '@/infrastructure/firebase/repositories/quiz-repository';
 import {
   requireChoiceOwner,
   requireHostUser,
@@ -39,12 +56,12 @@ import type {
 
 export async function listQuizzes(): Promise<QuizListItem[]> {
   const { user } = await requireHostUser();
-  return quizRepository.listQuizzes(user.id);
+  return listQuizzesRepo(user.uid);
 }
 
 export async function getQuiz(quizId: string): Promise<AdminQuizDetail> {
   await requireQuizOwner(quizId);
-  const detail = await quizRepository.getQuizDetail(quizId);
+  const detail = await getQuizDetail(quizId);
   if (!detail) {
     throw new AppError('QUIZ_NOT_FOUND');
   }
@@ -53,22 +70,22 @@ export async function getQuiz(quizId: string): Promise<AdminQuizDetail> {
 
 export async function createQuiz(input: CreateQuizInput): Promise<AdminQuizDetail> {
   const { user } = await requireHostUser();
-  return quizRepository.createQuiz(user.id, input);
+  return createQuizRepo(user.uid, input);
 }
 
 export async function updateQuiz(quizId: string, input: UpdateQuizInput): Promise<AdminQuizDetail> {
   await requireQuizOwner(quizId);
-  return quizRepository.updateQuiz(quizId, input);
+  return updateQuizRepo(quizId, input);
 }
 
 export async function archiveQuiz(quizId: string): Promise<void> {
   await requireQuizOwner(quizId);
-  await quizRepository.archiveQuiz(quizId);
+  await archiveQuizRepo(quizId);
 }
 
 export async function duplicateQuiz(quizId: string): Promise<AdminQuizDetail> {
   const { user } = await requireQuizOwner(quizId);
-  return quizRepository.duplicateQuiz(quizId, user.id);
+  return duplicateQuizRepo(quizId, user.uid);
 }
 
 // ---------------------------------------------------------------------------
@@ -80,126 +97,78 @@ export async function createQuestion(
   input: CreateQuestionInput,
 ): Promise<AdminQuestion> {
   await requireQuizOwner(quizId);
-  return quizRepository.createQuestion(quizId, input);
+  return createQuestionRepo(quizId, input);
 }
 
 export async function updateQuestion(
   questionId: string,
   input: UpdateQuestionInput,
 ): Promise<AdminQuestion> {
-  await requireQuestionOwner(questionId);
-  return quizRepository.updateQuestion(questionId, input);
+  const { user, question } = await requireQuestionOwner(questionId);
+  return updateQuestionRepo(questionId, input, { quizId: question.quizId, ownerId: user.uid });
 }
 
 export async function deleteQuestion(questionId: string): Promise<void> {
-  await requireQuestionOwner(questionId);
-  await quizRepository.deleteQuestion(questionId);
+  const { user, question } = await requireQuestionOwner(questionId);
+  await deleteQuestionRepo(questionId, { quizId: question.quizId, ownerId: user.uid });
 }
 
 export async function reorderQuestions(quizId: string, questionIds: string[]): Promise<void> {
   await requireQuizOwner(quizId);
-  await quizRepository.reorderQuestions(quizId, questionIds);
+  await reorderQuestionsRepo(quizId, questionIds);
 }
 
 // ---------------------------------------------------------------------------
-// 選択肢
+// 選択肢（問題ドキュメントへ埋め込まれた配列を更新する）
 // ---------------------------------------------------------------------------
 
 export async function addChoice(questionId: string): Promise<AdminChoice> {
-  const { question } = await requireQuestionOwner(questionId);
-  if (question.question_type !== 'choice') {
+  const { user, question } = await requireQuestionOwner(questionId);
+  if (question.questionType !== 'choice') {
     throw new AppError('VALIDATION_FAILED', {
       details: [{ path: 'questionId', message: '数値問題には選択肢を追加できません' }],
     });
   }
-  return quizRepository.addChoice(questionId);
+  return addChoiceRepo(questionId, { quizId: question.quizId, ownerId: user.uid });
 }
 
 export async function deleteChoice(choiceId: string): Promise<void> {
-  await requireChoiceOwner(choiceId);
-  await quizRepository.deleteChoice(choiceId);
+  const { user, question } = await requireChoiceOwner(choiceId);
+  await deleteChoiceRepo(choiceId, { quizId: question.quizId, ownerId: user.uid });
 }
 
 export async function reorderChoices(questionId: string, choiceIds: string[]): Promise<void> {
-  await requireQuestionOwner(questionId);
-  await quizRepository.reorderChoices(questionId, choiceIds);
+  const { user, question } = await requireQuestionOwner(questionId);
+  await reorderChoicesRepo(questionId, choiceIds, { quizId: question.quizId, ownerId: user.uid });
 }
 
 // ---------------------------------------------------------------------------
 // 公開
 // ---------------------------------------------------------------------------
 
-function parseDbIssues(payload: unknown): PublishIssue[] {
-  if (!isRecord(payload)) {
-    return [];
-  }
-  const raw = payload.issues;
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-  return raw.flatMap((entry) => {
-    if (!isRecord(entry)) {
-      return [];
-    }
-    const code = typeof entry.code === 'string' ? entry.code : null;
-    const message = typeof entry.message === 'string' ? entry.message : null;
-    if (!code || !message) {
-      return [];
-    }
-    const position = entry.questionPosition ?? entry.question_position;
-    const questionId = entry.questionId ?? entry.question_id;
-    return [
-      {
-        questionPosition: typeof position === 'number' ? position : null,
-        questionId: typeof questionId === 'string' ? questionId : null,
-        code,
-        message,
-      },
-    ];
-  });
-}
-
 /**
- * DB 側の検証結果を取得する。
- * 取得できない場合（関数未配備・権限不足など）は空配列を返し、公開処理は続行する。
+ * 公開する。
+ *
+ * 検証に通らない場合は例外ではなく `{ published: false, issues }` を返し、
+ * 管理画面が問題ごとの不備を一覧表示できるようにする。
  */
-async function fetchDbPublishIssues(quizId: string): Promise<PublishIssue[]> {
-  try {
-    const admin = createSupabaseAdminClient();
-    const { data, error } = await admin.rpc('validate_quiz_for_publish', { p_quiz_id: quizId });
-    if (error) {
-      logger.warn('quiz.db_validation_unavailable', { quizId, errorMessage: error.message });
-      return [];
-    }
-    return parseDbIssues(data);
-  } catch (error) {
-    logger.warn('quiz.db_validation_failed', {
-      quizId,
-      errorMessage: error instanceof Error ? error.message : String(error),
-    });
-    return [];
-  }
-}
-
 export async function publishQuiz(quizId: string): Promise<PublishResponse> {
   await requireQuizOwner(quizId);
 
-  // URL 解決は不要（画像の有無だけを見る）。署名 URL の無駄な発行を避ける。
-  const detail = await quizRepository.getQuizDetail(quizId, { resolveUrls: false });
-  if (!detail) {
-    throw new AppError('QUIZ_NOT_FOUND');
+  const validation = await validateQuizForPublishById(quizId);
+  if (!validation.ok) {
+    return { published: false, issues: dedupeIssues(validation.issues) };
   }
 
-  const snapshot = buildQuizSnapshot(detail);
-  const appResult = validateQuizForPublish({
-    title: detail.title,
-    questions: snapshot.questions,
-  });
+  // リポジトリ側でも公開直前に再検証する（検証と更新の間の編集を取りこぼさない）。
+  await publishQuizRepo(quizId);
+  return { published: true, issues: [] };
+}
 
-  const dbIssues = await fetchDbPublishIssues(quizId);
-
+/** 同じ問題・同じ理由の指摘を 1 件へまとめる。 */
+function dedupeIssues(issues: readonly PublishIssue[]): PublishIssue[] {
   const seen = new Set<string>();
-  const issues = [...appResult.issues, ...dbIssues].filter((issue) => {
+  return issues.filter((issue) => {
     const key = `${issue.questionId ?? ''}:${issue.code}`;
     if (seen.has(key)) {
       return false;
@@ -207,13 +176,6 @@ export async function publishQuiz(quizId: string): Promise<PublishResponse> {
     seen.add(key);
     return true;
   });
-
-  if (issues.length > 0) {
-    return { published: false, issues };
-  }
-
-  await quizRepository.publishQuiz(quizId);
-  return { published: true, issues: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -227,18 +189,20 @@ export async function publishQuiz(quizId: string): Promise<PublishResponse> {
  * 認可は呼び出し側（room-service）が済ませていること。
  */
 export async function buildSnapshotForQuiz(quizId: string): Promise<QuizSnapshot> {
-  const detail = await quizRepository.getQuizDetail(quizId, { resolveUrls: false });
+  // URL 解決は不要（スナップショットへ期限付き URL を入れない）。
+  const detail = await getQuizDetail(quizId, { resolveUrls: false });
   if (!detail) {
     throw new AppError('QUIZ_NOT_FOUND');
   }
 
   const snapshot = buildQuizSnapshot(detail);
-  const validation = validateQuizForPublish({
-    title: detail.title,
-    questions: snapshot.questions,
-  });
+
+  // 読み直さず、いま固定しようとしている内容そのものを検証する。
+  const validation = validateQuizForPublish({ title: detail.title, questions: snapshot.questions });
   if (!validation.ok) {
-    throw new AppError('QUIZ_PUBLISH_VALIDATION_FAILED', { details: validation.issues });
+    throw new AppError('QUIZ_PUBLISH_VALIDATION_FAILED', {
+      details: dedupeIssues(validation.issues),
+    });
   }
 
   return snapshot;

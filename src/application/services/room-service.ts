@@ -6,9 +6,12 @@ import 'server-only';
  * 守っている原則:
  * - 参加者へ渡す問題は必ず toPublicQuestion() を通す。
  *   正解選択肢 ID・数値の正解条件・解説・正解画像は phase が answer_revealed 以降でのみ返す。
- * - 参加者 Snapshot に quiz_snapshot 全体・参加トークン・投影トークンを含めない。
- * - DB が唯一の正。Realtime は「変わった」ことだけを通知し、詳細は Snapshot で取得させる。
- * - 状態遷移は DB の RPC が state_version を検証する。アプリ側の事前チェックは早期返却のため。
+ * - 参加者 Snapshot に quizSnapshot 全体・参加トークン・投影トークンを含めない。
+ * - Firestore が唯一の正。参加者は `rooms/{roomId}/public/state` だけを購読し、
+ *   実データはこの Snapshot API から取り直す（公開状態の更新自体が通知になる）。
+ * - 状態遷移は infrastructure/firebase/transactions.ts が runTransaction の中で
+ *   stateVersion を検証する。ここでの事前チェックは早期返却のため。
+ * - 締切判定はサーバー時刻（Cloud Run の時計）。クライアント時刻は一切信用しない。
  */
 
 import { headers } from 'next/headers';
@@ -25,7 +28,6 @@ import {
   questionAtPosition,
   type QuizSnapshot,
 } from '@/domain/quiz/quiz-snapshot';
-import { publicEventTypeForPhase, type PublicEventPayload } from '@/domain/room/events';
 import { rankParticipants, topRanking, type RankedParticipant } from '@/domain/room/scoring';
 import type { ParticipantSnapshot, StaffSnapshot } from '@/domain/room/snapshot';
 import {
@@ -41,12 +43,30 @@ import { buildSnapshotForQuiz } from '@/application/services/quiz-service';
 import { toMyAnswerDto } from '@/application/services/answer-mapper';
 import { parseQuizSnapshot } from '@/application/services/quiz-snapshot-codec';
 import { resolveQuestionMedia } from '@/application/services/media-service';
-import { answerRepository } from '@/infrastructure/supabase/repositories/answer-repository';
 import {
+  getBreakdown as getAnswerBreakdown,
+  getLeaderboard as getParticipantScores,
+  getMyAnswer,
+} from '@/infrastructure/firebase/repositories/answer-repository';
+import {
+  consumePresentationLink,
   countActiveParticipants,
-  roomRepository,
-} from '@/infrastructure/supabase/repositories/room-repository';
-import { buildEnvelope, eventPublisher } from '@/infrastructure/supabase/realtime/publisher';
+  countAnswers,
+  countParticipants,
+  createPresentationLink,
+  createRoom as createRoomDoc,
+  getRoomMembers,
+  listRooms as listRoomsForOwner,
+  rotateJoinToken as rotateJoinTokenHash,
+  setJoinOpen as setJoinOpenDoc,
+  touchMemberPresence,
+  upsertStaffMember,
+} from '@/infrastructure/firebase/repositories/room-repository';
+import {
+  lockQuestionIfExpired as lockQuestionIfExpiredTx,
+  transitionRoom as transitionRoomTx,
+} from '@/infrastructure/firebase/transactions';
+import { toIso, toIsoOr } from '@/infrastructure/firebase/converters';
 import { logger } from '@/infrastructure/logging/logger';
 import {
   requireHostUser,
@@ -72,7 +92,10 @@ import type {
   RoomListItem,
   RotateJoinTokenResponse,
 } from '@/types/api';
-import type { RoomRow } from '@/types/database';
+import type { RoomDoc } from '@/types/firestore';
+
+/** 参加人数の既定上限。 */
+const DEFAULT_MAX_PARTICIPANTS = 200;
 
 // ---------------------------------------------------------------------------
 // 共通ヘルパー
@@ -80,7 +103,7 @@ import type { RoomRow } from '@/types/database';
 
 /**
  * サーバー時刻。クライアント時計の補正基準として返す。
- * 締切判定そのものは DB 側 (`now()`) が行う。
+ * 締切判定そのものもサーバー時刻（Cloud Run）だけで行う。
  */
 function serverNow(): string {
   return new Date().toISOString();
@@ -102,15 +125,15 @@ export function buildPresentationUrl(baseUrl: string, token: string): string {
   return `${baseUrl}/present/token/${token}`;
 }
 
-function snapshotOf(room: RoomRow): QuizSnapshot {
-  return parseQuizSnapshot(room.quiz_snapshot);
+function snapshotOf(room: RoomDoc): QuizSnapshot {
+  return parseQuizSnapshot(room.quizSnapshot);
 }
 
-function currentQuestionOf(room: RoomRow, snapshot: QuizSnapshot): Question | null {
-  if (!room.current_question_id) {
+function currentQuestionOf(room: RoomDoc, snapshot: QuizSnapshot): Question | null {
+  if (!room.currentQuestionId) {
     return null;
   }
-  return findSnapshotQuestion(snapshot, room.current_question_id) ?? null;
+  return findSnapshotQuestion(snapshot, room.currentQuestionId) ?? null;
 }
 
 function toPublicImage(image: Question['image']): PublicImage | null {
@@ -164,26 +187,6 @@ function collectImageUrls(question: Question, includeReveal: boolean): string[] 
   return urls;
 }
 
-async function publishPhaseEvent(room: RoomRow): Promise<void> {
-  const payload: PublicEventPayload = {
-    phase: room.phase,
-    questionId: room.current_question_id,
-    questionPosition: room.current_question_position,
-    answerDeadlineAt: room.answer_deadline_at,
-  };
-
-  await eventPublisher.publishPublicEvent(
-    room.id,
-    buildEnvelope({
-      type: publicEventTypeForPhase(room.phase),
-      roomId: room.id,
-      stateVersion: room.state_version,
-      payload,
-      serverTime: serverNow(),
-    }),
-  );
-}
-
 // ---------------------------------------------------------------------------
 // ルーム作成
 // ---------------------------------------------------------------------------
@@ -201,17 +204,18 @@ export async function createRoom(input: {
   const snapshot = await buildSnapshotForQuiz(input.quizId);
   const { token, tokenHash } = createJoinToken();
 
-  const room = await roomRepository.createRoom({
-    ownerId: user.id,
+  const room = await createRoomDoc({
+    ownerId: user.uid,
     quizId: input.quizId,
     joinTokenHash: tokenHash,
     quizSnapshot: snapshot,
-    maxParticipants: input.maxParticipants ?? 200,
+    maxParticipants: input.maxParticipants ?? DEFAULT_MAX_PARTICIPANTS,
   });
 
   const baseUrl = await currentBaseUrl();
 
-  logger.info('room.created', { roomId: room.id, quizId: input.quizId, userId: user.id });
+  // 平文の参加トークンはレスポンスでしか返らない。ログへは出さない。
+  logger.info('room.created', { roomId: room.id, quizId: input.quizId, userId: user.uid });
 
   return {
     roomId: room.id,
@@ -226,7 +230,7 @@ export async function createRoom(input: {
 // ---------------------------------------------------------------------------
 
 type SnapshotBaseParts = {
-  room: RoomRow;
+  room: RoomDoc;
   snapshot: QuizSnapshot;
   /** メディア URL 解決済みの現在問題（生のドメイン型。正解情報を含む）。 */
   resolvedQuestion: Question | null;
@@ -238,15 +242,18 @@ type SnapshotBaseParts = {
 /**
  * 現在問題と次問題のメディア URL を **1 回の署名要求**でまとめて解決する。
  * 署名 URL の発行はネットワーク往復を伴うため、Snapshot 生成ごとに重複させない。
+ *
+ * `includeRevealImage: false` を渡すと正解・解説画像の URL をそもそも作らない。
+ * 正解発表前の参加者向けにはこれを使う（防御を一段増やす）。
  */
 async function loadSnapshotParts(
-  room: RoomRow,
-  options: { includeNext?: boolean } = {},
+  room: RoomDoc,
+  options: { includeNext?: boolean; includeRevealImage?: boolean } = {},
 ): Promise<SnapshotBaseParts> {
   const snapshot = snapshotOf(room);
   const current = currentQuestionOf(room, snapshot);
   const next = options.includeNext
-    ? (questionAtPosition(snapshot, (room.current_question_position ?? 0) + 1) ?? null)
+    ? (questionAtPosition(snapshot, (room.currentQuestionPosition ?? 0) + 1) ?? null)
     : null;
 
   const targets: Question[] = [];
@@ -257,7 +264,12 @@ async function loadSnapshotParts(
     targets.push(next);
   }
 
-  const resolved = targets.length > 0 ? await resolveQuestionMedia(targets) : [];
+  const resolved =
+    targets.length > 0
+      ? await resolveQuestionMedia(targets, {
+          includeRevealImage: options.includeRevealImage !== false,
+        })
+      : [];
 
   let cursor = 0;
   const resolvedQuestion = current ? (resolved[cursor++] ?? current) : null;
@@ -293,27 +305,23 @@ export async function getStaffSnapshot(
       ? await requireRoomMember(roomId, ['host'])
       : await requireRoomMember(roomId, ['host', 'presenter']);
 
-  await roomRepository.touchMemberPresence(member.id);
+  await touchMemberPresence(roomId, member.id);
 
   // 投影の先読みのため次問題まで解決する（司会・投影のみ）。
   const parts = await loadSnapshotParts(room, { includeNext: true });
   const { snapshot, resolvedQuestion, publicQuestion } = parts;
   const phase: RoomPhase = room.phase;
 
-  const participantCount = await roomRepository.countParticipants(roomId);
-  const onlineCount = await countActiveParticipants(roomId);
-  const answeredCount = room.current_question_id
-    ? await roomRepository.countAnswers(roomId, room.current_question_id)
-    : 0;
+  // 司会・投影の画面では正確な件数が要るので、その場で集計クエリを使う。
+  const [participantCount, onlineCount, answeredCount] = await Promise.all([
+    countParticipants(roomId),
+    countActiveParticipants(roomId),
+    room.currentQuestionId ? countAnswers(roomId, room.currentQuestionId) : Promise.resolve(0),
+  ]);
 
   const breakdown =
     showsBreakdown(phase) && resolvedQuestion
-      ? await answerRepository.getBreakdown(
-          roomId,
-          resolvedQuestion.id,
-          resolvedQuestion,
-          participantCount,
-        )
+      ? await getAnswerBreakdown(roomId, resolvedQuestion.id, resolvedQuestion, participantCount)
       : null;
 
   const reveal =
@@ -321,25 +329,25 @@ export async function getStaffSnapshot(
 
   const leaderboard =
     phase === 'scoreboard' || phase === 'finished'
-      ? topRanking(await answerRepository.getLeaderboard(roomId), snapshot.settings.leaderboardSize)
+      ? topRanking(await getParticipantScores(roomId), snapshot.settings.leaderboardSize)
       : null;
 
   const base: StaffSnapshot = {
     roomId,
     quizTitle: snapshot.title,
     phase,
-    stateVersion: room.state_version,
+    stateVersion: room.stateVersion,
     serverTime: serverNow(),
     currentQuestion: publicQuestion,
-    currentQuestionPosition: room.current_question_position,
+    currentQuestionPosition: room.currentQuestionPosition,
     totalQuestions: snapshot.questions.length,
-    answerDeadlineAt: room.answer_deadline_at,
+    answerDeadlineAt: toIso(room.answerDeadlineAt),
     showLeaderboard: snapshot.settings.showLeaderboard,
     audience,
     participantCount,
     onlineCount,
     answeredCount,
-    joinOpen: room.join_open,
+    joinOpen: room.joinOpen,
     breakdown,
     reveal,
     leaderboard,
@@ -352,7 +360,7 @@ export async function getStaffSnapshot(
     return base;
   }
 
-  const members = await roomRepository.getRoomMembers(roomId, 'participant');
+  const members = await getRoomMembers(roomId, 'participant');
 
   return {
     ...base,
@@ -362,35 +370,42 @@ export async function getStaffSnapshot(
     participants: members.map((entry) => ({
       participantId: entry.id,
       nickname: entry.nickname ?? '参加者',
-      isActive: entry.is_active,
-      joinedAt: entry.joined_at,
+      isActive: entry.isActive,
+      joinedAt: toIsoOr(entry.joinedAt),
     })),
   };
 }
 
 export async function getParticipantSnapshot(roomId: string): Promise<ParticipantSnapshot> {
   const { member, room } = await requireParticipant(roomId);
-  await roomRepository.touchMemberPresence(member.id);
+  await touchMemberPresence(roomId, member.id);
 
-  const { snapshot, resolvedQuestion, publicQuestion } = await loadSnapshotParts(room);
   const phase: RoomPhase = room.phase;
-  const participantCount = await roomRepository.countParticipants(roomId);
+  const revealed = revealsAnswer(phase);
+
+  // 正解発表前は正解・解説画像の URL を作らない（参加者向けの経路に存在させない）。
+  const { snapshot, resolvedQuestion, publicQuestion } = await loadSnapshotParts(room, {
+    includeRevealImage: revealed,
+  });
+
+  // participantCount は参加登録トランザクションで加算した確定値。
+  // 参加者が一斉に Snapshot を取りにくるため、ここでは集計クエリを走らせない。
+  const participantCount = room.participantCount;
 
   // 問題を出してよいフェーズでなければ問題そのものを返さない。
   const currentQuestion = showsQuestion(phase) ? publicQuestion : null;
 
   const storedAnswer = resolvedQuestion
-    ? await answerRepository.getMyAnswer(roomId, resolvedQuestion.id, member.id)
+    ? await getMyAnswer(roomId, resolvedQuestion.id, member.id)
     : null;
 
-  const revealed = revealsAnswer(phase);
   const reveal = revealed && resolvedQuestion ? buildRevealInfo(resolvedQuestion) : null;
 
   let myResult: ParticipantSnapshot['myResult'] = null;
   let leaderboard: RankedParticipant[] | null = null;
 
   if (revealed) {
-    const scores = await answerRepository.getLeaderboard(roomId);
+    const scores = await getParticipantScores(roomId);
     const ranked = rankParticipants(scores);
     const mine = ranked.find((entry) => entry.participantId === member.id) ?? null;
 
@@ -413,12 +428,12 @@ export async function getParticipantSnapshot(roomId: string): Promise<Participan
     roomId,
     quizTitle: snapshot.title,
     phase,
-    stateVersion: room.state_version,
+    stateVersion: room.stateVersion,
     serverTime: serverNow(),
     currentQuestion,
-    currentQuestionPosition: room.current_question_position,
+    currentQuestionPosition: room.currentQuestionPosition,
     totalQuestions: snapshot.questions.length,
-    answerDeadlineAt: room.answer_deadline_at,
+    answerDeadlineAt: toIso(room.answerDeadlineAt),
     showLeaderboard: snapshot.settings.showLeaderboard,
     audience: 'participant',
     participant: {
@@ -430,7 +445,7 @@ export async function getParticipantSnapshot(roomId: string): Promise<Participan
     reveal,
     myResult,
     leaderboard,
-    joinOpen: room.join_open,
+    joinOpen: room.joinOpen,
   };
 }
 
@@ -442,11 +457,12 @@ export async function transitionRoom(
   roomId: string,
   input: RoomActionInput,
 ): Promise<RoomActionResponse> {
-  const { room } = await requireRoomMember(roomId, ['host']);
+  const { user, room } = await requireRoomMember(roomId, ['host']);
 
-  if (room.state_version !== input.expectedVersion) {
+  // 事前チェックは早期返却のため。確定判定はトランザクション側が同じ条件で行う。
+  if (room.stateVersion !== input.expectedVersion) {
     throw new AppError('STATE_VERSION_CONFLICT', {
-      details: { currentVersion: room.state_version },
+      details: { currentVersion: room.stateVersion },
     });
   }
 
@@ -470,69 +486,57 @@ export async function transitionRoom(
     questionId = input.questionId;
   }
 
-  const updated = await roomRepository.transitionRoom({
+  // rooms/{id} と rooms/{id}/public/state を同じトランザクションで更新する。
+  // 公開状態の更新そのものが参加者・投影への通知になる（別途の送信は不要）。
+  const updated = await transitionRoomTx({
     roomId,
     action: input.action,
     expectedVersion: input.expectedVersion,
     questionId,
+    actorUserId: user.uid,
   });
-
-  // DB 更新の確定後にだけ通知する。送信失敗は無視される。
-  await publishPhaseEvent(updated);
 
   logger.info('room.transitioned', {
     roomId,
     action: input.action,
-    stateVersion: updated.state_version,
+    stateVersion: updated.stateVersion,
     phase: updated.phase,
   });
 
   return {
     phase: updated.phase,
-    stateVersion: updated.state_version,
-    serverTime: serverNow(),
+    stateVersion: updated.stateVersion,
+    serverTime: updated.serverTime,
   };
 }
 
 /**
  * 締切時刻を過ぎていれば締切へ遷移する（冪等）。
- * 他の誰かが先に締め切っていたら null を返す。
+ * 他の誰かが先に締め切っていた場合や、まだ締切前の場合は null を返す。
+ *
+ * 判定に使うのは Firestore に保存された answerDeadlineAt とサーバー時刻だけ。
  */
 export async function lockQuestionIfExpired(roomId: string): Promise<RoomActionResponse | null> {
-  const { room } = await requireRoomMember(roomId, ['host', 'presenter']);
+  const { user, room } = await requireRoomMember(roomId, ['host', 'presenter']);
 
-  if (room.phase !== 'question_open' || !room.answer_deadline_at) {
+  // 投影画面のカウントダウンから何度も呼ばれるため、
+  // 明らかに締切前ならトランザクションを開始しない。
+  const deadlineMs = room.answerDeadlineAt?.toMillis() ?? null;
+  if (room.phase !== 'question_open' || deadlineMs === null || deadlineMs > Date.now()) {
     return null;
   }
 
-  const deadlineMs = Date.parse(room.answer_deadline_at);
-  if (Number.isNaN(deadlineMs) || deadlineMs > Date.now()) {
+  const result = await lockQuestionIfExpiredTx(roomId, user.uid);
+  if (!result.locked) {
+    // 他の経路で既に締め切られた。冪等な操作なのでエラーにしない。
     return null;
   }
 
-  try {
-    const updated = await roomRepository.transitionRoom({
-      roomId,
-      action: 'lock_question',
-      expectedVersion: room.state_version,
-      questionId: null,
-    });
-    await publishPhaseEvent(updated);
-    return {
-      phase: updated.phase,
-      stateVersion: updated.state_version,
-      serverTime: serverNow(),
-    };
-  } catch (error) {
-    if (
-      error instanceof AppError &&
-      (error.code === 'STATE_VERSION_CONFLICT' || error.code === 'INVALID_TRANSITION')
-    ) {
-      // 他の経路で既に締め切られた。冪等な操作なのでエラーにしない。
-      return null;
-    }
-    throw error;
-  }
+  return {
+    phase: result.phase,
+    stateVersion: result.stateVersion,
+    serverTime: result.serverTime,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -543,7 +547,7 @@ export async function rotateJoinToken(roomId: string): Promise<RotateJoinTokenRe
   await requireRoomOwner(roomId);
 
   const { token, tokenHash } = createJoinToken();
-  const { rotatedAt } = await roomRepository.rotateJoinToken(roomId, tokenHash);
+  const { rotatedAt } = await rotateJoinTokenHash(roomId, tokenHash);
   const baseUrl = await currentBaseUrl();
 
   logger.info('room.join_token_rotated', { roomId });
@@ -561,11 +565,11 @@ export async function issuePresentationLink(roomId: string): Promise<Presentatio
   const { token, tokenHash } = createPresentationToken();
   const expiresAt = new Date(Date.now() + presentationLinkTtlMinutes() * 60_000).toISOString();
 
-  await roomRepository.createPresentationLink({
+  await createPresentationLink({
     roomId,
     tokenHash,
     expiresAt,
-    createdBy: user.id,
+    createdBy: user.uid,
   });
 
   const baseUrl = await currentBaseUrl();
@@ -579,45 +583,36 @@ export async function issuePresentationLink(roomId: string): Promise<Presentatio
 
 /**
  * 投影用トークンを投影担当メンバーへ引き換える。
- * トークンそのものはログへ出さない（redactPath 済みのパスのみ出す）。
+ * トークンそのものはログへ出さない。
  */
 export async function exchangePresentationToken(token: string): Promise<{ roomId: string }> {
   if (!isPlausibleToken(token)) {
     throw new AppError('PRESENTATION_LINK_INVALID');
   }
 
-  const link = await roomRepository.consumePresentationLink(hashToken(token));
+  const link = await consumePresentationLink(hashToken(token));
   const user = await ensureAuthSession();
-  await roomRepository.upsertStaffMember(link.room_id, user.id, 'presenter');
+  await upsertStaffMember(link.roomId, user.uid, 'presenter');
 
-  logger.info('room.presentation_token_exchanged', { roomId: link.room_id });
+  logger.info('room.presentation_token_exchanged', { roomId: link.roomId });
 
-  return { roomId: link.room_id };
+  return { roomId: link.roomId };
 }
 
+/**
+ * 参加受付の開閉（司会のみ）。
+ * `rooms/{id}` と `rooms/{id}/public/state` を同時に更新するため、
+ * 参加者側はこの書き込みだけで受付状態の変化に気づける。
+ */
 export async function setJoinOpen(roomId: string, open: boolean): Promise<void> {
-  const { room } = await requireRoomMember(roomId, ['host']);
-  await roomRepository.setJoinOpen(roomId, open);
+  await requireRoomMember(roomId, ['host']);
+  await setJoinOpenDoc(roomId, open);
 
-  await eventPublisher.publishPublicEvent(
-    roomId,
-    buildEnvelope({
-      type: 'room.lobby_updated',
-      roomId,
-      stateVersion: room.state_version,
-      payload: {
-        phase: room.phase,
-        questionId: room.current_question_id,
-        questionPosition: room.current_question_position,
-        answerDeadlineAt: room.answer_deadline_at,
-      } satisfies PublicEventPayload,
-      serverTime: serverNow(),
-    }),
-  );
+  logger.info('room.join_open_changed', { roomId, joinOpen: open });
 }
 
 /** 司会向けのルーム一覧。 */
 export async function listRooms(): Promise<RoomListItem[]> {
   const { user } = await requireHostUser();
-  return roomRepository.listRooms(user.id);
+  return listRoomsForOwner(user.uid);
 }

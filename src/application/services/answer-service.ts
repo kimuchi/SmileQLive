@@ -4,9 +4,13 @@ import 'server-only';
  * 回答送信・結果参照のユースケース。
  *
  * 原則:
- * - 正誤判定は DB (numeric) が唯一の正。ここでは判定しない。
- * - 締切判定もサーバー / DB 時刻。クライアントが送る時刻は一切信用しない。
- * - 数値は normalizeNumberAnswer() で正規化し、raw と normalizedText の両方を DB へ渡す。
+ * - 正誤判定・締切判定・二重回答の防止はすべて
+ *   `infrastructure/firebase/transactions.ts` の submitAnswer() が担う。
+ *   サービス層では判定せず、読み書きを個別に並べない。
+ * - 締切はサーバー時刻（Cloud Run の時計）だけで判定する。
+ *   クライアントが送る時刻は一切信用しない。
+ * - 数値は normalizeNumberAnswer() で正規化し、raw と正規化文字列の両方を渡す。
+ *   **number 型へは決して変換しない**（Firestore の number は倍精度浮動小数点のため）。
  * - 回答レスポンスに正誤を含めない（正解発表前に漏らさない）。
  */
 
@@ -17,15 +21,19 @@ import { rankParticipants, topRanking, type RankedParticipant } from '@/domain/r
 import { acceptsAnswers, revealsAnswer, showsBreakdown } from '@/domain/room/state-machine';
 import { parseQuizSnapshot } from '@/application/services/quiz-snapshot-codec';
 import { toMyAnswerDto } from '@/application/services/answer-mapper';
-import { answerRepository } from '@/infrastructure/supabase/repositories/answer-repository';
-import { roomRepository } from '@/infrastructure/supabase/repositories/room-repository';
-import { buildEnvelope, eventPublisher } from '@/infrastructure/supabase/realtime/publisher';
+import {
+  getBreakdown as getAnswerBreakdown,
+  getLeaderboard as getParticipantScores,
+  getMyAnswer,
+  getMyTotals,
+} from '@/infrastructure/firebase/repositories/answer-repository';
+import { countParticipants } from '@/infrastructure/firebase/repositories/room-repository';
+import { submitAnswer as submitAnswerTx } from '@/infrastructure/firebase/transactions';
 import { logger } from '@/infrastructure/logging/logger';
 import { requireParticipant, requireRoomMember } from '@/lib/auth/session';
 import { AppError, type AppErrorCode } from '@/lib/errors/app-error';
 import { checkRateLimit } from '@/lib/http/rate-limit';
 import type { SubmitAnswerRequest } from '@/lib/validation/schemas';
-import type { AnswersProgressPayload } from '@/domain/room/events';
 import type { MyResultResponse, SubmitAnswerResponse } from '@/types/api';
 
 /** 正規化エラーコードをアプリ共通エラーへ写す。 */
@@ -40,35 +48,35 @@ export async function submitAnswer(
   roomId: string,
   input: SubmitAnswerRequest,
 ): Promise<SubmitAnswerResponse> {
-  const { member, room } = await requireParticipant(roomId);
+  const { user, member, room } = await requireParticipant(roomId);
 
-  // 参加者 1 人あたりの連打を抑える。重複防止そのものは DB の UNIQUE 制約が担保する。
+  // 参加者 1 人あたりの連打を抑える。
+  // 二重回答の防止そのものは決定的ドキュメント ID + create() が担保する。
   checkRateLimit(`answer:${member.id}`, { limit: 20, windowMs: 10_000 });
 
+  // 以下はいずれも早期エラー用。最終判定はトランザクションが同じ条件で行う。
   if (!acceptsAnswers(room.phase)) {
     throw new AppError('ANSWER_NOT_OPEN');
   }
-  if (!room.current_question_id || room.current_question_id !== input.questionId) {
+  if (!room.currentQuestionId || room.currentQuestionId !== input.questionId) {
     throw new AppError('ANSWER_QUESTION_MISMATCH');
   }
 
-  const snapshot = parseQuizSnapshot(room.quiz_snapshot);
+  const snapshot = parseQuizSnapshot(room.quizSnapshot);
   const question = findSnapshotQuestion(snapshot, input.questionId);
   if (!question) {
     throw new AppError('QUESTION_NOT_FOUND');
   }
 
-  // 早期エラー用の締切チェック。最終判定は DB の submit_answer が行う。
-  if (room.answer_deadline_at) {
-    const deadlineMs = Date.parse(room.answer_deadline_at);
-    if (!Number.isNaN(deadlineMs) && deadlineMs <= Date.now()) {
-      throw new AppError('ANSWER_DEADLINE_PASSED');
-    }
+  // 締切判定はサーバー時刻のみ。クライアントが送る時刻は受け取らない。
+  const deadlineMs = room.answerDeadlineAt?.toMillis() ?? null;
+  if (deadlineMs !== null && deadlineMs <= Date.now()) {
+    throw new AppError('ANSWER_DEADLINE_PASSED');
   }
 
   let choiceId: string | null = null;
   let numberRaw: string | null = null;
-  let numberValue: string | null = null;
+  let numberNormalized: string | null = null;
 
   if (question.type === 'choice') {
     if (input.choiceId === undefined) {
@@ -86,7 +94,8 @@ export async function submitAnswer(
     try {
       const normalized = normalizeNumberAnswer(input.numberValue);
       numberRaw = normalized.raw;
-      numberValue = normalized.normalizedText;
+      // 正規化後も文字列のまま扱う。判定は decimal.js だけが行う。
+      numberNormalized = normalized.normalizedText;
     } catch (error) {
       if (error instanceof NumberNormalizationError) {
         throw new AppError(NUMBER_ERROR_MAP[error.code] ?? 'INVALID_NUMBER_FORMAT');
@@ -95,44 +104,25 @@ export async function submitAnswer(
     }
   }
 
-  const stored = await answerRepository.submitAnswer({
-    roomId,
+  // 締切・重複・正誤・得点加算・進捗更新はトランザクション側で確定する。
+  const stored = await submitAnswerTx(roomId, user.uid, {
     questionId: input.questionId,
-    participantId: member.id,
     choiceId,
     numberRaw,
-    numberValue,
+    numberNormalized,
   });
-
-  const answeredCount = await roomRepository.countAnswers(roomId, input.questionId);
-  const participantCount = await roomRepository.countParticipants(roomId);
-
-  // 司会・投影の進捗表示用。参加者画面では使わない。DB 確定後にだけ送る。
-  await eventPublisher.publishStaffEvent(
-    roomId,
-    buildEnvelope({
-      type: 'answers.progress',
-      roomId,
-      stateVersion: room.state_version,
-      payload: {
-        questionId: input.questionId,
-        answeredCount,
-        participantCount,
-        answerRate: participantCount > 0 ? answeredCount / participantCount : 0,
-      } satisfies AnswersProgressPayload,
-    }),
-  );
 
   logger.info('answer.submitted', {
     roomId,
     questionId: input.questionId,
-    // 正誤・入力値はログへ出さない。
+    // 正誤・入力値・参加トークンはログへ出さない。
   });
 
   return {
     accepted: true,
     answeredAt: stored.answeredAt,
-    answeredCount,
+    // 進捗（回答数）は司会・投影向け。参加者画面では表示しない。
+    answeredCount: stored.answeredCount,
   };
 }
 
@@ -140,23 +130,21 @@ export async function submitAnswer(
 export async function getMyResult(roomId: string): Promise<MyResultResponse> {
   const { member, room } = await requireParticipant(roomId);
 
-  const participantCount = await roomRepository.countParticipants(roomId);
-  const questionId = room.current_question_id;
+  // 参加登録トランザクションで加算した確定値。集計クエリを走らせない。
+  const participantCount = room.participantCount;
+  const questionId = room.currentQuestionId;
 
-  const stored = questionId
-    ? await answerRepository.getMyAnswer(roomId, questionId, member.id)
-    : null;
+  const stored = questionId ? await getMyAnswer(roomId, questionId, member.id) : null;
+  const totals = await getMyTotals(roomId, member.id);
 
-  const totals = await answerRepository.getMyTotals(roomId, member.id);
+  const revealed = revealsAnswer(room.phase);
 
   let rank: number | null = null;
-  if (revealsAnswer(room.phase)) {
-    const scores = await answerRepository.getLeaderboard(roomId);
+  if (revealed) {
+    const scores = await getParticipantScores(roomId);
     rank =
       rankParticipants(scores).find((entry) => entry.participantId === member.id)?.rank ?? null;
   }
-
-  const revealed = revealsAnswer(room.phase);
 
   return {
     questionId,
@@ -181,14 +169,14 @@ export async function getBreakdown(
     return null;
   }
 
-  const snapshot = parseQuizSnapshot(room.quiz_snapshot);
+  const snapshot = parseQuizSnapshot(room.quizSnapshot);
   const question = findSnapshotQuestion(snapshot, questionId);
   if (!question) {
     throw new AppError('QUESTION_NOT_FOUND');
   }
 
-  const participantCount = await roomRepository.countParticipants(roomId);
-  return answerRepository.getBreakdown(roomId, questionId, question, participantCount);
+  const participantCount = await countParticipants(roomId);
+  return getAnswerBreakdown(roomId, questionId, question, participantCount);
 }
 
 /**
@@ -202,11 +190,11 @@ export async function getLeaderboard(roomId: string, limit?: number): Promise<Ra
     return [];
   }
 
-  const snapshot = parseQuizSnapshot(room.quiz_snapshot);
+  const snapshot = parseQuizSnapshot(room.quizSnapshot);
   if (member.role === 'participant' && !snapshot.settings.showLeaderboard) {
     return [];
   }
 
-  const scores = await answerRepository.getLeaderboard(roomId);
+  const scores = await getParticipantScores(roomId);
   return topRanking(scores, limit ?? snapshot.settings.leaderboardSize);
 }

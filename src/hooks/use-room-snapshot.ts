@@ -5,16 +5,19 @@ import type { RoomEventEnvelope } from '@/domain/room/events';
 import type { ServerClock } from '@/domain/room/timer';
 import { apiGet } from '@/lib/client/api-client';
 import { toUserErrorMessage } from '@/lib/client/error-text';
+import { isProgressEventType } from '@/lib/client/room-event';
 import type { RoomChannelStatus } from '@/lib/client/realtime-status';
 import { useRoomChannel } from '@/hooks/use-room-channel';
 import { useServerClock } from '@/hooks/use-server-clock';
 
 /**
- * Snapshot + Realtime を組み合わせた画面状態の取得。
+ * Snapshot + リアルタイム購読を組み合わせた画面状態の取得。
  *
  * 原則:
- * - DB（Snapshot API）が唯一の正。Realtime は「取り直せ」という合図にすぎない。
- * - Broadcast の payload から状態を組み立てない。
+ * - DB（Snapshot API）が唯一の正。**Firestore を購読していても、実データは必ず
+ *   Snapshot API から取る。** 購読は「取り直せ」という合図にすぎない。
+ * - 購読で受け取った payload から状態を組み立てない
+ *   （公開ドキュメントには正解・問題文・選択肢が入っていない）。
  * - stateVersion の飛びを検知したら必ず Snapshot を取り直す。
  * - 再接続時・タブ復帰時も取り直す。
  * - 300 台規模で同時に叩くため、連続実行は抑制し、進行中なら 1 回だけキューへ積む。
@@ -42,8 +45,16 @@ export type UseRoomSnapshotResult<T> = {
   refresh: () => Promise<void>;
 };
 
-/** Realtime が切れている間だけ動かす保険のポーリング間隔。 */
+/** 購読が切れている間だけ動かす保険のポーリング間隔。 */
 const FALLBACK_POLL_INTERVAL_MS = 15_000;
+
+/**
+ * 進捗イベント（回答数の増加など）で取り直す最短間隔。
+ *
+ * 進捗は stateVersion が変わらないまま何度も届く。
+ * 200 人が一斉に回答してもサーバーを叩きすぎないよう、ここで間引く。
+ */
+const PROGRESS_REFRESH_MIN_INTERVAL_MS = 1000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -177,11 +188,46 @@ export function useRoomSnapshot<T extends RoomSnapshotBase>(
     void refreshRef.current();
   }, [enabled, roomId, endpoint, sourceKey]);
 
+  // 進捗イベントの間引き用。
+  const progressRefreshedAtRef = useRef(0);
+  const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (progressTimerRef.current !== null) {
+        clearTimeout(progressTimerRef.current);
+        progressTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const handleEvent = useCallback(
     (envelope: RoomEventEnvelope) => {
       if (envelope.roomId !== roomId) {
         return;
       }
+
+      // 回答数・内訳の進捗は stateVersion が変わらないまま届くため、
+      // 版番号では新旧を判別できない。間引いたうえで Snapshot を取り直す
+      // （司会・投影だけが購読するイベントで、参加者へは届かない）。
+      if (isProgressEventType(envelope.type)) {
+        const elapsed = Date.now() - progressRefreshedAtRef.current;
+        if (elapsed >= PROGRESS_REFRESH_MIN_INTERVAL_MS) {
+          progressRefreshedAtRef.current = Date.now();
+          void refreshRef.current();
+          return;
+        }
+        if (progressTimerRef.current !== null) {
+          return;
+        }
+        progressTimerRef.current = setTimeout(() => {
+          progressTimerRef.current = null;
+          progressRefreshedAtRef.current = Date.now();
+          void refreshRef.current();
+        }, PROGRESS_REFRESH_MIN_INTERVAL_MS - elapsed);
+        return;
+      }
+
       const tracked = stateVersionRef.current;
       // 反映済みの版番号は「同じルーム・同じ取得先」のときだけ意味を持つ。
       const known = tracked.key === sourceKey ? tracked.value : null;

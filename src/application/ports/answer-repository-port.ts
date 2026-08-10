@@ -1,38 +1,43 @@
 /**
- * 回答・集計の永続化ポート。
+ * 回答の参照・集計ポート（Firestore 版）。
  *
- * - 正誤判定は DB (numeric) が行い、その結果 (answers.is_correct) を読むだけ。
- *   アプリ側で JavaScript の number により再判定しない。
- * - 数値は文字列のまま扱う。
+ * 原則:
+ * - 回答の登録・正誤判定・締切判定は
+ *   `src/infrastructure/firebase/transactions.ts` の `submitAnswer()` が行う。
+ *   このポートは保存済みの `isCorrect` / `pointsAwarded` を読むだけで、再判定しない。
+ * - 数値は**文字列のまま**扱う（Firestore の number は倍精度浮動小数点のため）。
+ * - 集計を返してよいフェーズかどうかの判断はサービス層の責務。
+ *
+ * 実装: `src/infrastructure/firebase/repositories/answer-repository.ts`
  */
 
 import type { AnswerBreakdown } from '@/domain/answer/answer-dto';
+import type { QuestionType, Question } from '@/domain/quiz/question';
 import type { ParticipantScore } from '@/domain/room/scoring';
-import type { AnswerRow } from '@/types/database';
-import type { Question } from '@/domain/quiz/question';
 
+/** トランザクション層へ渡す回答内容。数値は正規化済み文字列で渡す。 */
 export type SubmitAnswerDbInput = {
-  roomId: string;
   questionId: string;
-  /** 読み直し用。認可済みの room_members.id。 */
-  participantId: string;
+  /** 選択式のときだけ使う。 */
   choiceId?: string | null;
-  /** 参加者が入力した生文字列。 */
+  /** 参加者の生入力（数値式）。本人の結果画面にだけ表示する。 */
   numberRaw?: string | null;
-  /** 正規化済み文字列。DB の numeric へ渡す。 */
-  numberValue?: string | null;
+  /** 正規化済みの数値（文字列）。判定・集計はこちらを使う。 */
+  numberNormalized?: string | null;
 };
 
+/** 保存済みの回答。数値は文字列のまま保持する。 */
 export type StoredAnswer = {
   id: string;
   roomId: string;
   questionId: string;
   participantId: string;
-  answerType: 'choice' | 'number';
+  answerType: QuestionType;
   choiceId: string | null;
   numberRaw: string | null;
-  /** numeric を文字列のまま保持する。 */
+  /** 正規化済みの数値（文字列）。集計はこちらを使う。 */
   numberValue: string | null;
+  /** ISO8601。 */
   answeredAt: string;
   elapsedMs: number;
   isCorrect: boolean;
@@ -46,8 +51,6 @@ export type MyTotals = {
 };
 
 export type AnswerRepository = {
-  /** DB の submit_answer RPC を呼ぶ。締切・重複・正誤はすべて DB 側で確定する。 */
-  submitAnswer(input: SubmitAnswerDbInput): Promise<StoredAnswer>;
   getMyAnswer(
     roomId: string,
     questionId: string,
@@ -59,12 +62,7 @@ export type AnswerRepository = {
     question: Question,
     totalParticipants: number,
   ): Promise<AnswerBreakdown>;
+  /** ランキングは members の集計値（回答と同じトランザクションで加算済み）を読む。 */
   getLeaderboard(roomId: string): Promise<ParticipantScore[]>;
   getMyTotals(roomId: string, participantId: string): Promise<MyTotals>;
 };
-
-/** AnswerRow から DTO へ写す（numeric は文字列のまま）。 */
-export type AnswerRowLike = Pick<
-  AnswerRow,
-  'id' | 'room_id' | 'question_id' | 'participant_id' | 'answer_type'
->;

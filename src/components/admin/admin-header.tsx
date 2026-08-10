@@ -4,8 +4,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useState } from 'react';
 import { Button } from '@/components/shared/Button';
-import { useIsConfigured, useRuntimeConfig } from '@/components/shared/runtime-config-provider';
-import { getSupabaseBrowserClient } from '@/infrastructure/supabase/browser';
+import { useIsConfigured } from '@/components/shared/runtime-config-provider';
+import { signOutEverywhere } from '@/infrastructure/firebase/client';
 import { cn } from '@/lib/client/cn';
 
 /**
@@ -30,7 +30,6 @@ export type AdminHeaderProps = {
 
 export function AdminHeader({ current = 'none', actions }: AdminHeaderProps) {
   const router = useRouter();
-  const config = useRuntimeConfig();
   const configured = useIsConfigured();
   const [signingOut, setSigningOut] = useState(false);
 
@@ -40,8 +39,8 @@ export function AdminHeader({ current = 'none', actions }: AdminHeaderProps) {
     }
     setSigningOut(true);
     try {
-      const client = getSupabaseBrowserClient(config.supabaseUrl, config.supabasePublishableKey);
-      await client.auth.signOut();
+      // セッションクッキーの破棄（サーバー）とブラウザ側サインアウトの両方を行う。
+      await signOutEverywhere();
     } catch {
       // 失敗してもログイン画面へは戻す（サーバー側の Cookie は middleware が判定する）。
     } finally {
@@ -49,7 +48,7 @@ export function AdminHeader({ current = 'none', actions }: AdminHeaderProps) {
       router.replace('/admin/login');
       router.refresh();
     }
-  }, [config.supabasePublishableKey, config.supabaseUrl, configured, router]);
+  }, [configured, router]);
 
   return (
     <header className="border-b border-slate-200 bg-white">

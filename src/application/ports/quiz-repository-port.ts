@@ -1,10 +1,13 @@
 /**
  * クイズ編集の永続化ポート。
  *
- * サービス層はこの型にだけ依存する。実装は
- * `src/infrastructure/supabase/repositories/quiz-repository.ts`。
+ * 実装は `src/infrastructure/firebase/repositories/quiz-repository.ts`。
  *
- * numeric 由来の値（正解値・許容誤差・範囲）は**必ず文字列**でやり取りする。
+ * 数値（正解値・許容誤差・範囲）は**必ず文字列**でやり取りする。
+ * Firestore の number は倍精度浮動小数点なので、number へ入れた時点で桁落ちする。
+ *
+ * ※ 実装側の一部の関数は「問題の所在を絞り込むヒント」を任意の追加引数で受け取る。
+ *   ヒントは読み取り量を減らすためのもので、この契約には含めない。
  */
 
 import type { AdminChoice, AdminQuestion, AdminQuizDetail, QuizListItem } from '@/types/api';

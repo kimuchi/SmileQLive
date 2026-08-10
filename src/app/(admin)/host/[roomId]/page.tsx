@@ -48,7 +48,7 @@ export default async function HostRoomPage({ params }: { params: Promise<{ roomI
 
   try {
     const { room } = await requireRoomOwner(parsed.data);
-    const snapshot = parseQuizSnapshot(room.quiz_snapshot);
+    const snapshot = parseQuizSnapshot(room.quizSnapshot);
     quizTitle = snapshot.title;
     outline = [...snapshot.questions]
       .sort((a, b) => a.position - b.position)

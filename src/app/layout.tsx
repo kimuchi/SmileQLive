@@ -1,6 +1,14 @@
 import type { Metadata, Viewport } from 'next';
 import { RuntimeConfigProvider } from '@/components/shared/runtime-config-provider';
-import { appBaseUrl } from '@/lib/env/server-env';
+import {
+  allowedAuthDomains,
+  appBaseUrl,
+  firebaseApiKey,
+  firebaseAppId,
+  firebaseAuthDomain,
+  firebaseProjectId,
+  firebaseStorageBucket,
+} from '@/lib/env/server-env';
 import './globals.css';
 
 /**
@@ -22,13 +30,38 @@ export const viewport: Viewport = {
   themeColor: '#122457',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const runtimeConfig = {
-    supabaseUrl: process.env.SUPABASE_URL ?? '',
-    supabasePublishableKey: process.env.SUPABASE_PUBLISHABLE_KEY ?? '',
+/**
+ * ブラウザへ渡す実行時設定を組み立てる。
+ *
+ * - **秘密情報を含めない。** Firebase の apiKey は公開前提の識別子であり秘密鍵ではない
+ *   （docs/FIRESTORE_MODEL.md §6）。サーバー用の秘密情報は Firebase 版には存在しない。
+ * - 設定が不足していても描画自体は止めず、空文字で渡す。
+ *   画面側が `useIsConfigured()` で構成エラーを明示する
+ *   （起動直後の最初の要求で曖昧に失敗させない、という仕様 §39.3 の要件）。
+ */
+function buildRuntimeConfig() {
+  const read = (getter: () => string): string => {
+    try {
+      return getter();
+    } catch {
+      return '';
+    }
+  };
+
+  return {
+    firebaseApiKey: read(firebaseApiKey),
+    firebaseAuthDomain: read(firebaseAuthDomain),
+    firebaseProjectId: read(firebaseProjectId),
+    firebaseStorageBucket: read(firebaseStorageBucket),
+    firebaseAppId: firebaseAppId(),
     appBaseUrl: appBaseUrl(),
+    allowedAuthDomains: allowedAuthDomains(),
     turnstileSiteKey: process.env.TURNSTILE_SITE_KEY ?? null,
   };
+}
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const runtimeConfig = buildRuntimeConfig();
 
   return (
     <html lang="ja">

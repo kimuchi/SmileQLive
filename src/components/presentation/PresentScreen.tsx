@@ -21,6 +21,7 @@ import { useStagePreload } from '@/components/presentation/use-stage-preload';
 import { Button } from '@/components/shared/Button';
 import { FullScreenMessage } from '@/components/shared/FullScreenMessage';
 import type { StaffSnapshot } from '@/domain/room/snapshot';
+import { useAnonymousSessionReady } from '@/hooks/use-anonymous-session';
 import { useCountdown } from '@/hooks/use-countdown';
 import { useRoomSnapshot } from '@/hooks/use-room-snapshot';
 
@@ -34,12 +35,18 @@ import { useRoomSnapshot } from '@/hooks/use-room-snapshot';
  *   発表前に受け取って隠しておく実装にしない。
  * - 効果音は操作者のクリック（投影開始）より前には一切鳴らさない。
  * - 残り 0 秒になったら冪等な締切 API を 1 回だけ呼ぶ。締切の判定はサーバーが行う。
+ * - 投影担当にログインは求めない。匿名認証（＝ /present/token/... で presenter として
+ *   登録済みの端末）が整うまで取得も購読も始めない。
  */
 export function PresentScreen({ roomId }: { roomId: string }) {
+  // 再読込でセッションクッキーが切れていても、同じ匿名ユーザーで張り直せるようにする。
+  const sessionReady = useAnonymousSessionReady();
+
   const { snapshot, error, status, clock, refresh } = useRoomSnapshot<StaffSnapshot>({
     roomId,
     endpoint: `/api/rooms/${roomId}/staff-snapshot`,
     audience: 'staff',
+    enabled: sessionReady,
   });
 
   const audio = useProjectorAudio(roomId);

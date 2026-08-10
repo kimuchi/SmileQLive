@@ -9,7 +9,7 @@ import { Card } from '@/components/shared/Card';
 import { ErrorMessage } from '@/components/shared/ErrorMessage';
 import { FullScreenMessage } from '@/components/shared/FullScreenMessage';
 import { TextInput } from '@/components/shared/TextInput';
-import { useEnsureAnonymousSession } from '@/components/participant/use-anonymous-session';
+import { useEnsureAnonymousSession } from '@/hooks/use-anonymous-session';
 import { ApiClientError, apiGet, apiPost } from '@/lib/client/api-client';
 import { formatCount } from '@/lib/format';
 import type { JoinRegisterResponse, JoinResolveResponse } from '@/types/api';
@@ -102,7 +102,9 @@ export function JoinScreen({ joinToken }: { joinToken: string }) {
     let cancelled = false;
 
     void (async () => {
-      // 参加者にログインは求めない。Realtime 購読と RLS のための匿名セッションだけ用意する。
+      // 参加者にログインは求めない。
+      // Firestore の購読（Security Rules）とサーバー API の認可のため、
+      // 匿名認証 → セッションクッキーだけを用意する。
       await ensureSessionRef.current();
       if (cancelled) {
         return;

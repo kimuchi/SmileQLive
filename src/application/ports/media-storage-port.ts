@@ -1,8 +1,12 @@
 /**
  * 画像保存・配信 URL 解決のポート。
  *
- * DB とスナップショットには `storage://<bucket>/<path>` の参照だけを保存し、
- * 期限付き URL は配信直前に解決する。
+ * Firestore とクイズスナップショットには `storage://<bucket>/<path>` の参照だけを保存し、
+ * 期限付き（署名付き）URL は配信直前に解決する。保存すると期限切れの URL が残るため。
+ *
+ * 実装:
+ *   `src/infrastructure/firebase/storage/media-storage.ts`（Cloud Storage）
+ *   `src/infrastructure/firebase/repositories/media-repository.ts`（mediaAssets）
  */
 
 export type UploadProcessedImageInput = {
@@ -20,7 +24,7 @@ export type MediaStorage = {
   resolveMediaUrls(refs: (string | null)[]): Promise<(string | null)[]>;
 };
 
-/** media_assets テーブルのポート。 */
+/** `mediaAssets/{assetId}` のポート。 */
 export type MediaAssetRecord = {
   id: string;
   ownerId: string;

@@ -38,7 +38,7 @@ export const POST = defineRoute<{ roomId: string }>(
     const { room } = await requireRoomMember(roomId, ['host', 'presenter']);
     return jsonOk<RoomActionResponse>({
       phase: room.phase,
-      stateVersion: room.state_version,
+      stateVersion: room.stateVersion,
       serverTime: new Date().toISOString(),
     });
   },

@@ -9,7 +9,10 @@ import 'server-only';
  *   3. 8MB 超は拒否
  *   4. sharp で rotate()（EXIF 方向を反映）→ メタデータ除去 → usage に応じた長辺へ縮小
  *   5. WebP quality 82 で再エンコード（アニメーションは受け付けない）
- *   6. Storage へ保存 → media_assets へ登録
+ *   6. Cloud Storage へ保存 → mediaAssets へ登録
+ *
+ * 保存するのは `storage://<bucket>/<objectPath>` 参照だけで、期限付き URL は保存しない。
+ * 配信 URL は resolveQuestionMedia() が**1 回の呼び出しでまとめて**解決する。
  */
 
 import sharp from 'sharp';
@@ -32,15 +35,15 @@ import {
   deleteAsset as deleteAssetRow,
   getAsset,
   insertAsset,
-} from '@/infrastructure/supabase/repositories/media-repository';
+} from '@/infrastructure/firebase/repositories/media-repository';
 import {
   buildStorageRef,
   deleteObject,
+  mediaBucketName,
   resolveMediaUrl,
   resolveMediaUrls,
   uploadProcessedImage,
-} from '@/infrastructure/supabase/storage/media-storage';
-import { quizMediaBucket } from '@/lib/env/server-env';
+} from '@/infrastructure/firebase/storage/media-storage';
 import type { MediaUploadResponse } from '@/types/api';
 
 export type UploadImageInput = {
@@ -117,7 +120,8 @@ export async function uploadImage(input: UploadImageInput): Promise<MediaUploadR
   }
 
   const assetId = crypto.randomUUID();
-  const bucket = quizMediaBucket();
+  // 実際に保存するバケット名をそのまま記録する（storage:// 参照と食い違わせない）。
+  const bucket = mediaBucketName();
 
   const { objectPath } = await uploadProcessedImage({
     ownerId: user.id,
@@ -182,8 +186,15 @@ export async function deleteAsset(assetId: string): Promise<void> {
 // スナップショット内の画像参照を配信 URL へ解決する
 // ---------------------------------------------------------------------------
 
-function collectRefs(question: Question): (string | null)[] {
-  const refs: (string | null)[] = [question.image?.url ?? null, question.revealImage?.url ?? null];
+/**
+ * 解決対象の参照を問題ごとに並べる。
+ * `includeReveal` が false でも**枠だけは残す**（後段の添字計算を単純に保つため）。
+ */
+function collectRefs(question: Question, includeReveal: boolean): (string | null)[] {
+  const refs: (string | null)[] = [
+    question.image?.url ?? null,
+    includeReveal ? (question.revealImage?.url ?? null) : null,
+  ];
   if (question.type === 'choice') {
     for (const choice of question.choices) {
       refs.push(choice.image?.url ?? null);
@@ -199,16 +210,35 @@ function applyUrl(ref: MediaRef | null, url: string | null): MediaRef | null {
   return { ...ref, url: url ?? '' };
 }
 
+export type ResolveQuestionMediaOptions = {
+  /**
+   * 正解・解説画像も解決するか（既定は true）。
+   *
+   * **正解発表前の参加者向けには false を渡すこと。**
+   * false のときは配信 URL を作らず revealImage を null にするので、
+   * 参加者向けの処理経路には使える URL がそもそも存在しなくなる。
+   */
+  includeRevealImage?: boolean;
+};
+
 /**
  * スナップショット上の `storage://` 参照を配信 URL へ差し替えた問題を返す。
  * 参加者へ返す直前にこの関数を通し、その後で toPublicQuestion() を適用する。
+ *
+ * 署名付き URL の発行はネットワーク往復を伴うため、
+ * 渡された問題すべての画像を **1 回の呼び出しでまとめて**解決する。
  */
-export async function resolveQuestionMedia(questions: Question[]): Promise<Question[]> {
+export async function resolveQuestionMedia(
+  questions: Question[],
+  options: ResolveQuestionMediaOptions = {},
+): Promise<Question[]> {
   if (questions.length === 0) {
     return [];
   }
 
-  const perQuestion = questions.map(collectRefs);
+  const includeReveal = options.includeRevealImage !== false;
+
+  const perQuestion = questions.map((question) => collectRefs(question, includeReveal));
   const flat = perQuestion.flat();
   const resolved = await resolveMediaUrls(flat);
 
@@ -219,7 +249,7 @@ export async function resolveQuestionMedia(questions: Question[]): Promise<Quest
     cursor += refs.length;
 
     const image = applyUrl(question.image, slice[0] ?? null);
-    const revealImage = applyUrl(question.revealImage, slice[1] ?? null);
+    const revealImage = includeReveal ? applyUrl(question.revealImage, slice[1] ?? null) : null;
 
     if (question.type === 'number') {
       return { ...question, image, revealImage };
@@ -238,7 +268,10 @@ export async function resolveQuestionMedia(questions: Question[]): Promise<Quest
 }
 
 /** 単一問題向けの薄いラッパー。 */
-export async function resolveSingleQuestionMedia(question: Question): Promise<Question> {
-  const [resolved] = await resolveQuestionMedia([question]);
+export async function resolveSingleQuestionMedia(
+  question: Question,
+  options: ResolveQuestionMediaOptions = {},
+): Promise<Question> {
+  const [resolved] = await resolveQuestionMedia([question], options);
   return resolved ?? question;
 }
