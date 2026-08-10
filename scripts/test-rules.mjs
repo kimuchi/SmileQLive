@@ -62,7 +62,9 @@ const cliRunner = hasFirebaseCli
     : { bin: 'npx', prefix: ['--yes', 'firebase-tools@15'] };
 
 if (!hasFirebaseCli) {
-  info(`firebase CLI が無いため ${cliRunner.bin} 経由で実行します（初回は取得に時間がかかります）。`);
+  info(
+    `firebase CLI が無いため ${cliRunner.bin} 経由で実行します（初回は取得に時間がかかります）。`,
+  );
   console.log(`  ${color.dim('常用する場合は npm install -g firebase-tools を推奨します。')}`);
 
   // 一時実行はネットワークから firebase-tools を取得する。

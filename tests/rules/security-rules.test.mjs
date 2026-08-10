@@ -29,10 +29,16 @@ import {
 import { IDS, answerDocId } from './harness.mjs';
 
 /** 読み取り（get）を試す。 */
-const readDoc = (client, ...path) => () => getDoc(doc(client.db, ...path));
+const readDoc =
+  (client, ...path) =>
+  () =>
+    getDoc(doc(client.db, ...path));
 
 /** 一覧取得（list）を試す。 */
-const listCollection = (client, ...path) => () => getDocs(collection(client.db, ...path));
+const listCollection =
+  (client, ...path) =>
+  () =>
+    getDocs(collection(client.db, ...path));
 
 /**
  * @param {ReturnType<import('./harness.mjs').createReporter>} report
@@ -62,14 +68,17 @@ export default async function run(report, ctx) {
   await report.denied('未認証の利用者が rooms/{roomId} を読む', () =>
     readDoc(unauthenticated, 'rooms', IDS.room)(),
   );
-  await report.denied('匿名参加者が rooms を一覧する', () => listCollection(participant, 'rooms')());
+  await report.denied('匿名参加者が rooms を一覧する', () =>
+    listCollection(participant, 'rooms')(),
+  );
 
   // quizzes/** は正解・解説そのもの。
   await report.denied('匿名参加者が quizzes/{quizId} を読む', () =>
     readDoc(participant, 'quizzes', IDS.quiz)(),
   );
-  await report.denied('匿名参加者が quizzes/{quizId}/questions/{questionId} を読む（正解・解説）', () =>
-    readDoc(participant, 'quizzes', IDS.quiz, 'questions', IDS.question)(),
+  await report.denied(
+    '匿名参加者が quizzes/{quizId}/questions/{questionId} を読む（正解・解説）',
+    () => readDoc(participant, 'quizzes', IDS.quiz, 'questions', IDS.question)(),
   );
   await report.denied('匿名参加者が questions を一覧する', () =>
     listCollection(participant, 'quizzes', IDS.quiz, 'questions')(),
@@ -249,7 +258,9 @@ export default async function run(report, ctx) {
   await report.denied('司会者が別の司会者の profiles を読む', () =>
     readDoc(host, 'profiles', otherHost.uid)(),
   );
-  await report.denied('参加者が profiles を読む', () => readDoc(participant, 'profiles', host.uid)());
+  await report.denied('参加者が profiles を読む', () =>
+    readDoc(participant, 'profiles', host.uid)(),
+  );
 
   // -------------------------------------------------------------------------
   report.section('8. presentationLinks — 誰からも読めない（交換は API 経由）');
@@ -286,7 +297,8 @@ export default async function run(report, ctx) {
   const writeTargets = (client) => [
     {
       label: 'rooms/{roomId} を書き換える（フェーズ改ざん）',
-      run: () => setDoc(doc(client.db, 'rooms', IDS.room), { phase: 'answer_revealed' }, { merge: true }),
+      run: () =>
+        setDoc(doc(client.db, 'rooms', IDS.room), { phase: 'answer_revealed' }, { merge: true }),
     },
     {
       label: 'rooms を新規作成する',
@@ -322,11 +334,20 @@ export default async function run(report, ctx) {
     {
       label: '自分の answers を新規作成する（回答の直接書き込み）',
       run: () =>
-        setDoc(doc(client.db, 'rooms', IDS.room, 'answers', answerDocId(IDS.question, client.uid ?? 'anonymous')), {
-          participantId: client.uid ?? 'anonymous',
-          isCorrect: true,
-          pointsAwarded: 999_999,
-        }),
+        setDoc(
+          doc(
+            client.db,
+            'rooms',
+            IDS.room,
+            'answers',
+            answerDocId(IDS.question, client.uid ?? 'anonymous'),
+          ),
+          {
+            participantId: client.uid ?? 'anonymous',
+            isCorrect: true,
+            pointsAwarded: 999_999,
+          },
+        ),
     },
     {
       label: '他人の answers を書き換える',
@@ -364,7 +385,8 @@ export default async function run(report, ctx) {
     },
     {
       label: 'mediaAssets を作る',
-      run: () => setDoc(doc(client.db, 'mediaAssets', `forged-${client.name}`), { ownerId: client.uid }),
+      run: () =>
+        setDoc(doc(client.db, 'mediaAssets', `forged-${client.name}`), { ownerId: client.uid }),
     },
     {
       label: 'presentationLinks を作る（投影リンクの偽造）',

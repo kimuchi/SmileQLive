@@ -10,7 +10,10 @@
  * 実行は `scripts/test-rules.mjs`（firebase emulators:exec）から行う。
  * 直接 node で起動しても、エミュレータの環境変数が無ければ失敗する。
  */
-import { deleteApp as deleteAdminApp, initializeApp as initializeAdminApp } from 'firebase-admin/app';
+import {
+  deleteApp as deleteAdminApp,
+  initializeApp as initializeAdminApp,
+} from 'firebase-admin/app';
 import { getFirestore as getAdminFirestore, Timestamp } from 'firebase-admin/firestore';
 import { deleteApp as deleteClientApp, initializeApp as initializeClientApp } from 'firebase/app';
 import { connectAuthEmulator, getAuth, signInAnonymously } from 'firebase/auth';
@@ -343,19 +346,22 @@ async function seed(adminDb, roles) {
   });
 
   // 公開状態: 正解・問題文・選択肢を含めない。
-  await roomRef.collection('public').doc('state').set({
-    roomId: IDS.room,
-    phase: 'question_open',
-    stateVersion: 3,
-    currentQuestionId: IDS.question,
-    currentQuestionPosition: 1,
-    totalQuestions: 1,
-    answerDeadlineAt: Timestamp.fromMillis(Date.now() + 60_000),
-    joinOpen: true,
-    participantCount: 2,
-    answeredCount: 1,
-    updatedAt: now,
-  });
+  await roomRef
+    .collection('public')
+    .doc('state')
+    .set({
+      roomId: IDS.room,
+      phase: 'question_open',
+      stateVersion: 3,
+      currentQuestionId: IDS.question,
+      currentQuestionPosition: 1,
+      totalQuestions: 1,
+      answerDeadlineAt: Timestamp.fromMillis(Date.now() + 60_000),
+      joinOpen: true,
+      participantCount: 2,
+      answeredCount: 1,
+      updatedAt: now,
+    });
 
   // 進捗: 司会・投影のみ。
   await roomRef.collection('staff').doc('progress').set({
@@ -427,37 +433,43 @@ async function seed(adminDb, roles) {
   });
 
   // 別の司会者のルーム。
-  await adminDb.collection('rooms').doc(IDS.otherRoom).set({
-    id: IDS.otherRoom,
-    ownerId: roles.otherHost.uid,
-    quizId: IDS.otherQuiz,
-    joinTokenHash: 'e'.repeat(64),
-    joinTokenRotatedAt: now,
-    phase: 'lobby',
-    currentQuestionId: null,
-    currentQuestionPosition: null,
-    phaseStartedAt: null,
-    answerDeadlineAt: null,
-    stateVersion: 0,
-    joinOpen: true,
-    maxParticipants: 200,
-    participantCount: 0,
-    createdAt: now,
-    updatedAt: now,
-    finishedAt: null,
-    quizSnapshot: { quizId: IDS.otherQuiz, title: '別の司会者のクイズ', questions: [] },
-  });
+  await adminDb
+    .collection('rooms')
+    .doc(IDS.otherRoom)
+    .set({
+      id: IDS.otherRoom,
+      ownerId: roles.otherHost.uid,
+      quizId: IDS.otherQuiz,
+      joinTokenHash: 'e'.repeat(64),
+      joinTokenRotatedAt: now,
+      phase: 'lobby',
+      currentQuestionId: null,
+      currentQuestionPosition: null,
+      phaseStartedAt: null,
+      answerDeadlineAt: null,
+      stateVersion: 0,
+      joinOpen: true,
+      maxParticipants: 200,
+      participantCount: 0,
+      createdAt: now,
+      updatedAt: now,
+      finishedAt: null,
+      quizSnapshot: { quizId: IDS.otherQuiz, title: '別の司会者のクイズ', questions: [] },
+    });
 
   // 投影リンク（トークンはハッシュのみ）。誰からも読めてはいけない。
-  await adminDb.collection('presentationLinks').doc(IDS.presentationLink).set({
-    id: IDS.presentationLink,
-    roomId: IDS.room,
-    tokenHash: 'd'.repeat(64),
-    expiresAt: Timestamp.fromMillis(Date.now() + 3_600_000),
-    consumedAt: null,
-    createdBy: roles.host.uid,
-    createdAt: now,
-  });
+  await adminDb
+    .collection('presentationLinks')
+    .doc(IDS.presentationLink)
+    .set({
+      id: IDS.presentationLink,
+      roomId: IDS.room,
+      tokenHash: 'd'.repeat(64),
+      expiresAt: Timestamp.fromMillis(Date.now() + 3_600_000),
+      consumedAt: null,
+      createdBy: roles.host.uid,
+      createdAt: now,
+    });
 }
 
 // ---------------------------------------------------------------------------
