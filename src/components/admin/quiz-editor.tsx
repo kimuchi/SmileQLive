@@ -105,24 +105,28 @@ export function QuizEditor({ quizId }: QuizEditorProps) {
 
   const flushMapRef = useRef(new Map<string, () => Promise<void>>());
 
+  // 同期的な setState を含めない（effect から呼ぶため）。
   const load = useCallback(async () => {
-    setLoadError(null);
     try {
       const response = await apiGet<QuizDetailResponse>(`/api/admin/quizzes/${quizId}`);
       setQuiz(response.quiz);
-      setSettings((previous) =>
-        previous ?? {
-          title: response.quiz.title,
-          description: response.quiz.description ?? '',
-          showLeaderboard: response.quiz.showLeaderboard,
-        },
+      setSettings(
+        (previous) =>
+          previous ?? {
+            title: response.quiz.title,
+            description: response.quiz.description ?? '',
+            showLeaderboard: response.quiz.showLeaderboard,
+          },
       );
+      setLoadError(null);
     } catch (caught) {
       setLoadError(caught);
     }
   }, [quizId]);
 
   useEffect(() => {
+    // マウント時（およびクイズ切り替え時）の初回取得。
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- クライアント側での初回取得のため
     void load();
   }, [load]);
 

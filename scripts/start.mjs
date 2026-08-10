@@ -27,17 +27,21 @@ if (existsSync(standaloneServer)) {
 } else {
   const agent = process.env.npm_config_user_agent ?? '';
   const pm = agent.startsWith('pnpm') ? 'pnpm' : agent.startsWith('yarn') ? 'yarn' : 'npm';
-  const bin = process.platform === 'win32' ? `${pm}.cmd` : pm;
-  command = bin;
+  command = process.platform === 'win32' ? `${pm}.cmd` : pm;
   args =
     pm === 'npm'
       ? ['exec', '--', 'next', 'start', '--hostname', hostname, '--port', port]
       : ['exec', 'next', 'start', '--hostname', hostname, '--port', port];
 }
 
+// Windows では pnpm/npm の実体が .cmd バッチファイルで、
+// Node.js は .cmd を shell: false で起動できないため cmd.exe 経由にする。
+// standalone の server.js を直接起動する場合はシェル不要。
+const useShell = process.platform === 'win32' && command.endsWith('.cmd');
+
 const child = spawn(command, args, {
   stdio: 'inherit',
-  shell: false,
+  shell: useShell,
   cwd: repoRoot,
   env: { ...process.env, PORT: port, HOSTNAME: hostname },
 });

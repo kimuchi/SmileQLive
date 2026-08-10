@@ -25,7 +25,7 @@ import {
   serviceExists,
 } from './lib/gcloud.mjs';
 import { color, heading, info } from './lib/log.mjs';
-import { commandExists, run } from './lib/proc.mjs';
+import { probeCommand, run } from './lib/proc.mjs';
 
 process.chdir(fileURLToPath(new URL('..', import.meta.url)));
 
@@ -41,17 +41,29 @@ heading('SmileQ Live デプロイ診断');
 // --- ローカル環境 ------------------------------------------------------------
 const nodeMajor = Number(process.versions.node.split('.')[0]);
 check('Node.js 24 系', nodeMajor === 24, `検出: v${process.versions.node}`);
-check('gcloud CLI', commandExists('gcloud'), commandExists('gcloud') ? '' : 'https://cloud.google.com/sdk/docs/install');
-check('Git', commandExists('git'), '');
+
+// gcloud は「PATH にあるか」ではなく「このスクリプトから起動できるか」を見る。
+// 失敗したときは理由（未インストール／PATH 未反映／エイリアス等）を必ず表示する。
+const gcloudProbe = probeCommand('gcloud');
 check(
-  'pnpm-lock.yaml',
-  existsSync(new URL('../pnpm-lock.yaml', import.meta.url)),
-  'ロックファイルはコミットしてください',
+  'gcloud CLI',
+  gcloudProbe.ok,
+  gcloudProbe.ok
+    ? gcloudProbe.version
+    : gcloudProbe.via === 'shell-only'
+      ? gcloudProbe.detail
+      : `${gcloudProbe.detail} — 未インストールなら https://cloud.google.com/sdk/docs/install`,
 );
+
+const gitProbe = probeCommand('git');
+check('Git', gitProbe.ok, gitProbe.ok ? gitProbe.version : gitProbe.detail);
+const lockExists = existsSync(new URL('../pnpm-lock.yaml', import.meta.url));
+check('pnpm-lock.yaml', lockExists, lockExists ? '' : 'ロックファイルをコミットしてください');
+const dockerfileExists = existsSync(new URL('../Dockerfile', import.meta.url));
 check(
   'Dockerfile',
-  existsSync(new URL('../Dockerfile', import.meta.url)),
-  'Cloud Build がこの Dockerfile を使います',
+  dockerfileExists,
+  dockerfileExists ? '' : 'Cloud Build が使う Dockerfile がありません',
 );
 
 // --- 設定ファイル ------------------------------------------------------------
@@ -71,11 +83,13 @@ if (available.length > 0) {
   info(`診断対象: ${environment} (${config.projectId} / ${config.serviceName})`);
 
   check('supabaseUrl', /^https:\/\/.+\.supabase\.co$/.test(config.supabaseUrl), config.supabaseUrl);
+  const publishableOk =
+    !config.supabasePublishableKey.startsWith('sb_secret') &&
+    !config.supabasePublishableKey.startsWith('service_role');
   check(
     'Publishable Key が公開用キーであること',
-    !config.supabasePublishableKey.startsWith('sb_secret') &&
-      !config.supabasePublishableKey.startsWith('service_role'),
-    'Secret Key を JSON へ書かないでください',
+    publishableOk,
+    publishableOk ? '' : 'Secret Key を JSON へ書かないでください（Secret Manager を使う）',
   );
   check(
     'appBaseUrl',
@@ -89,15 +103,18 @@ if (available.length > 0) {
       `${config.appBaseUrl} / https://${config.customDomain}`,
     );
   }
+  const minInstancesOk = config.environment !== 'production' || config.minInstances >= 1;
   check(
     '本番の最小インスタンス',
-    config.environment !== 'production' || config.minInstances >= 1,
-    `minInstances=${config.minInstances}（会場開催時は 1 以上を推奨）`,
+    minInstancesOk,
+    minInstancesOk
+      ? `minInstances=${config.minInstances}`
+      : `minInstances=${config.minInstances} — 会場開催時は 1 以上にしてください`,
   );
 }
 
 // --- Google Cloud ------------------------------------------------------------
-if (config && commandExists('gcloud')) {
+if (config && gcloudProbe.ok) {
   const account = activeAccount();
   check('gcloud ログイン', Boolean(account), account || 'gcloud auth login を実行してください');
 
@@ -115,10 +132,13 @@ if (config && commandExists('gcloud')) {
         secretExists(config.projectId, config.supabaseSecretName),
         config.supabaseSecretName,
       );
+      const hasSecretValue = secretHasVersion(config.projectId, config.supabaseSecretName);
       check(
         'Secret に値がある',
-        secretHasVersion(config.projectId, config.supabaseSecretName),
-        'gcloud secrets versions add ... で登録してください',
+        hasSecretValue,
+        hasSecretValue
+          ? ''
+          : `gcloud secrets versions add ${config.supabaseSecretName} --project ${config.projectId} --data-file=-`,
       );
       const url = serviceExists(config.projectId, config.region, config.serviceName);
       check('Cloud Run サービス', Boolean(url), url || '未作成（初回デプロイで作成されます）');
@@ -132,7 +152,14 @@ let failures = 0;
 for (const result of results) {
   const mark = result.ok ? color.green('✔') : color.yellow('▲');
   if (!result.ok) failures += 1;
-  console.log(`  ${mark} ${result.name.padEnd(32)} ${color.dim(result.detail ?? '')}`);
+  const detail = result.detail ?? '';
+  if (detail.length <= 60) {
+    console.log(`  ${mark} ${result.name.padEnd(30)} ${color.dim(detail)}`);
+  } else {
+    // 原因の説明が長い場合は折り返して読めるようにする。
+    console.log(`  ${mark} ${result.name}`);
+    console.log(`      ${color.dim(detail)}`);
+  }
 }
 
 console.log('');

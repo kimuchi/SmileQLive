@@ -5,24 +5,106 @@ import { color, redactArg } from './log.mjs';
 /**
  * 子プロセス実行の共通処理。
  *
- * - 必ず配列引数 + shell: false で呼ぶ（Bash / PowerShell へ依存しない）。
+ * - 必ず配列引数で呼び、文字列連結でコマンドを組み立てない。
+ * - macOS / Linux は常に shell: false（Bash / PowerShell へ依存しない）。
+ *   Windows の .cmd ラッパー（gcloud / pnpm など）だけは、Node.js が
+ *   .cmd を直接起動できない仕様のため cmd.exe 経由で起動する。
  * - Windows では実行ファイル名へ .cmd を付ける必要があるものを吸収する。
  */
 
 const isWindows = process.platform === 'win32';
+
+/**
+ * Windows では gcloud / pnpm / npm などの実体が .cmd バッチファイルになる。
+ * Node.js は .cmd / .bat を shell: false で起動できない仕様のため、
+ * これらだけは cmd.exe 経由で起動する必要がある。
+ */
+const CMD_WRAPPED = new Set(['gcloud', 'pnpm', 'npm', 'npx', 'yarn', 'supabase']);
 
 /** Windows 用に実行ファイル名を補正する。 */
 export function binName(name) {
   if (!isWindows) {
     return name;
   }
-  const cmdWrapped = new Set(['gcloud', 'pnpm', 'npm', 'npx', 'yarn', 'supabase']);
-  return cmdWrapped.has(name) ? `${name}.cmd` : name;
+  return CMD_WRAPPED.has(name) ? `${name}.cmd` : name;
+}
+
+/**
+ * この実行ファイルの起動に shell が必要か。
+ *
+ * Windows の .cmd ラッパーだけ true になる。macOS / Linux では常に false で、
+ * 「OS 固有シェルを前提とするデプロイ処理を作らない」という方針を保つ。
+ * shell: true で起動する場合も、引数は Node.js が自動エスケープするため
+ * 文字列連結でコマンドを組み立てることはしない。
+ */
+function needsShell(name) {
+  return isWindows && CMD_WRAPPED.has(name);
+}
+
+/**
+ * コマンドが「このスクリプトから実際に起動できるか」を調べる。
+ *
+ * デプロイ本体は必ず shell: false で呼ぶため、存在確認も shell: false で行う。
+ * ただしそれで失敗した場合だけ、原因の切り分けのためにシェル経由でも試す。
+ * （PATH がシェル初期化ファイルでしか設定されていない、エイリアス／シェル関数として
+ *   定義されている、Windows で拡張子付きの実体が無い、などを区別するため）
+ *
+ * @returns {{ok: boolean, via: 'direct'|'shell-only'|'missing', detail: string, version: string}}
+ */
+export function probeCommand(name) {
+  const resolved = binName(name);
+
+  const direct = spawnSync(resolved, ['--version'], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    encoding: 'utf8',
+    shell: needsShell(name),
+    timeout: 30_000,
+  });
+
+  const firstLine = (text) => String(text ?? '').split(/\r?\n/)[0]?.trim() ?? '';
+
+  if (!direct.error && direct.status === 0) {
+    return { ok: true, via: 'direct', detail: '', version: firstLine(direct.stdout) };
+  }
+
+  // ここから先は診断目的のみ。実際のデプロイ処理をシェル経由で実行することはない。
+  const viaShell = spawnSync(`${name} --version`, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    encoding: 'utf8',
+    shell: true,
+    timeout: 30_000,
+  });
+
+  if (!viaShell.error && viaShell.status === 0) {
+    return {
+      ok: false,
+      via: 'shell-only',
+      detail:
+        `シェル経由では見つかりますが、直接起動できません（${resolved}）。` +
+        'エイリアスやシェル関数ではなく、実行ファイルが PATH に含まれているか確認してください。' +
+        (isWindows ? ' Windows では gcloud.cmd が PATH にある必要があります。' : ''),
+      version: firstLine(viaShell.stdout),
+    };
+  }
+
+  const reason = direct.error
+    ? `${direct.error.code ?? direct.error.message}`
+    : direct.status === null
+      ? 'タイムアウト'
+      : `終了コード ${direct.status}`;
+
+  const stderr = firstLine(direct.stderr);
+
+  return {
+    ok: false,
+    via: 'missing',
+    detail: `${resolved} を起動できません（${reason}）${stderr ? `: ${stderr}` : ''}`,
+    version: '',
+  };
 }
 
 export function commandExists(name) {
-  const probe = spawnSync(binName(name), ['--version'], { stdio: 'ignore', shell: false });
-  return !probe.error && probe.status === 0;
+  return probeCommand(name).ok;
 }
 
 /**
@@ -54,7 +136,9 @@ export function run(name, args, options = {}) {
   const result = spawnSync(binName(name), args, {
     stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
     encoding: capture ? 'utf8' : undefined,
-    shell: false,
+    // Windows の .cmd ラッパーのみ cmd.exe 経由。引数は配列のまま渡し、
+    // Node.js に自動エスケープさせる（文字列連結でコマンドを作らない）。
+    shell: needsShell(name),
     cwd,
     env: env ? { ...process.env, ...env } : process.env,
   });

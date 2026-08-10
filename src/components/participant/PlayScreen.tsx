@@ -290,6 +290,12 @@ export function PlayScreen({ roomId }: { roomId: string }) {
       );
     }
 
+    // 受付前はまだ回答が無く、正解発表後は RevealPanel が同じ内容を含むため、
+    // ここでは自分の回答を出さない。
+    if (phase === 'question_ready' || phase === 'answer_revealed') {
+      return null;
+    }
+
     return <MyAnswerSummary question={current} myAnswer={myAnswer} />;
   };
 
@@ -378,10 +384,6 @@ export function PlayScreen({ roomId }: { roomId: string }) {
         ) : null}
 
         {renderAnswerArea(question)}
-
-        {phase === 'question_open' && answered && question.type === 'choice' ? (
-          <MyAnswerSummary question={question} myAnswer={myAnswer} />
-        ) : null}
 
         {answerErrorBlock}
 
