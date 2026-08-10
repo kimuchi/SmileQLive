@@ -138,6 +138,7 @@ npm run domain:map -- production          # カスタムドメイン
 | `npm run host:list` / `host:add` / `host:remove` | 司会者の確認・登録・削除 |
 | `npm run domain:map` / `domain:status` | カスタムドメイン設定・確認 |
 | `npm run firebase:config` | Firebase の公開設定を CLI で取得し設定ファイルへ書き込む（GUI 不要） |
+| `npm run firebase:doctor` | Firebase が使える状態か診断（変更しない） |
 | `npm run gcp:bootstrap` | Google Cloud 初期設定（冪等） |
 
 > `npm` / `pnpm` どちらからでも実行できます。デプロイスクリプトは呼び出し元のパッケージマネージャを自動判定します。

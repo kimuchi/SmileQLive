@@ -60,6 +60,33 @@ function firebase(args, { capture = true, allowFailure = false } = {}) {
  * npm / pnpm 経由だと大量の warn が混ざるため、それらを除いて
  * 実際のエラー行だけを残す（原因が埋もれると利用者が対処できない）。
  */
+/**
+ * firebase CLI は失敗の詳細を stdout ではなく firebase-debug.log にだけ書く。
+ * 分類を誤らないよう、直近のエラー行をここから読み取る。
+ */
+function readDebugLogTail(maxLines = 400) {
+  const candidates = ['firebase-debug.log', 'firebase-debug.log.1'];
+  for (const file of candidates) {
+    if (!existsSync(file)) {
+      continue;
+    }
+    try {
+      const lines = readFileSync(file, 'utf8').split(/\r?\n/);
+      return lines.slice(-maxLines).join('\n');
+    } catch {
+      // 読めなければ無視する。
+    }
+  }
+  return '';
+}
+
+/** デバッグログから HTTP ステータスとエラー本文を抽出する。 */
+function extractApiError(logText) {
+  const status = logText.match(/HTTP Error:\s*(\d{3})/g)?.pop() ?? '';
+  const body = logText.match(/\{"error":\{[^\n]*\}\}/g)?.pop() ?? '';
+  return { status, body, text: `${status}\n${body}\n${logText}` };
+}
+
 function reportFailure(result, args) {
   const noise = /^(npm |pnpm |\(node:|\s*$)/;
   const lines = `${result.stdout ?? ''}\n${result.stderr ?? ''}`
@@ -208,7 +235,15 @@ if (!firebaseEnabled) {
   if (!added.ok) {
     reportFailure(added, ['projects:addfirebase', projectId]);
 
-    const output = `${added.stdout ?? ''}\n${added.stderr ?? ''}`;
+    // CLI の標準出力には詳細が出ないため、デバッグログも合わせて判定する。
+    const debugLog = readDebugLogTail();
+    const apiError = extractApiError(debugLog);
+    const output = `${added.stdout ?? ''}\n${added.stderr ?? ''}\n${apiError.text}`;
+
+    if (apiError.body) {
+      console.error(`  API の応答: ${apiError.body}`);
+      console.error('');
+    }
     const permissionDenied =
       /PERMISSION_DENIED/i.test(output) ||
       /does not have permission/i.test(output) ||
