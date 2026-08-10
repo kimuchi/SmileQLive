@@ -41,9 +41,7 @@ describe('エラー定義の網羅性', () => {
     for (const code of ALL_CODES) {
       const { message } = APP_ERROR_DEFINITIONS[code];
       // 日本語（ひらがな・カタカナ・漢字）を含むこと
-      expect(message, `${code}: 日本語になっていない`).toMatch(
-        /[぀-ゟ゠-ヿ一-鿿]/,
-      );
+      expect(message, `${code}: 日本語になっていない`).toMatch(/[぀-ゟ゠-ヿ一-鿿]/);
       for (const word of forbidden) {
         expect(message, `${code}: 内部用語「${word}」が露出している`).not.toContain(word);
       }
@@ -55,8 +53,7 @@ describe('エラー定義の網羅性', () => {
   it('§34.1 の対応表どおりのメッセージになっている', () => {
     const expected: Partial<Record<AppErrorCode, string>> = {
       JOIN_LINK_INVALID: 'この参加URLは無効です',
-      JOIN_LINK_REVOKED:
-        'この参加URLは更新されています。会場の二次元コードを読み直してください',
+      JOIN_LINK_REVOKED: 'この参加URLは更新されています。会場の二次元コードを読み直してください',
       JOIN_CLOSED: 'このクイズは参加受付を終了しています',
       ROOM_FULL: '参加人数が上限に達しました',
       NICKNAME_TAKEN: '同じ名前が使われています',

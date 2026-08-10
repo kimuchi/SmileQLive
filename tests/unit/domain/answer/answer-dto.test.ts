@@ -41,7 +41,29 @@ describe('summarizeFrequentValues', () => {
   it('既定では上位 5 件までに絞る', () => {
     expect(FREQUENT_VALUES_LIMIT).toBe(5);
 
-    const values = ['1', '2', '2', '3', '3', '3', '4', '4', '4', '4', '5', '5', '5', '5', '5', '6', '6', '6', '6', '6', '6'];
+    const values = [
+      '1',
+      '2',
+      '2',
+      '3',
+      '3',
+      '3',
+      '4',
+      '4',
+      '4',
+      '4',
+      '5',
+      '5',
+      '5',
+      '5',
+      '5',
+      '6',
+      '6',
+      '6',
+      '6',
+      '6',
+      '6',
+    ];
     const result = summarizeFrequentValues(values);
 
     expect(result).toHaveLength(5);

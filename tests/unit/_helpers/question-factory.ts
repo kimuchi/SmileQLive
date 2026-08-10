@@ -30,7 +30,10 @@ export function mediaRef(overrides: Partial<MediaRef> = {}): MediaRef {
  * 選択肢。position は 1〜5 が正当だが、
  * 「6 件で公開検証が落ちること」を確認するため範囲外も組み立てられるようにしている。
  */
-export function choiceOption(position: number, overrides: Partial<ChoiceOption> = {}): ChoiceOption {
+export function choiceOption(
+  position: number,
+  overrides: Partial<ChoiceOption> = {},
+): ChoiceOption {
   return {
     id: `choice-${position}`,
     position: position as ChoicePosition,
@@ -42,7 +45,10 @@ export function choiceOption(position: number, overrides: Partial<ChoiceOption> 
 }
 
 /** position 1..count の選択肢を作り、correctIndex（0 始まり）だけ正解にする。 */
-export function choiceOptions(count: number, correctIndexes: readonly number[] = [0]): ChoiceOption[] {
+export function choiceOptions(
+  count: number,
+  correctIndexes: readonly number[] = [0],
+): ChoiceOption[] {
   return Array.from({ length: count }, (_unused, index) =>
     choiceOption(index + 1, { isCorrect: correctIndexes.includes(index) }),
   );

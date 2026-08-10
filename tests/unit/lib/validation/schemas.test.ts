@@ -192,9 +192,9 @@ describe('問題の更新', () => {
       }).success,
     ).toBe(true);
 
-    expect(
-      updateQuestionSchema.safeParse({ type: 'number', decimalPlaces: 0 }).success,
-    ).toBe(false);
+    expect(updateQuestionSchema.safeParse({ type: 'number', decimalPlaces: 0 }).success).toBe(
+      false,
+    );
   });
 
   it('制限時間・配点の範囲外を拒否する', () => {

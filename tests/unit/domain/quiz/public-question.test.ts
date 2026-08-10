@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { toPublicQuestion } from '@/domain/quiz/public-question';
 import { CHOICE_LABELS, choiceLabelFor } from '@/domain/quiz/question';
 import type { ChoiceQuestion, NumberQuestion } from '@/domain/quiz/question';
-import { choiceOption, choiceQuestion, mediaRef, numberQuestion } from '../../_helpers/question-factory';
+import {
+  choiceOption,
+  choiceQuestion,
+  mediaRef,
+  numberQuestion,
+} from '../../_helpers/question-factory';
 
 /**
  * 最重要の回帰防止テスト（仕様書 §37.1）。
@@ -111,7 +116,9 @@ describe('toPublicQuestion（選択式）', () => {
       throw new Error('選択式として生成されていない');
     }
     for (const choice of publicQuestion.choices) {
-      expect(Object.keys(choice).sort()).toEqual(['id', 'image', 'label', 'position', 'text'].sort());
+      expect(Object.keys(choice).sort()).toEqual(
+        ['id', 'image', 'label', 'position', 'text'].sort(),
+      );
     }
   });
 

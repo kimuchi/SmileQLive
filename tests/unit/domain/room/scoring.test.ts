@@ -89,7 +89,11 @@ describe('compareForRanking', () => {
 
   it('順序キーは 得点 → 所要時間 → 参加時刻 → 名前 の優先度で効く', () => {
     // 得点が低ければ、所要時間がどれだけ速くても下位。
-    const richSlow = score({ participantId: 'a', totalPoints: 2000, correctElapsedMsTotal: 60_000 });
+    const richSlow = score({
+      participantId: 'a',
+      totalPoints: 2000,
+      correctElapsedMsTotal: 60_000,
+    });
     const poorFast = score({ participantId: 'b', totalPoints: 1000, correctElapsedMsTotal: 100 });
     expect(compareForRanking(richSlow, poorFast)).toBeLessThan(0);
 

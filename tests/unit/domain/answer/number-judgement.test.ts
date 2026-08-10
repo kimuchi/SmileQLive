@@ -117,9 +117,9 @@ describe('浮動小数点の誤判定が起きないこと', () => {
 
   it('浮動小数点の誤差相当値を文字列で受けても正しく判定する', () => {
     // number 経由で作ると 0.30000000000000004 になる値。
-    expect(judgeNumberAnswerText('0.30000000000000004', { mode: 'exact', correctValue: '0.3' })).toBe(
-      false,
-    );
+    expect(
+      judgeNumberAnswerText('0.30000000000000004', { mode: 'exact', correctValue: '0.3' }),
+    ).toBe(false);
     expect(judgeNumberAnswerText('0.3', { mode: 'exact', correctValue: '0.30' })).toBe(true);
   });
 
