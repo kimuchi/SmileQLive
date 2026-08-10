@@ -156,7 +156,11 @@ export function appBaseUrl(headers?: Headers): string {
 export function checkServerConfiguration(): { ok: boolean; missing: string[] } {
   const missing: string[] = [];
 
-  if (!readEnv('FIREBASE_PROJECT_ID') && !readEnv('GOOGLE_CLOUD_PROJECT') && !readEnv('GCLOUD_PROJECT')) {
+  if (
+    !readEnv('FIREBASE_PROJECT_ID') &&
+    !readEnv('GOOGLE_CLOUD_PROJECT') &&
+    !readEnv('GCLOUD_PROJECT')
+  ) {
     missing.push('FIREBASE_PROJECT_ID');
   }
   if (!readEnv('FIREBASE_API_KEY')) {

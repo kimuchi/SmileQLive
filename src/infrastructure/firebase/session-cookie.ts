@@ -24,7 +24,7 @@ import { appEnvironment } from '@/lib/env/server-env';
 const MAX_SESSION_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
 /** ローカル開発は http なので Secure を付けない（付けると保存されない）。 */
-function useSecureCookie(): boolean {
+function isSecureCookieRequired(): boolean {
   return appEnvironment() !== 'local';
 }
 
@@ -58,7 +58,7 @@ export async function setSessionCookie(value: string, expiresInMs: number): Prom
     name: SESSION_COOKIE_NAME,
     value,
     httpOnly: true,
-    secure: useSecureCookie(),
+    secure: isSecureCookieRequired(),
     sameSite: 'lax',
     path: '/',
     maxAge: Math.floor(clampTtl(expiresInMs) / 1000),
@@ -72,7 +72,7 @@ export async function clearSessionCookie(): Promise<void> {
     name: SESSION_COOKIE_NAME,
     value: '',
     httpOnly: true,
-    secure: useSecureCookie(),
+    secure: isSecureCookieRequired(),
     sameSite: 'lax',
     path: '/',
     maxAge: 0,

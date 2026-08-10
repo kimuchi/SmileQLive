@@ -63,6 +63,14 @@ export type CreateSessionRequestBody = {
 export type CreateSessionResponse = {
   uid: string;
   isAnonymous: boolean;
+  /**
+   * 司会者として管理画面を使えるか（profiles/{uid} が存在するか）。
+   *
+   * サインイン自体は誰でも成功してよい。false のときは画面側で
+   * 「この Google アカウントには管理権限がありません」と伝えてサインアウトさせる
+   * （docs/HOST_ACCESS.md §2）。
+   */
+  isHost: boolean;
   /** セッションクッキーの失効時刻 (ISO8601)。 */
   expiresAt: string;
 };
