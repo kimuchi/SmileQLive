@@ -24,7 +24,7 @@
  */
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { configExists, ENVIRONMENTS, parseArgs, resolveEnvironment } from './lib/config.mjs';
 import { color, fatal, heading, info, step, success, warn } from './lib/log.mjs';
 import { commandExists, run } from './lib/proc.mjs';
@@ -45,11 +45,11 @@ const dryRun = flags.has('dry-run');
  * これにより、同じプロジェクトに同居している既存アプリのルールとインデックスを
  * 上書きする事故が構造的に起こらない。
  *
- * Storage も同様に、firebase.json の target 'smileq-media' に紐づけた
- * 専用バケットだけを対象にする。
+ * Storage も同様に、設定ファイルの mediaBucket で指定した専用バケットだけを対象にする
+ * （配信直前に一時設定へ実バケット名を書き出し、--config で渡す）。
  */
 function defaultTargets(databaseId) {
-  return `firestore:${databaseId},storage:smileq-media`;
+  return `firestore:${databaseId},storage`;
 }
 
 heading('Security Rules / インデックスの反映');
@@ -179,29 +179,32 @@ if (hasFirebaseCli) {
   console.log(`  ${color.dim('常用する場合は npm install -g firebase-tools を推奨します。')}`);
 }
 
-// firebase.json の storage は target 名で対象バケットを指定している。
-// どのバケットに紐づくかをここで確定させる（既存アプリのバケットに触れないため）。
-if (only.includes('storage') && mediaBucket) {
-  step('Storage の対象バケットを紐づけ');
-  const applied = run(
-    runner.bin,
-    [
-      ...runner.prefix,
-      'target:apply',
-      'storage',
-      'smileq-media',
-      mediaBucket,
-      '--project',
-      projectId,
+// firebase.json の storage.bucket はプレースホルダのまま置いてある。
+// 誤って手動 `firebase deploy` を実行しても既存アプリのバケットへ当たらないようにするため。
+// ここで実際のバケット名と対象データベースを入れた一時設定を書き出し、--config で渡す。
+step('配信用の一時設定を生成');
+
+const generatedConfigPath = '.firebase/smileq-deploy.json';
+{
+  const base = JSON.parse(readFileSync('firebase.json', 'utf8'));
+  const generated = {
+    firestore: [
+      {
+        database: databaseId,
+        rules: 'firebase/firestore.rules',
+        indexes: 'firebase/firestore.indexes.json',
+      },
     ],
-    { capture: true, quiet: true, allowFailure: true },
-  );
-  if (applied.ok) {
-    success(`smileq-media → ${mediaBucket}`);
-  } else {
-    warn('バケットの紐づけに失敗しました。Storage ルールの配信をスキップします。');
-    info(`手動で紐づける場合: ${runner.bin} ${[...runner.prefix, 'target:apply', 'storage', 'smileq-media', mediaBucket].join(' ')}`);
-  }
+    ...(mediaBucket
+      ? { storage: [{ bucket: mediaBucket, rules: 'firebase/storage.rules' }] }
+      : {}),
+    ...(base.emulators ? { emulators: base.emulators } : {}),
+  };
+
+  mkdirSync('.firebase', { recursive: true });
+  writeFileSync(generatedConfigPath, `${JSON.stringify(generated, null, 2)}\n`);
+  success(`${generatedConfigPath} を生成しました`);
+  info(`Firestore: ${databaseId} / Storage: ${mediaBucket || '(対象なし)'}`);
 }
 
 const deployArgs = [
@@ -211,6 +214,8 @@ const deployArgs = [
   only,
   '--project',
   projectId,
+  '--config',
+  generatedConfigPath,
   '--non-interactive',
 ];
 

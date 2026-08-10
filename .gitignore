@@ -47,3 +47,9 @@ pnpm-debug.log*
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# firebase CLI の作業ディレクトリ（配信用の一時設定を含む）
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*

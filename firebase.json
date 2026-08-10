@@ -8,7 +8,7 @@
   ],
   "storage": [
     {
-      "target": "smileq-media",
+      "bucket": "REPLACED-BY-npm-run-rules-deploy",
       "rules": "firebase/storage.rules"
     }
   ],
