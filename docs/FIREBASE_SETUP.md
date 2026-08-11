@@ -114,6 +114,7 @@ SmileQ Live は既定で次のように、既存アプリと**物理的に分離
 | Firestore ルール／インデックス | `smileq-live` にのみ適用 | **触れない** |
 | Storage バケット | `<project>-smileq-media`（専用） | 既定バケット |
 | Storage ルール | 専用バケットにのみ適用 | **触れない** |
+| ブラウザ用 API キー | `SmileQ Live Web`（専用） | 既存アプリのキー |
 | Firebase Authentication | **共有** | 共有 |
 
 Firestore は 1 プロジェクトに複数のデータベースを持て、
@@ -165,6 +166,29 @@ gcloud storage buckets create gs://idl-application-smileq-media --uniform-bucket
 - 既定バケットを使うと分かったうえで配信する場合だけ
   `npm run rules:deploy -- --allow-default-bucket` を使います
   （既存アプリの Storage ルールを引き継ぐ責任が生じます）。
+
+#### API キーを分ける理由
+
+Firebase が自動生成する「Browser key」は既存アプリのもので、
+**HTTP リファラー制限が既存アプリのドメインに限定されている**ことが多くあります。
+これを流用すると、ブラウザからのログインが次で拒否されます。
+
+```text
+Requests from referer https://q.iefainavi.net/ are blocked.
+```
+
+このエラーはブラウザ側では未定義のコードになり、画面には
+「ログインできませんでした / 時間をおいて、もう一度お試しください」としか出ません。
+`npm run firebase:config` は既存のキーを流用せず、
+`SmileQ Live Web` という専用キーだけを使います。
+
+制限に当たっているかは次で確認できます（**既存アプリのキーは変更しません**）。
+
+```bash
+npm run firebase:auth -- production      # 「公開 API キーの疎通確認」を見る
+npm run firebase:config -- --new-api-key # 専用キーを作り直す
+npm run deploy -- production             # 新しいキーを反映
+```
 
 #### 共有される部分（Authentication）
 

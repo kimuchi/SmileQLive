@@ -290,6 +290,117 @@ if (google?.enabled) {
 }
 
 // ---------------------------------------------------------------------------
+step('公開 API キーの疎通確認');
+
+/**
+ * ブラウザが実際に使う経路で API キーを試す。
+ *
+ * Firebase の設定がすべて正しくても、API キー側の制限で弾かれることがある。
+ *   * HTTP リファラー制限にこのサイトのドメインが入っていない
+ *   * API 制限に Identity Toolkit が含まれていない
+ * この場合ブラウザには未定義のエラーコードが返り、画面には
+ * 「時間をおいて、もう一度お試しください」としか出ない。
+ * ここで同じ経路を叩いて切り分ける。
+ *
+ * accounts:createAuthUri を使う（ユーザーを作らないため副作用が無い）。
+ */
+async function probeApiKey(apiKey, origin) {
+  const response = await fetch(
+    `${API_HOST}/v1/accounts:createAuthUri?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Referer: `${origin}/` },
+      body: JSON.stringify({ identifier: 'probe@example.com', continueUri: `${origin}/admin/login` }),
+    },
+  );
+  const text = await response.text();
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    // JSON でなければ生のまま扱う。
+  }
+  return { ok: response.ok, status: response.status, message: json?.error?.message ?? text.slice(0, 300) };
+}
+
+/** 制限に引っかかった API キーを特定して、内容を表示する。 */
+function describeRestrictedKey(apiKey) {
+  const list = run(
+    'gcloud',
+    ['services', 'api-keys', 'list', `--project=${projectId}`, '--format=json'],
+    { capture: true, quiet: true, allowFailure: true },
+  );
+  if (!list.ok) {
+    return;
+  }
+  let keys = [];
+  try {
+    keys = JSON.parse(list.stdout || '[]').filter((key) => !key.deleteTime);
+  } catch {
+    return;
+  }
+
+  for (const key of keys) {
+    const keyString = run(
+      'gcloud',
+      ['services', 'api-keys', 'get-key-string', key.name, `--project=${projectId}`, '--format=value(keyString)'],
+      { capture: true, quiet: true, allowFailure: true },
+    );
+    if (!keyString.ok || keyString.stdout.trim() !== apiKey) {
+      continue;
+    }
+    console.log('');
+    console.log(`        使用中のキー: ${key.displayName ?? '(名称なし)'}`);
+    console.log(`        ${key.name}`);
+    const referrers = key.restrictions?.browserKeyRestrictions?.allowedReferrers;
+    if (Array.isArray(referrers) && referrers.length > 0) {
+      console.log(`        許可リファラー: ${referrers.join(', ')}`);
+    }
+    const targets = key.restrictions?.apiTargets;
+    if (Array.isArray(targets) && targets.length > 0) {
+      console.log(`        許可 API: ${targets.map((t) => t.service).join(', ')}`);
+    }
+    console.log('');
+    return;
+  }
+}
+
+const apiKey = config?.firebaseApiKey ?? '';
+const origin = (config?.appBaseUrl || (config?.customDomain ? `https://${config.customDomain}` : ''))
+  .replace(/\/+$/, '');
+
+if (!apiKey || !origin) {
+  info('firebaseApiKey または appBaseUrl が未設定のため省略しました。');
+} else {
+  const probe = await probeApiKey(apiKey, origin);
+  if (probe.ok) {
+    success(`${origin} から利用できます`);
+  } else if (/referer|referrer/i.test(probe.message)) {
+    // 既存アプリのブラウザキーを流用していると、この状態になる。
+    warn('API キーの HTTP リファラー制限で拒否されました。');
+    info(`  ${probe.message}`);
+    describeRestrictedKey(apiKey);
+    info('既存アプリのキーを共用していると、この制限に当たります。');
+    info('SmileQ Live 専用のキーへ切り替えてください（既存アプリのキーは変更しないこと）:');
+    info(`  npm run firebase:config -- --project=${projectId} --new-api-key`);
+    info('  npm run deploy -- production');
+  } else if (/API_KEY_SERVICE_BLOCKED|blocked|SERVICE_DISABLED/i.test(probe.message)) {
+    warn('API キーの API 制限で拒否されました。');
+    info(`  ${probe.message}`);
+    describeRestrictedKey(apiKey);
+    info('Identity Toolkit API を許可するか、専用キーへ切り替えてください:');
+    info(`  npm run firebase:config -- --project=${projectId} --new-api-key`);
+  } else if (/API key not valid|API_KEY_INVALID/i.test(probe.message)) {
+    warn('API キーが無効です。');
+    info(`  ${probe.message}`);
+    info(`  npm run firebase:config -- --project=${projectId} --new-api-key`);
+  } else {
+    warn(`疎通できませんでした（HTTP ${probe.status}）`);
+    info(`  ${probe.message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 heading('次の手順');
 if (google?.enabled) {
   console.log('  1. 司会者本人に一度ログインしてもらう:');

@@ -8,6 +8,7 @@
  *   npm run firebase:config -- staging           … 書き込み先の環境を指定
  *   npm run firebase:config -- --print           … 書き込まず表示だけ
  *   npm run firebase:config -- --app-id 1:...    … 既知の Web アプリを直接指定
+ *   npm run firebase:config -- --new-api-key     … 専用の API キーを作り直す
  *
  * GUI（Firebase コンソール）を開く必要はない。
  * ここで扱う値はすべて**公開前提の識別子**であり秘密情報ではない
@@ -51,6 +52,10 @@ process.chdir(fileURLToPath(new URL('..', import.meta.url)));
 
 const { positional, flags } = parseArgs(process.argv.slice(2));
 const printOnly = flags.has('print');
+/** 既存アプリのキーと取り違えないよう、専用キーの名前を固定する。 */
+const DEDICATED_KEY_NAME = 'SmileQ Live Web';
+/** 制限に当たったキーを捨てて作り直したいときに使う。 */
+const forceNewApiKey = flags.has('new-api-key');
 const targetEnv = positional.find((value) => ENVIRONMENTS.includes(value)) ?? 'production';
 
 heading('Firebase の公開設定を取得');
@@ -657,15 +662,28 @@ function configFromGcloud() {
     info(`  有効化: gcloud services enable apikeys.googleapis.com --project ${projectId}`);
   }
 
-  // 削除済み（DELETED）のキーは除く。Firebase が自動生成したブラウザ用キーを優先する。
+  // 既存アプリのキーを流用しない。
+  //
+  // Firebase が自動生成した「Browser key」は既存アプリのものであり、
+  // 多くの場合 HTTP リファラー制限が既存アプリのドメインに限定されている。
+  // それを使い回すと、ブラウザからのログインが
+  //   Requests from referer https://<新ドメイン>/ are blocked.
+  // で拒否される（画面には原因が出ない）。専用のキーだけを使う。
   const usable = keys.filter((key) => !key.deleteTime);
-  const preferred =
-    usable.find((key) => /browser key|Web API Key|Firebase/i.test(key.displayName ?? '')) ??
-    usable[0];
+  const dedicated = usable.find((key) => key.displayName === DEDICATED_KEY_NAME);
 
-  let keyName = preferred?.name ?? '';
+  if (!dedicated && usable.length > 0) {
+    info(`既存の API キーが ${usable.length} 件ありますが、流用しません。`);
+    info('（既存アプリ用のキーはリファラー制限が別ドメインに限定されていることが多いため）');
+  }
+
+  let keyName = dedicated?.name ?? '';
+  if (forceNewApiKey && keyName) {
+    info(`--new-api-key のため、既存の「${DEDICATED_KEY_NAME}」とは別に作り直します。`);
+    keyName = '';
+  }
   if (!keyName) {
-    info('使える API キーが見つかりませんでした。新しく作成します。');
+    info(`SmileQ Live 専用の API キーを作成します: ${DEDICATED_KEY_NAME}`);
     const createdKey = run(
       'gcloud',
       [
@@ -673,7 +691,7 @@ function configFromGcloud() {
         'api-keys',
         'create',
         `--project=${projectId}`,
-        '--display-name=SmileQ Live Web',
+        `--display-name=${DEDICATED_KEY_NAME}`,
         '--format=value(response.name)',
       ],
       { capture: true, quiet: true, allowFailure: true },
