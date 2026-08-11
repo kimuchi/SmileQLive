@@ -6,6 +6,7 @@
  *   npm run seed:demo -- --project my-proj
  *   npm run seed:demo -- --owner you@example.com   … 所有者を指定
  *   npm run seed:demo -- --replace        … 同名のデモクイズを作り直す
+ *   npm run seed:demo -- --cleanup-stray  … 誤ってトップレベルへ書かれた問題を削除する
  *
  * 収録する問題（型を一通り網羅する）:
  *   1. 2 択                       … 問題画像 + 解説画像
@@ -32,6 +33,7 @@ import {
   DEMO_DESCRIPTION,
   DEMO_MEDIA,
   DEMO_TITLE,
+  questionsPath,
   toDomainQuestions,
 } from './lib/demo-quiz.mjs';
 
@@ -113,6 +115,37 @@ const db = getFirestore(app, databaseId);
 const auth = getAuth(app);
 const bucket = getStorage(app).bucket(bucketName);
 
+/** 問題のサブコレクション（quizzes/{quizId}/questions）。 */
+function questionsRef(id) {
+  const [root, docId, sub] = questionsPath(id);
+  return db.collection(root).doc(docId).collection(sub);
+}
+
+// ---------------------------------------------------------------------------
+// 以前のバージョンはトップレベルの `questions` へ書いていた。
+// アプリは quizzes/{quizId}/questions を読むため、その分は使われないまま残る。
+// 消しても現在の動作には影響しないので、掃除だけを行う入口を用意する。
+if (flags.has('cleanup-stray')) {
+  heading('誤った場所に残った問題を削除');
+  const strays = await db.collection('questions').get();
+  if (strays.empty) {
+    success('トップレベルの questions は空です。掃除は不要です。');
+    process.exit(0);
+  }
+  info(`トップレベルの questions に ${strays.size} 件あります。`);
+  const proceed =
+    flags.has('yes') || !isInteractive() ? true : await confirmYesNo('削除しますか？', true);
+  if (!proceed) {
+    warn('中止しました。');
+    process.exit(0);
+  }
+  for (const doc of strays.docs) {
+    await doc.ref.delete();
+  }
+  success(`${strays.size} 件を削除しました。`);
+  process.exit(0);
+}
+
 // ---------------------------------------------------------------------------
 step('所有者を決定');
 
@@ -179,9 +212,14 @@ if (!existing.empty) {
 
   for (const doc of existing.docs) {
     // 問題 → 画像 → クイズ の順に消す（参照が残らないようにする）。
-    const questions = await db.collection('questions').where('quizId', '==', doc.id).get();
+    const questions = await questionsRef(doc.id).get();
     for (const question of questions.docs) {
       await question.ref.delete();
+    }
+    // 以前のバージョンがトップレベルの questions へ書いていた分も片付ける。
+    const strays = await db.collection('questions').where('quizId', '==', doc.id).get();
+    for (const stray of strays.docs) {
+      await stray.ref.delete();
     }
     const assets = await db.collection('mediaAssets').where('ownerId', '==', ownerId).get();
     for (const asset of assets.docs) {
@@ -342,7 +380,7 @@ batch.set(db.collection('quizzes').doc(quizId), {
 });
 
 for (const question of questions) {
-  batch.set(db.collection('questions').doc(question.id), question);
+  batch.set(questionsRef(quizId).doc(question.id), question);
 }
 
 await batch.commit();
@@ -364,7 +402,9 @@ step('書き込んだ内容を読み直して点検');
 async function inspect() {
   const problems = [];
 
-  const storedQuestions = await db.collection('questions').where('quizId', '==', quizId).get();
+  // アプリと同じ場所（quizzes/{quizId}/questions）から読む。
+  // ここを別の場所にすると、点検が自分の書き間違いを追認してしまう。
+  const storedQuestions = await questionsRef(quizId).get();
   if (storedQuestions.size !== questions.length) {
     problems.push(`問題が ${storedQuestions.size} 件しか読めません（期待 ${questions.length} 件）`);
   }

@@ -4,8 +4,10 @@ import {
   DEMO_MEDIA,
   DEMO_QUESTIONS,
   DEMO_TITLE,
+  questionsPath,
   toDomainQuestions,
 } from '../../../scripts/lib/demo-quiz.mjs';
+import { COLLECTIONS } from '@/types/firestore';
 import { validateQuizForPublish } from '@/domain/quiz/publish-validation';
 import { judgeNumberAnswerText } from '@/domain/answer/number-judgement';
 import { normalizeNumberAnswer } from '@/domain/answer/number-normalizer';
@@ -97,6 +99,14 @@ describe('デモクイズ', () => {
         `第${testCase.position}問 "${testCase.input}" は ${testCase.expected ? '正解' : '不正解'} のはず`,
       ).toBe(testCase.expected);
     }
+  });
+
+  it('問題の保存先がアプリ側と一致している', () => {
+    // questions はトップレベルではなく quizzes/{quizId} のサブコレクション
+    // （src/infrastructure/firebase/paths.ts の questionsCollection）。
+    // ここがずれるとクイズは一覧に出るのに中身が 0 問になり、
+    // ルーム作成が「問題を1問以上作成してください」で止まる。
+    expect(questionsPath('QUIZ')).toEqual([COLLECTIONS.quizzes, 'QUIZ', COLLECTIONS.questions]);
   });
 
   it('解説文が正解を説明している（空でない）', () => {

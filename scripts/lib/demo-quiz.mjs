@@ -16,6 +16,19 @@
  */
 
 export const DEMO_TITLE = 'SmileQ Live 動作確認クイズ';
+
+/**
+ * 問題の保存先。
+ *
+ * **`questions` はトップレベルではなく `quizzes/{quizId}` のサブコレクション。**
+ * ここを間違えるとクイズ自体は一覧に出るのに中身が 0 問になり、
+ * ルーム作成が「問題を1問以上作成してください」で止まる。
+ * アプリ側の paths.ts（questionsCollection）と一致していること。
+ * tests/unit/scripts/demo-quiz.test.ts で突き合わせている。
+ */
+export function questionsPath(quizId) {
+  return ['quizzes', quizId, 'questions'];
+}
 export const DEMO_DESCRIPTION =
   '選択式と数値入力をひととおり収録したデモです。会場での動作確認に使えます。';
 
