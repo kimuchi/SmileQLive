@@ -42,6 +42,9 @@ const VALUE_FLAGS = new Set([
   'uid', // host:remove で uid を直接指定する
   'database', // host:* で Firestore データベースを直接指定する
   'app-id', // firebase:config で既知の Web アプリを指定する
+  'owner', // seed:demo でクイズの所有者を指定する
+  'bucket', // seed:demo で画像バケットを指定する
+  'from', // sounds:install で取り込み元ディレクトリを指定する
 ]);
 
 export function parseArgs(argv) {

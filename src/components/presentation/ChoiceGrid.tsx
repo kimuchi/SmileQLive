@@ -36,7 +36,10 @@ export function ChoiceGrid({ choices, results = null, correctChoiceId = null }: 
 
   return (
     <ul
-      className={cn('grid w-full list-none', choiceGridClassName(count))}
+      // stage-stagger: 選択肢を少しずつ遅らせて出す（出現順で視線を誘導する）。
+      // key に count と revealing を含め、問題が変わったときと発表時に再生し直す。
+      key={`${count}-${revealing}`}
+      className={cn('stage-stagger grid w-full list-none', choiceGridClassName(count))}
       style={{ gap: stageSize(24) }}
     >
       {choices.map((choice, index) => {
@@ -50,10 +53,11 @@ export function ChoiceGrid({ choices, results = null, correctChoiceId = null }: 
               'flex flex-col border-4 transition-colors',
               choiceCellClassName(count, index),
               isCorrect
-                ? 'border-emerald-300 bg-emerald-400/20 text-white'
+                ? // 正解は一度だけ弾ませ、発表の瞬間を見逃さないようにする。
+                  'stage-pop border-emerald-300 bg-emerald-400/20 text-white shadow-[0_0_0_0.6cqw_rgba(16,185,129,0.25)]'
                 : revealing
                   ? // 不正解は控えめにするが、会場から読める明るさは保つ。
-                    'border-white/20 bg-white/5 text-white/80'
+                    'border-white/20 bg-white/5 text-white/80 opacity-70'
                   : 'border-white/30 bg-white/10 text-white',
             )}
             style={{

@@ -227,7 +227,17 @@ export function PresentScreen({ roomId }: { roomId: string }) {
           />
         }
       >
-        {body}
+        {/*
+          場面（フェーズ・問題）が変わるたびに入場効果をやり直す。
+          key を変えることで React が要素を作り直し、CSS アニメーションが再生される。
+          会場では画面の切り替わりが伝わりにくいため、動きで「変わった」ことを示す。
+        */}
+        <div
+          key={`${phase}-${snapshot.currentQuestion?.id ?? ''}`}
+          className="stage-enter flex min-h-0 flex-1 flex-col justify-center"
+        >
+          {body}
+        </div>
       </StageFrame>
       {controls}
       {overlay}

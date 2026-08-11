@@ -31,6 +31,8 @@ export function RankingStage({
   finished: boolean;
 }) {
   const entries = (leaderboard ?? []).slice(0, MAX_VISIBLE);
+  // 得点帯の基準。1 位の得点を 100% とする（0 点しかいない場合は帯を出さない）。
+  const topPoints = entries.reduce((max, entry) => Math.max(max, entry.totalPoints), 0);
   const title = finished ? 'クイズは終了しました' : 'ランキング';
 
   const columns: RankedParticipant[][] =
@@ -74,14 +76,14 @@ export function RankingStage({
           {columns.map((column, columnIndex) => (
             <ol
               key={columnIndex}
-              className="flex min-w-0 flex-1 list-none flex-col"
+              className="stage-stagger flex min-w-0 flex-1 list-none flex-col"
               style={{ gap: stageSize(16) }}
             >
               {column.map((entry) => (
                 <li
                   key={entry.participantId}
                   className={cn(
-                    'flex items-center border-4 text-white',
+                    'relative flex items-center overflow-hidden border-4 text-white',
                     rankAccentClassName(entry.rank),
                   )}
                   style={{
@@ -90,21 +92,33 @@ export function RankingStage({
                     gap: stageSize(24),
                   }}
                 >
+                  {/*
+                    得点の帯。数字だけだと差が伝わりにくいので、
+                    1 位を基準にした長さで「どれくらい離れているか」を見せる。
+                  */}
+                  <div
+                    aria-hidden="true"
+                    className="absolute inset-y-0 left-0 bg-white/10"
+                    style={{
+                      width: `${topPoints > 0 ? (entry.totalPoints / topPoints) * 100 : 0}%`,
+                      transition: 'width 600ms cubic-bezier(0.16, 1, 0.3, 1)',
+                    }}
+                  />
                   <span
-                    className="shrink-0 text-center font-bold tabular-nums"
+                    className="relative shrink-0 text-center font-bold tabular-nums"
                     style={{ width: stageSize(120), fontSize: stageSize(STAGE_FONT.heading) }}
                   >
                     {formatInteger(entry.rank)}
                     <span style={{ fontSize: stageSize(STAGE_FONT.caption) }}>位</span>
                   </span>
                   <span
-                    className="min-w-0 flex-1 truncate font-bold"
+                    className="relative min-w-0 flex-1 truncate font-bold"
                     style={{ fontSize: stageSize(STAGE_FONT.choice) }}
                   >
                     {entry.nickname}
                   </span>
                   <span
-                    className="shrink-0 font-bold tabular-nums"
+                    className="relative shrink-0 font-bold tabular-nums"
                     style={{ fontSize: stageSize(STAGE_FONT.choice) }}
                   >
                     {formatPoints(entry.totalPoints)}

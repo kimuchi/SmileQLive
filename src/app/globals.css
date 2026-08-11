@@ -50,6 +50,7 @@ button {
 
 /* 投影画面 16:9 用ユーティリティ */
 .stage-root {
+  position: relative;
   background: radial-gradient(
     ellipse at top,
     var(--color-stage-800) 0%,
@@ -57,6 +58,103 @@ button {
   );
   color: #fff;
   min-height: 100dvh;
+  overflow: hidden;
+}
+
+/*
+ * 背景の淡い光。会場では画面が大きく、単色の背景は「止まって見える」。
+ * ゆっくり動く光を 1 枚重ねるだけで、映像が生きている印象になる。
+ * 文字と重ならないよう彩度・輝度は低く抑え、可読性を下げない。
+ */
+.stage-root::before {
+  content: '';
+  position: absolute;
+  inset: -20%;
+  background:
+    radial-gradient(circle at 20% 25%, rgba(89, 165, 255, 0.16), transparent 45%),
+    radial-gradient(circle at 80% 70%, rgba(16, 185, 129, 0.12), transparent 45%);
+  animation: stage-drift 24s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes stage-drift {
+  from {
+    transform: translate3d(-2%, -1%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(2%, 1%, 0) scale(1.08);
+  }
+}
+
+/* 場面が切り替わったことを一目で分かるようにする入場効果。 */
+@keyframes stage-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 1.4cqw, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.stage-enter {
+  animation: stage-enter 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/*
+ * 選択肢を少しずつ遅らせて出す。
+ * 同時に出すより「何個あるか」が把握しやすく、読み始めの視線も誘導できる。
+ */
+.stage-stagger > * {
+  animation: stage-enter 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.stage-stagger > *:nth-child(1) {
+  animation-delay: 60ms;
+}
+.stage-stagger > *:nth-child(2) {
+  animation-delay: 130ms;
+}
+.stage-stagger > *:nth-child(3) {
+  animation-delay: 200ms;
+}
+.stage-stagger > *:nth-child(4) {
+  animation-delay: 270ms;
+}
+.stage-stagger > *:nth-child(5) {
+  animation-delay: 340ms;
+}
+
+/* 正解の強調。発表の瞬間に一度だけ弾ませる。 */
+@keyframes stage-pop {
+  0% {
+    transform: scale(0.94);
+  }
+  60% {
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.stage-pop {
+  animation: stage-pop 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* 締切間際の脈動。色に加えて動きでも気付けるようにする。 */
+@keyframes stage-urgent {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.stage-urgent {
+  animation: stage-urgent 1s steps(2, jump-none) infinite;
 }
 
 /* 投影画面のフォントは 1920x1080 基準で cqw ではなく vw ベースに寄せる */

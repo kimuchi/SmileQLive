@@ -66,13 +66,15 @@ Firebase の準備は [docs/FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md) を参照
 pnpm emulators     # Firestore / Auth / Storage / UI(http://127.0.0.1:4000)
 ```
 
-効果音のプレースホルダを生成する場合（自家生成 WAV。ライセンス問題なし）:
+効果音は 2 通りあります。
 
 ```bash
-node scripts/generate-placeholder-sounds.mjs
+node scripts/generate-placeholder-sounds.mjs   # 自家生成のプレースホルダ（すぐ鳴る・権利問題なし）
+npm run sounds:install                          # 効果音ラボから取り込む（手順を表示）
 ```
 
-本番用の効果音は各自で用意し、`public/sounds/LICENSE.md` に出典を記録してください。
+配布元の規約で**素材の再配布が禁止**されているため、音源はリポジトリに含めていません。
+環境ごとに `npm run sounds:install` を実行してください（出典は `public/sounds/LICENSE.md` へ自動記録されます）。
 
 ---
 
@@ -97,6 +99,7 @@ npm run rules:deploy -- production        # Security Rules とインデックス
 npm run deploy -- production
 npm run host:add -- you@example.com --name "あなたの名前"   # 最初の司会者
 npm run domain:map -- production          # カスタムドメイン
+npm run seed:demo                         # 動作確認用のデモクイズ（任意）
 ```
 
 > **Secret Manager の手順はありません。** Cloud Run 上の Admin SDK は実行サービスアカウントの
@@ -140,6 +143,8 @@ npm run domain:map -- production          # カスタムドメイン
 | `npm run domain:map` / `domain:status` | カスタムドメイン設定・確認 |
 | `npm run firebase:config` | Firebase の公開設定を CLI で取得し設定ファイルへ書き込む（GUI 不要） |
 | `npm run firebase:auth` | Authentication の初期化・匿名認証の有効化・承認済みドメインの追加 |
+| `npm run seed:demo` | 動作確認用のデモクイズを作成（画像つき 6 問） |
+| `npm run sounds:install` | 効果音の入手手順を表示 / ダウンロード済みの音源を取り込む |
 | `npm run firebase:doctor` | Firebase が使える状態か診断（変更しない） |
 | `npm run gcp:bootstrap` | Google Cloud 初期設定（冪等） |
 

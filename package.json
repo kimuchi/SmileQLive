@@ -42,7 +42,9 @@
     "firebase:config": "node scripts/firebase-config.mjs",
     "firebase:login": "npx --yes firebase-tools@15 login",
     "firebase:doctor": "node scripts/firebase-doctor.mjs",
-    "firebase:auth": "node scripts/firebase-auth-init.mjs"
+    "firebase:auth": "node scripts/firebase-auth-init.mjs",
+    "seed:demo": "node scripts/seed-demo-quiz.mjs",
+    "sounds:install": "node scripts/install-sounds.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "5.7.1",

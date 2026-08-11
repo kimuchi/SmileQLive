@@ -39,6 +39,12 @@ deploy/cloud-run.*.json
 supabase/.temp/
 supabase/.branches/
 
+# 効果音（配布元の規約で再配布禁止のためコミットしない）
+# 取得方法は public/sounds/README.md / npm run sounds:install を参照
+/public/sounds/*.mp3
+/public/sounds/*.wav
+/public/sounds/*.ogg
+
 # misc
 .DS_Store
 *.pem
