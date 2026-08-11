@@ -22,7 +22,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
-import { color, fatal, heading, info, step, success, warn } from './lib/log.mjs';
+import { color, fatal, heading, info, step, success } from './lib/log.mjs';
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 process.chdir(repoRoot);
@@ -56,6 +56,24 @@ function collectFiles(dir, extensions) {
   };
   walk(dir);
   return out;
+}
+
+/**
+ * パス区切りを `/` へ揃える。
+ *
+ * Windows では join が `\` を返すため、`/play/` のような判定が必ず外れる。
+ * 検査が「対象なし」で素通りし、成果物を見ていないのに成功と表示されていた。
+ */
+function toPosix(path) {
+  return path.replace(/\\/g, '/');
+}
+
+/** ルート（/j/ や /play/）に対応する成果物を選ぶ。 */
+function filesForRoutes(files, routes) {
+  return files.filter((file) => {
+    const path = toPosix(file);
+    return routes.some((route) => path.includes(route));
+  });
 }
 
 const clientFiles = collectFiles(STATIC_DIR, ['.js', '.mjs']);
@@ -136,12 +154,17 @@ step('3. 参加者経路へ音声処理が混入していないこと');
 // 投影画面 (present) のチャンクだけが音声を持ってよい。
 // クライアントチャンクは名前から画面を特定できないため、
 // サーバー側の参加者ページの成果物を検査する。
-const participantServerFiles = collectFiles(SERVER_DIR, ['.js']).filter(
-  (file) => file.includes('/play/') || file.includes('/j/') || file.includes('participant'),
-);
+const participantServerFiles = filesForRoutes(collectFiles(SERVER_DIR, ['.js']), [
+  '/play/',
+  '/j/',
+  'participant',
+]);
 
 if (participantServerFiles.length === 0) {
-  warn('参加者ページの成果物が見つかりませんでした（未実装の可能性）。');
+  // 参加者ページは必ず存在する。0 件は「安全」ではなく「検査できていない」。
+  failures.push('参加者ページの成果物が見つからず、音声処理の有無を検査できませんでした');
+  console.error(`    ${color.red('✖')} 参加者ページの成果物が見つかりません（検査できていません）`);
+  console.error(`        探索先: ${SERVER_DIR}`);
 } else {
   const audioHits = participantServerFiles.filter((file) => {
     const content = readFileSync(file, 'utf8');
@@ -164,12 +187,13 @@ if (participantServerFiles.length === 0) {
 // ---------------------------------------------------------------------------
 step('4. 参加導線にルームコード入力欄が無いこと');
 
-const joinServerFiles = collectFiles(SERVER_DIR, ['.js']).filter(
-  (file) => file.includes('/j/') || file.includes('/play/'),
-);
+const joinServerFiles = filesForRoutes(collectFiles(SERVER_DIR, ['.js']), ['/j/', '/play/']);
 
 if (joinServerFiles.length === 0) {
-  warn('参加ページの成果物が見つかりませんでした（未実装の可能性）。');
+  // 同上。二次元コード参加は仕様の中心なので、見ていないまま通してはいけない。
+  failures.push('参加ページの成果物が見つからず、ルームコード入力の有無を検査できませんでした');
+  console.error(`    ${color.red('✖')} 参加ページの成果物が見つかりません（検査できていません）`);
+  console.error(`        探索先: ${SERVER_DIR}`);
 } else {
   const codeInputHits = joinServerFiles.filter((file) => {
     const content = readFileSync(file, 'utf8');
