@@ -233,6 +233,16 @@ cp deploy/cloud-run.staging.example.json deploy/cloud-run.staging.json
 >   `serviceAccount` は必ず `<name>@<projectId>.iam.gserviceaccount.com` の形にしてください。
 >   `npm run firebase:config` を使えば、この 2 つも自動で揃います。
 
+> **firebase CLI の認証は期限切れになります。**
+> `Authentication Error: Your credentials are no longer valid.` が出たら取り直してください。
+>
+> ```bash
+> npm run firebase:login
+> ```
+>
+> `npm run rules:deploy` は本番の確認プロンプトより**前**に認証を確かめます
+> （「反映しますか？」に答えたあとで失敗しないようにするため）。
+
 ### 2.5 Google Cloud の初期設定
 
 ```bash

@@ -40,7 +40,7 @@
     "deploy:doctor": "node scripts/deploy-doctor.mjs",
     "verify:bundle": "node scripts/verify-bundle.mjs",
     "firebase:config": "node scripts/firebase-config.mjs",
-    "firebase:login": "npx --yes firebase-tools@15 login",
+    "firebase:login": "npx --yes firebase-tools@15 login --reauth",
     "firebase:doctor": "node scripts/firebase-doctor.mjs",
     "firebase:auth": "node scripts/firebase-auth-init.mjs",
     "seed:demo": "node scripts/seed-demo-quiz.mjs",

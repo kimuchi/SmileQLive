@@ -200,13 +200,57 @@ step('firebase CLI を確認');
 const hasFirebaseCli = commandExists('firebase');
 const runner = hasFirebaseCli
   ? { bin: 'firebase', prefix: [] }
-  : { bin: 'npx', prefix: ['--yes', 'firebase-tools'] };
+  : { bin: 'npx', prefix: ['--yes', 'firebase-tools@15'] };
 
 if (hasFirebaseCli) {
   success('firebase CLI を使用します');
 } else {
-  info('firebase CLI が無いため npx --yes firebase-tools で実行します（初回は取得に時間がかかります）。');
+  info('firebase CLI が無いため npx --yes firebase-tools@15 で実行します（初回は取得に時間がかかります）。');
   console.log(`  ${color.dim('常用する場合は npm install -g firebase-tools を推奨します。')}`);
+}
+
+/** ログインし直すコマンド（このスクリプトが使う実行方法に合わせる）。 */
+const reauthCommand = `${runner.bin} ${[...runner.prefix, 'login', '--reauth'].join(' ')}`;
+
+/** 認証切れかどうか。文言は firebase CLI が出すもの。 */
+function isAuthExpired(text) {
+  return (
+    /credentials are no longer valid/i.test(text) ||
+    /Authentication Error/i.test(text) ||
+    /Failed to authenticate/i.test(text) ||
+    /No authorized accounts/i.test(text)
+  );
+}
+
+function fatalAuthExpired() {
+  fatal(
+    'firebase CLI の認証が切れています。',
+    [
+      'ログインし直してから、もう一度実行してください:',
+      `  ${reauthCommand}`,
+      '',
+      'ブラウザを開けない環境では:',
+      `  ${runner.bin} ${[...runner.prefix, 'login', '--reauth', '--no-localhost'].join(' ')}`,
+      '',
+      'CI では GOOGLE_APPLICATION_CREDENTIALS か FIREBASE_TOKEN を使います。',
+    ].join('\n'),
+  );
+}
+
+// 認証は本番確認より前に確かめる。
+// 「本番へ反映しますか？」に答えたあとで認証切れに気付くのは手戻りが大きい。
+step('ログイン状態を確認');
+{
+  const loginCheck = run(runner.bin, [...runner.prefix, 'login:list'], {
+    capture: true,
+    quiet: true,
+    allowFailure: true,
+  });
+  const output = `${loginCheck.stdout ?? ''}\n${loginCheck.stderr ?? ''}`;
+  if (!loginCheck.ok || isAuthExpired(output)) {
+    fatalAuthExpired();
+  }
+  success(output.split(/\r?\n/).find((line) => line.includes('@'))?.trim() ?? 'ログイン済み');
 }
 
 // firebase.json の storage.bucket はプレースホルダのまま置いてある。
@@ -309,11 +353,15 @@ step('反映');
 const result = run(runner.bin, deployArgs, { allowFailure: true });
 
 if (!result.ok) {
+  // 反映中に期限が切れることもあるため、ここでも認証切れを見分ける。
+  if (isAuthExpired(`${result.stdout ?? ''}\n${result.stderr ?? ''}`)) {
+    fatalAuthExpired();
+  }
   fatal(
     'Rules / インデックスの反映に失敗しました。',
     [
       'よくある原因:',
-      '  * firebase login が済んでいない  → firebase login',
+      `  * 認証が切れている               → ${reauthCommand}`,
       '    （CI では GOOGLE_APPLICATION_CREDENTIALS か FIREBASE_TOKEN を使う）',
       `  * プロジェクト ID が違う         → ${projectId} を確認`,
       '  * Firestore がまだ作成されていない → docs/FIREBASE_SETUP.md §4',

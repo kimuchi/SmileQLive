@@ -91,7 +91,7 @@ npm run deploy           # Cloud Run へデプロイ
 cp deploy/cloud-run.production.example.json deploy/cloud-run.production.json
 # 編集（プロジェクト ID、ドメイン、Firebase の公開設定）
 
-npm run firebase:login                    # 初回のみ（ブラウザが開きます）
+npm run firebase:login                    # ログイン（期限切れ時もこれで取り直します）
 npm run firebase:config                   # Firebase の公開設定をCLIで取得し設定ファイルへ書き込む
 npm run gcp:bootstrap -- production       # API 有効化・SA 作成・Firebase 権限付与
 npm run firebase:auth -- production       # Authentication の初期化（Google 有効化のみ GUI）
