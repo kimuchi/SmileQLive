@@ -146,6 +146,8 @@ export type RoomListItem = {
   finishedAt: string | null;
 };
 
+export type RoomListResponse = { rooms: RoomListItem[] };
+
 // ---------------------------------------------------------------------------
 // 参加
 // ---------------------------------------------------------------------------

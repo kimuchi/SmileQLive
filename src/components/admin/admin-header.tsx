@@ -19,7 +19,8 @@ export type AdminHeaderNav = 'quizzes' | 'rooms' | 'none';
 
 const NAV_ITEMS: ReadonlyArray<{ key: AdminHeaderNav; href: string; label: string }> = [
   { key: 'quizzes', href: '/admin/quizzes', label: 'クイズ一覧' },
-  { key: 'rooms', href: '/admin/rooms/new', label: 'ルーム作成' },
+  // 司会画面へ戻る導線。ルーム作成直後の画面を離れても進行へ復帰できるようにする。
+  { key: 'rooms', href: '/admin/rooms', label: 'ルーム一覧' },
 ];
 
 export type AdminHeaderProps = {

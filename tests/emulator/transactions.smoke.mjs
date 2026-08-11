@@ -10,12 +10,14 @@
  *   2. 同時実行しても回答が二重登録されない
  *   3. 状態遷移の stateVersion 競合検出
  *   4. 締切後の回答を受け付けない
- *   5. 参加者登録の冪等性とニックネーム重複の拒否
+ *   5. ニックネーム重複の拒否
  *   6. 数値判定が境界値を含めて正しい（両端を含む）
  *   7. 得点集計が回答と同じトランザクションで更新される
  *
  * 注意: このスクリプトは Admin SDK で動くため Security Rules は適用されない。
  *       Rules 自体の検証は tests/rules/ が担当する。
+ *       同じ端末での再参加（参加者登録の冪等性）は
+ *       tests/integration/participant-rejoin.test.ts が実コードで検証する。
  */
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore, Timestamp } from 'firebase-admin/firestore';

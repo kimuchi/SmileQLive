@@ -6,6 +6,7 @@ import { HostConsole, type HostQuestionOutline } from '@/components/admin/host-c
 import { FullScreenMessage } from '@/components/shared/FullScreenMessage';
 import { parseQuizSnapshot } from '@/application/services/quiz-snapshot-codec';
 import { requireRoomOwner } from '@/lib/auth/session';
+import { AppError } from '@/lib/errors/app-error';
 import { uuidSchema } from '@/lib/validation/schemas';
 
 /**
@@ -40,7 +41,12 @@ export default async function HostRoomPage({ params }: { params: Promise<{ roomI
   const parsed = uuidSchema.safeParse(roomId);
 
   if (!parsed.success) {
-    return <HostUnavailable />;
+    return (
+      <HostUnavailable
+        title="ルームの URL が正しくありません"
+        description="クイズ一覧からルームを作成し直すか、司会用のリンクを開き直してください。"
+      />
+    );
   }
 
   let quizTitle = '';
@@ -58,9 +64,34 @@ export default async function HostRoomPage({ params }: { params: Promise<{ roomI
         type: question.type,
         summary: summarize(question.text, question.image !== null),
       }));
-  } catch {
-    // 権限が無い・ルームが無い場合は理由を明かさず、共通の案内だけを出す。
-    return <HostUnavailable />;
+  } catch (error) {
+    // この画面は司会者だけが開ける（未ログインは手前で弾かれる）。
+    // 相手が運営担当者である以上、原因を伏せると自分で直せない。
+    // 「見つからない」と「自分のルームではない」は対処が違うので分けて伝える。
+    const code = error instanceof AppError ? error.code : '';
+
+    if (code === 'ROOM_NOT_FOUND') {
+      return (
+        <HostUnavailable
+          title="ルームが見つかりません"
+          description="削除されたか、URL が違う可能性があります。クイズ一覧からルームを作成し直してください。"
+        />
+      );
+    }
+    if (code === 'FORBIDDEN') {
+      return (
+        <HostUnavailable
+          title="このルームの司会者ではありません"
+          description="ルームを操作できるのは作成した本人だけです。共有されたクイズでも、ルームは各自で作成してください。"
+        />
+      );
+    }
+    return (
+      <HostUnavailable
+        title="このルームを開けません"
+        description="ルームが見つからないか、司会の権限がありません。URL をご確認ください。"
+      />
+    );
   }
 
   return (
@@ -81,11 +112,11 @@ export default async function HostRoomPage({ params }: { params: Promise<{ roomI
   );
 }
 
-function HostUnavailable() {
+function HostUnavailable({ title, description }: { title: string; description: string }) {
   return (
     <FullScreenMessage
-      title="このルームを開けません"
-      description="ルームが見つからないか、司会の権限がありません。URL をご確認ください。"
+      title={title}
+      description={description}
       tone="error"
       actions={
         <Link href="/admin/quizzes" className="text-brand-700 font-bold hover:underline">

@@ -126,7 +126,32 @@ export function JoinScreen({ joinToken }: { joinToken: string }) {
           router.replace(`/play/${info.roomId}`);
           return;
         }
+
+        // ここまでの resolve は認証と**並行**に走らせている。
+        // セッションクッキーがまだ張られていないと、参加済みでも
+        // alreadyJoinedNickname は null になる（サーバーが本人を特定できないため）。
+        // 同じ端末で同じ二次元コードを読み直したときに、
+        // ニックネーム入力からやり直させないよう、認証が整ってから一度だけ確かめ直す。
         setState({ kind: 'ready', info });
+
+        const authed = await sessionPromise.catch(() => false);
+        if (cancelled || !authed) {
+          return;
+        }
+
+        try {
+          const recheck = await apiGet<JoinResolveResponse>(
+            `/api/join/${encodeURIComponent(joinToken)}/resolve`,
+          );
+          if (cancelled || recheck.alreadyJoinedNickname === null) {
+            return;
+          }
+          setState({ kind: 'redirecting' });
+          router.replace(`/play/${recheck.roomId}`);
+        } catch {
+          // 確かめ直しに失敗しても、ニックネーム入力からの参加は続けられる。
+          // 二重登録にはならない（同じ匿名利用者なら既存の参加者行が返る）。
+        }
       } catch (caught) {
         if (cancelled) {
           return;

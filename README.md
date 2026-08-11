@@ -138,6 +138,7 @@ npm run seed:demo                         # 動作確認用のデモクイズ（
 | `npm run rules:deploy` | Security Rules とインデックスを反映 |
 | `npm run test:rules` | Rules をエミュレータへ適用して検証（Java 必要） |
 | `npm run test:emulator` | トランザクションの不変条件を実測（Java 必要） |
+| `npm run emulators` + `pnpm test` | 参加者の再参加テストはエミュレータ接続時のみ実行（未接続ならスキップ） |
 | `npm run emulators` | ローカルエミュレータを起動 |
 | `npm run host:list` / `host:add` / `host:remove` | 司会者の確認・登録・削除 |
 | `npm run domain:map` / `domain:status` | カスタムドメイン設定・確認 |
