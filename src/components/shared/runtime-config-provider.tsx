@@ -43,6 +43,39 @@ export function RuntimeConfigProvider({
   value: RuntimeConfig;
   children: ReactNode;
 }) {
+  // 設定が届いた時点で Firebase を初期化しておく。
+  //
+  // 以前は初期化が useFirebaseAuth / useOptionalFirestore などのフック内でだけ行われ、
+  // そのフックを使わない画面（管理ログイン）では未初期化のまま
+  // signInWithGoogle() が呼ばれ、素の Error で失敗していた。
+  // 「先にフックを呼んでおくこと」という暗黙の順序に頼らない。
+  useMemo(() => {
+    if (!value.firebaseApiKey || !value.firebaseAuthDomain || !value.firebaseProjectId) {
+      // 設定不足は各画面が「構成エラー」として表示する。ここでは落とさない。
+      return false;
+    }
+    try {
+      initializeFirebaseClient({
+        apiKey: value.firebaseApiKey,
+        authDomain: value.firebaseAuthDomain,
+        projectId: value.firebaseProjectId,
+        storageBucket: value.firebaseStorageBucket,
+        ...(value.firebaseAppId ? { appId: value.firebaseAppId } : {}),
+        firestoreDatabaseId: value.firestoreDatabaseId,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }, [
+    value.firebaseApiKey,
+    value.firebaseAuthDomain,
+    value.firebaseProjectId,
+    value.firebaseStorageBucket,
+    value.firebaseAppId,
+    value.firestoreDatabaseId,
+  ]);
+
   return <RuntimeConfigContext.Provider value={value}>{children}</RuntimeConfigContext.Provider>;
 }
 

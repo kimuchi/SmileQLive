@@ -46,6 +46,21 @@ export type FirebaseClientConfig = {
 /** 既定のデータベース ID。サーバー側 firestoreDatabaseId() と一致させること。 */
 export const DEFAULT_FIRESTORE_DATABASE_ID = 'smileq-live';
 
+/**
+ * ブラウザ側 Firebase の利用手順に関する失敗。
+ *
+ * 素の Error にすると、画面には name が 'Error' としか出ず原因が追えない
+ * （実際に管理ログインで「詳細コード: Error」だけが表示され、
+ * 未初期化であることに辿り着けなかった）。
+ * 呼び出し側が種類を判別できるよう、専用の型にする。
+ */
+export class FirebaseClientError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FirebaseClientError';
+  }
+}
+
 let cachedApp: FirebaseApp | null = null;
 let cachedDatabaseId: string = DEFAULT_FIRESTORE_DATABASE_ID;
 
@@ -66,7 +81,9 @@ export function initializeFirebaseClient(config: FirebaseClientConfig): Firebase
   }
 
   if (!config.apiKey || !config.projectId || !config.authDomain) {
-    throw new Error('Firebase の公開設定（apiKey / authDomain / projectId）が渡されていません');
+    throw new FirebaseClientError(
+      'Firebase の公開設定（apiKey / authDomain / projectId）が渡されていません',
+    );
   }
 
   cachedApp = initializeApp({
@@ -91,7 +108,9 @@ function requireApp(config?: FirebaseClientConfig): FirebaseApp {
     cachedApp = getApp();
     return cachedApp;
   }
-  throw new Error('Firebase が初期化されていません（initializeFirebaseClient を先に呼ぶこと）');
+  throw new FirebaseClientError(
+    'Firebase が初期化されていません（initializeFirebaseClient を先に呼ぶこと）',
+  );
 }
 
 export function getFirebaseAuth(config?: FirebaseClientConfig): Auth {
@@ -186,7 +205,7 @@ export async function exchangeSessionCookie(
 ): Promise<CreateSessionResponse> {
   const target = user ?? getFirebaseAuth().currentUser;
   if (!target) {
-    throw new Error('サインインしていません');
+    throw new FirebaseClientError('サインインしていません');
   }
 
   const idToken = await target.getIdToken(true);

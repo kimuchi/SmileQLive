@@ -8,6 +8,7 @@ import { Button } from '@/components/shared/Button';
 import { Card } from '@/components/shared/Card';
 import { useRuntimeConfig } from '@/components/shared/runtime-config-provider';
 import {
+  FirebaseClientError,
   exchangeSessionCookie,
   signInWithGoogle,
   signOutEverywhere,
@@ -160,6 +161,15 @@ export function toLoginNotice(error: unknown, allowedDomains: string[]): LoginNo
       };
     }
     return { title: 'ログインできませんでした', description: error.message, code: error.code };
+  }
+
+  if (error instanceof FirebaseClientError) {
+    // 設定・初期化の不備。再試行では直らないので、そう伝える。
+    return {
+      title: 'ログイン機能を利用できません',
+      description: `${error.message}。ページを再読み込みしても直らない場合は運営管理者へ連絡してください`,
+      code: error.name,
+    };
   }
 
   return {
