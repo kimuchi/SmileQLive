@@ -222,6 +222,10 @@ cp deploy/cloud-run.staging.example.json deploy/cloud-run.staging.json
 > - `deploy/cloud-run.*.json`（実値ファイル）は `.gitignore` 済みで、`.gcloudignore` / `.dockerignore` にも入っているため、Git にも Cloud Build のソースにも最終コンテナにも含まれません。
 > - **サービスアカウントの秘密鍵をここへ貼らないでください。** `private_key` や `-----BEGIN PRIVATE KEY-----` を検出するとスクリプトが停止します。
 > - `allowedAuthDomains` を空にすると、司会者かどうかは `profiles/{uid}` の存在だけで決まります（[docs/HOST_ACCESS.md](./HOST_ACCESS.md)）。
+> - **`your-gcp-project-id` などの雛形の値が残っていると、スクリプトは開始前に停止します。**
+>   とくに `projectId` だけ直して `serviceAccount` を直し忘れる事故が起きやすいため、
+>   `serviceAccount` は必ず `<name>@<projectId>.iam.gserviceaccount.com` の形にしてください。
+>   `npm run firebase:config` を使えば、この 2 つも自動で揃います。
 
 ### 2.5 Google Cloud の初期設定
 

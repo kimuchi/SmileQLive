@@ -160,6 +160,9 @@ export function loadDeployConfig(environment) {
     );
   }
 
+  validatePlaceholders(config, environment);
+  validateServiceAccount(config, environment);
+
   // Firebase のサービスアカウント秘密鍵を設定ファイルへ貼ってしまう事故を止める。
   // Cloud Run では ADC を使うため、そもそも秘密鍵は不要（docs/FIRESTORE_MODEL.md §6）。
   const serialized = JSON.stringify(config);
@@ -181,6 +184,63 @@ export function loadDeployConfig(environment) {
   }
 
   return normalizeConfig(config, environment);
+}
+
+/**
+ * 雛形の値がそのまま残っていないか。
+ *
+ * 置き換え忘れは、途中まで成功してから失敗するため質が悪い。
+ * 実際に「projectId は直したが serviceAccount を直し忘れ」たまま初期設定が進み、
+ * 存在しないサービスアカウントへ権限を付与しようとして止まった。
+ * ここで先に止めれば、部分的にできあがった状態を残さずに済む。
+ */
+const PLACEHOLDER = /your-(gcp|firebase)[a-z-]*|AIzaSyX{10,}|AIzaSy\.\.\.\./i;
+
+function validatePlaceholders(config, environment) {
+  // 空でもよいキー（customDomain / appBaseUrl）は必須キーに含まれないため対象外。
+  const remaining = REQUIRED_KEYS.filter((key) => PLACEHOLDER.test(String(config[key] ?? '')));
+  if (remaining.length === 0) {
+    return;
+  }
+
+  fatal(
+    `雛形の値が残っています: ${remaining.join(', ')}`,
+    [
+      `deploy/cloud-run.${environment}.json を実際の値へ書き換えてください。`,
+      '',
+      ...remaining.map((key) => `  ${key.padEnd(20)} ${config[key]}`),
+      '',
+      'Firebase 側の値は次のコマンドで自動的に書き込めます:',
+      `  npm run firebase:config -- ${environment}`,
+    ].join('\n'),
+  );
+}
+
+/**
+ * serviceAccount がこのプロジェクトのものか。
+ *
+ * サービスアカウントのメールは `<name>@<projectId>.iam.gserviceaccount.com` の形になる。
+ * projectId だけ書き換えて serviceAccount を放置すると、
+ * 存在しないアカウントへ権限を付与しようとして必ず失敗する。
+ */
+function validateServiceAccount(config, environment) {
+  const account = String(config.serviceAccount);
+  const match = account.match(/^[^@]+@([^.]+)\.iam\.gserviceaccount\.com$/);
+
+  if (!match) {
+    fatal(
+      `serviceAccount の形式が正しくありません: ${account}`,
+      '`<name>@<projectId>.iam.gserviceaccount.com` の形で指定してください。',
+    );
+  }
+
+  const owner = match[1];
+  if (owner !== String(config.projectId)) {
+    // 別プロジェクトのサービスアカウントを使う構成もありうるため、止めずに知らせる。
+    warn(`serviceAccount のプロジェクト (${owner}) が projectId (${config.projectId}) と異なります。`);
+    info(`  同じプロジェクトを使う場合: ${account.split('@')[0]}@${config.projectId}.iam.gserviceaccount.com`);
+    info(`  設定ファイル: deploy/cloud-run.${environment}.json`);
+  }
 }
 
 /** 文字列配列として正規化する（未設定・不正値は空配列）。 */

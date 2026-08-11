@@ -817,6 +817,43 @@ if (isPlaceholder || isSharedDefaultBucket) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Google Cloud 側（projectId / serviceAccount）
+//
+// ここを雛形のまま残すと、初期設定が途中まで成功してから失敗する。
+// 実際に「projectId だけ直して serviceAccount を直し忘れる」事故が起きた
+// （存在しない ...@your-gcp-project-id... へ権限を付与しようとして停止）。
+// 同じプロジェクトを使うのが通常なので、雛形のままならここで揃える。
+// ---------------------------------------------------------------------------
+const cloudPlaceholder = /your-gcp-project-id/;
+const projectIsPlaceholder = cloudPlaceholder.test(String(current.projectId ?? ''));
+const accountIsPlaceholder = cloudPlaceholder.test(String(current.serviceAccount ?? ''));
+
+if (projectIsPlaceholder || accountIsPlaceholder) {
+  const useSameProject =
+    flags.has('yes') || !isInteractive()
+      ? true
+      : await confirmYesNo(
+          `Cloud Run も同じプロジェクト（${projectId}）を使いますか？`,
+          true,
+        );
+
+  if (useSameProject) {
+    if (projectIsPlaceholder) {
+      updated.projectId = projectId;
+    }
+    if (accountIsPlaceholder) {
+      const name = String(current.serviceAccount).split('@')[0] || 'smileq-live-runtime';
+      updated.serviceAccount = `${name}@${updated.projectId}.iam.gserviceaccount.com`;
+    }
+    success(`Cloud Run 側の設定も ${updated.projectId} に揃えました。`);
+  } else {
+    warn('projectId / serviceAccount は手動で書き換えてください。');
+    info(`  deploy/cloud-run.${targetEnv}.json`);
+    info('  serviceAccount は <name>@<projectId>.iam.gserviceaccount.com の形です。');
+  }
+}
+
 writeFileSync(path, `${JSON.stringify(updated, null, 2)}\n`);
 success(`deploy/cloud-run.${targetEnv}.json を更新しました`);
 
@@ -833,7 +870,7 @@ console.log('  残りの設定（Google Cloud 側）:');
 console.log(`    projectId       … ${color.bold(updated.projectId)}`);
 console.log(`    serviceAccount  … ${color.bold(updated.serviceAccount)}`);
 console.log('');
-if (String(updated.projectId).includes('your-gcp-project-id')) {
+if (cloudPlaceholder.test(`${updated.projectId} ${updated.serviceAccount}`)) {
   warn('projectId / serviceAccount が雛形のままです。実際の値へ書き換えてください。');
   info(`Firebase と同じプロジェクトを使う場合は projectId も "${projectId}" になります。`);
 } else {
