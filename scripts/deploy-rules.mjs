@@ -25,7 +25,7 @@
  */
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { configExists, ENVIRONMENTS, parseArgs, resolveEnvironment } from './lib/config.mjs';
 import { color, fatal, heading, info, step, success, warn } from './lib/log.mjs';
 import { commandExists, run } from './lib/proc.mjs';
@@ -214,7 +214,19 @@ if (hasFirebaseCli) {
 // ここで実際のバケット名と対象データベースを入れた一時設定を書き出し、--config で渡す。
 step('配信用の一時設定を生成');
 
-const generatedConfigPath = '.firebase/smileq-deploy.json';
+/**
+ * 一時設定は**リポジトリ直下**へ置く。
+ *
+ * firebase CLI は --config を渡すと、そのファイルのあるディレクトリを
+ * プロジェクトルートとみなし、rules / indexes の相対パスをそこから解決する
+ * （firebase-tools の detectProjectRoot）。
+ * 例えば .firebase/ へ置くと firebase/storage.rules を
+ * .firebase/firebase/storage.rules として探しに行き、
+ * 「Error reading rules file」で失敗する。
+ * `../` で戻すこともできない（Config.path がプロジェクト外のパスを拒否する）。
+ * firebase.json と同じ場所に置けば、相対パスはそのまま通る。
+ */
+const generatedConfigPath = '.smileq-deploy.json';
 {
   const base = JSON.parse(readFileSync('firebase.json', 'utf8'));
   const generated = {
@@ -231,10 +243,27 @@ const generatedConfigPath = '.firebase/smileq-deploy.json';
     ...(base.emulators ? { emulators: base.emulators } : {}),
   };
 
-  mkdirSync('.firebase', { recursive: true });
   writeFileSync(generatedConfigPath, `${JSON.stringify(generated, null, 2)}\n`);
   success(`${generatedConfigPath} を生成しました`);
   info(`Firestore: ${databaseId} / Storage: ${mediaBucket || '(対象なし)'}`);
+
+  // 生成した設定が指すファイルが本当に読めるかを、配信前に確かめる。
+  // ここで落としておけば、認証や API を通ったあとで初めて失敗することがない。
+  const referenced = [
+    'firebase/firestore.rules',
+    'firebase/firestore.indexes.json',
+    ...(mediaBucket ? ['firebase/storage.rules'] : []),
+  ];
+  const unreadable = referenced.filter((file) => !existsSync(file));
+  if (unreadable.length > 0) {
+    fatal(
+      `一時設定が参照するファイルを読めません: ${unreadable.join(', ')}`,
+      [
+        `${generatedConfigPath} からの相対パスとして解決されます。`,
+        'リポジトリのルートで実行しているか確認してください。',
+      ].join('\n'),
+    );
+  }
 }
 
 const deployArgs = [

@@ -48,8 +48,10 @@ pnpm-debug.log*
 .vscode/*
 !.vscode/extensions.json
 
-# firebase CLI の作業ディレクトリ（配信用の一時設定を含む）
+# firebase CLI の作業ディレクトリ
 .firebase/
+# rules:deploy が生成する配信用の一時設定（対象データベースとバケットを確定させる）
+.smileq-deploy.json
 firebase-debug.log*
 firestore-debug.log*
 ui-debug.log*

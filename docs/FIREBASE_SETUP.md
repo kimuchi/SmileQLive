@@ -155,8 +155,11 @@ gcloud storage buckets create gs://idl-application-smileq-media --uniform-bucket
 
 - `firebase.json` の `storage.bucket` は**プレースホルダのまま**にしてあります。
   手作業で `firebase deploy` を実行しても、既存アプリのバケットへは当たりません。
-  実際の配信では `rules:deploy` が `.firebase/smileq-deploy.json` を生成し、
-  `--config` で対象を確定させます。
+  実際の配信では `rules:deploy` がリポジトリ直下へ `.smileq-deploy.json` を生成し、
+  `--config` で対象を確定させます（`.gitignore` 済み）。
+  この一時設定を**リポジトリ直下**へ置くのは、firebase CLI が `--config` の
+  置き場所をプロジェクトルートとみなし、`rules` / `indexes` の相対パスを
+  そこから解決するためです（サブディレクトリへ置くと参照できません）。
 - `npm run firebase:config` は `mediaBucket` が既定バケットを指していたら
   専用バケット名へ書き換えます。
 - 既定バケットを使うと分かったうえで配信する場合だけ
