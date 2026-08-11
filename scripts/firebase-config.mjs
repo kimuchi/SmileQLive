@@ -7,6 +7,7 @@
  *   npm run firebase:config -- --project my-proj … プロジェクトを指定
  *   npm run firebase:config -- staging           … 書き込み先の環境を指定
  *   npm run firebase:config -- --print           … 書き込まず表示だけ
+ *   npm run firebase:config -- --app-id 1:...    … 既知の Web アプリを直接指定
  *
  * GUI（Firebase コンソール）を開く必要はない。
  * ここで扱う値はすべて**公開前提の識別子**であり秘密情報ではない
@@ -17,13 +18,25 @@
  *   firebase apps:list WEB --project <id>      … 登録済み Web アプリ一覧
  *   firebase apps:create WEB "<name>" ...      … Web アプリが無い場合に作成
  *   firebase apps:sdkconfig WEB <appId> ...    … 公開設定一式を取得
+ *
+ * Web アプリ API が組織の制限などで使えない場合は、gcloud の API キーから
+ * 同じ値を組み立てる（apiKey の実体は Google Cloud の API キー、
+ * authDomain はプロジェクト ID から決まり、appId は Analytics 用で任意）。
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import { cliJson } from './lib/cli-json.mjs';
+import { classifyApiError, extractApiError, readDebugLogTail } from './lib/firebase-debug.mjs';
 import { configPath, ENVIRONMENTS, parseArgs } from './lib/config.mjs';
 import { color, fatal, heading, info, step, success, warn } from './lib/log.mjs';
 import { commandExists, detectPackageManager, run } from './lib/proc.mjs';
@@ -62,10 +75,37 @@ if (!hasFirebaseCli) {
  * （誤った手動デプロイを止めるため — scripts/deploy-rules.mjs）、
  * 設定取得とは無関係な検証の警告や異常終了を招く。最初から見えない場所で実行する。
  */
+const repoRoot = process.cwd();
 const cliCwd = mkdtempSync(join(tmpdir(), 'smileq-firebase-'));
 process.on('exit', () => {
   rmSync(cliCwd, { recursive: true, force: true });
 });
+
+/**
+ * CLI のデバッグログをリポジトリ直下へ退避する。
+ *
+ * firebase CLI は「See firebase-debug.log for more info」としか言わず、
+ * 実際の HTTP ステータスと API の応答はログにしか書かない。
+ * そのログは CLI の作業ディレクトリ（= 終了時に消える一時領域）にできるため、
+ * 失敗時はここでリポジトリ直下へ写して利用者が読めるようにする。
+ * （firebase-debug.log* は .gitignore 済み）
+ */
+function preserveDebugLog() {
+  for (const name of ['firebase-debug.log', 'firebase-debug.log.1']) {
+    const from = join(cliCwd, name);
+    if (!existsSync(from)) {
+      continue;
+    }
+    const to = join(repoRoot, name);
+    try {
+      copyFileSync(from, to);
+      return to;
+    } catch {
+      // 写せなければ諦める（診断のための処理で失敗を増やさない）。
+    }
+  }
+  return '';
+}
 
 function firebase(args, { capture = true, allowFailure = false } = {}) {
   return run(cli.bin, [...cli.prefix, ...args], {
@@ -94,45 +134,17 @@ function noteExitCodeMismatch(cmdResult, label) {
   }
 }
 
+/** CLI は作業ディレクトリへログを書くため、そちらを先に見る。 */
+function readCliDebugLog() {
+  return readDebugLogTail([cliCwd, repoRoot]);
+}
+
 /**
  * 失敗した firebase コマンドの出力を、原因が分かる形で表示する。
  *
  * npm / pnpm 経由だと大量の warn が混ざるため、それらを除いて
  * 実際のエラー行だけを残す（原因が埋もれると利用者が対処できない）。
  */
-/**
- * firebase CLI は失敗の詳細を stdout ではなく firebase-debug.log にだけ書く。
- * 分類を誤らないよう、直近のエラー行をここから読み取る。
- */
-function readDebugLogTail(maxLines = 400) {
-  // CLI は実行時の作業ディレクトリへ書くため、そちらを先に見る。
-  const candidates = [
-    join(cliCwd, 'firebase-debug.log'),
-    join(cliCwd, 'firebase-debug.log.1'),
-    'firebase-debug.log',
-    'firebase-debug.log.1',
-  ];
-  for (const file of candidates) {
-    if (!existsSync(file)) {
-      continue;
-    }
-    try {
-      const lines = readFileSync(file, 'utf8').split(/\r?\n/);
-      return lines.slice(-maxLines).join('\n');
-    } catch {
-      // 読めなければ無視する。
-    }
-  }
-  return '';
-}
-
-/** デバッグログから HTTP ステータスとエラー本文を抽出する。 */
-function extractApiError(logText) {
-  const status = logText.match(/HTTP Error:\s*(\d{3})/g)?.pop() ?? '';
-  const body = logText.match(/\{"error":\{[^\n]*\}\}/g)?.pop() ?? '';
-  return { status, body, text: `${status}\n${body}\n${logText}` };
-}
-
 function reportFailure(result, args) {
   const noise = /^(npm |pnpm |\(node:|\s*$)/;
   const lines = `${result.stdout ?? ''}\n${result.stderr ?? ''}`
@@ -151,6 +163,42 @@ function reportFailure(result, args) {
     console.error('  出力: （エラーメッセージが得られませんでした）');
   }
   console.error('');
+}
+
+/**
+ * 失敗した firebase コマンドについて、分かることを全部出す。
+ *
+ * CLI 本体は「See firebase-debug.log for more info」としか言わないため、
+ * ここでデバッグログから HTTP ステータスと API の応答本文を取り出して見せ、
+ * ログ自体もリポジトリ直下へ残す。ここを省くと利用者は原因に辿り着けない。
+ *
+ * @returns {{status: string, body: string, text: string}} 判定に使えるエラー情報
+ */
+function explainFailure(cmdResult, args, jsonMessage = '') {
+  reportFailure(cmdResult, args);
+  if (jsonMessage) {
+    console.error(`  CLI のエラー: ${jsonMessage}`);
+    console.error('');
+  }
+
+  const apiError = extractApiError(readCliDebugLog());
+  if (apiError.status || apiError.body) {
+    console.error('  API の応答:');
+    if (apiError.status) {
+      console.error(`    ${apiError.status}`);
+    }
+    if (apiError.body) {
+      console.error(`    ${apiError.body}`);
+    }
+    console.error('');
+  }
+
+  const saved = preserveDebugLog();
+  if (saved) {
+    console.error(`  詳細ログ: ${saved}`);
+    console.error('');
+  }
+  return { ...apiError, text: `${cmdResult.stdout ?? ''}\n${cmdResult.stderr ?? ''}\n${jsonMessage}\n${apiError.text}` };
 }
 
 // ---------------------------------------------------------------------------
@@ -284,7 +332,7 @@ if (!firebaseEnabled) {
     reportFailure(added, ['projects:addfirebase', projectId]);
 
     // CLI の標準出力には詳細が出ないため、デバッグログも合わせて判定する。
-    const debugLog = readDebugLogTail();
+    const debugLog = readCliDebugLog();
     const apiError = extractApiError(debugLog);
     const output = `${added.stdout ?? ''}\n${added.stderr ?? ''}\n${addedJson.message}\n${apiError.text}`;
 
@@ -365,136 +413,327 @@ if (!firebaseEnabled) {
 }
 
 // ---------------------------------------------------------------------------
+// Web アプリと公開設定
+//
+// 通常は Firebase の Web アプリ登録から公開設定一式を取得する。
+// ただし Web アプリ API（firebase.googleapis.com の webApps）は、
+// 組織の制限や権限設定によっては一覧も作成も 403 で拒否されることがある。
+// その場合でも SmileQ Live に必要な値は揃えられるため、gcloud の API キーで代替する。
+//   * appId … Analytics を使わないので任意（src/lib/env/server-env.ts）
+//   * authDomain / storageBucket … プロジェクト ID から決まる
+//   * apiKey … Google Cloud の API キーそのもの。gcloud で取得・作成できる
+// ---------------------------------------------------------------------------
 step('Web アプリを決定');
-const appsResult = firebase(['apps:list', 'WEB', '--project', projectId, '--json'], {
-  allowFailure: true,
-});
 
-const appsJson = cliJson(appsResult);
-if (appsJson.ok) {
-  noteExitCodeMismatch(appsResult, 'apps:list');
-}
-const apps = Array.isArray(appsJson.result)
-  ? appsJson.result.map((item) => ({ appId: item.appId, displayName: item.displayName ?? '' }))
-  : [];
+/** --app-id で既知の appId を渡せる（一覧が使えないときの回避策）。 */
+const explicitAppId = typeof flags.get('app-id') === 'string' ? flags.get('app-id').trim() : '';
 
 let appId = '';
-if (apps.length === 0) {
-  if (appsJson.message) {
-    warn(`Web アプリ一覧を取得できませんでした: ${appsJson.message}`);
-  }
-  warn('この プロジェクトに Web アプリが登録されていません。');
-  const shouldCreate =
-    flags.has('yes') || !isInteractive()
-      ? true
-      : await confirmYesNo('Web アプリ「SmileQ Live」を作成しますか？', true);
+let webAppUsable = true;
 
-  if (!shouldCreate) {
-    fatal(
-      'Web アプリが無いと公開設定を取得できません。',
-      `作成コマンド: ${cli.bin} ${[...cli.prefix, 'apps:create', 'WEB', '"SmileQ Live"', '--project', projectId].join(' ')}`,
-    );
-  }
-
-  const created = firebase(
-    ['apps:create', 'WEB', 'SmileQ Live', '--project', projectId, '--json'],
-    { allowFailure: true },
-  );
-  const createdJson = cliJson(created);
-  if (!createdJson.ok) {
-    reportFailure(created, ['apps:create', 'WEB', 'SmileQ Live', '--project', projectId]);
-    if (createdJson.message) {
-      console.error(`  CLI のエラー: ${createdJson.message}`);
-      console.error('');
-    }
-    if (isFirebaseNotEnabled(created)) {
-      fatal(
-        `${projectId} に Firebase が追加されていません。`,
-        [
-          'Google Cloud プロジェクトは存在しますが、Firebase リソースが未追加です。',
-          '',
-          'CLI で追加する場合:',
-          `  ${cli.bin} ${[...cli.prefix, 'projects:addfirebase', projectId].join(' ')}`,
-          '',
-          'GUI で追加する場合:',
-          '  https://console.firebase.google.com/ → プロジェクトを追加 →',
-          `  「既存の Google Cloud プロジェクト」から ${projectId} を選ぶ`,
-        ].join('\n'),
-      );
-    }
-    fatal(
-      'Web アプリを作成できませんでした。',
-      [
-        'よくある原因:',
-        '  * このアカウントに Firebase プロジェクトの編集権限が無い',
-        '    （必要なロール: roles/firebase.developAdmin もしくは編集者）',
-        '  * 対象プロジェクトで Firebase が有効化されていない',
-        '',
-        '手動で作成する場合:',
-        `  ${cli.bin} ${[...cli.prefix, 'apps:create', 'WEB', '"SmileQ Live"', '--project', projectId].join(' ')}`,
-      ].join('\n'),
-    );
-  }
-  noteExitCodeMismatch(created, 'apps:create');
-  appId = createdJson.result?.appId ?? '';
-  if (!appId) {
-    fatal('作成した Web アプリの appId を取得できませんでした。');
-  }
-  success(`Web アプリを作成しました: ${appId}`);
-} else if (apps.length === 1) {
-  appId = apps[0].appId;
-  success(`Web アプリ: ${appId} ${apps[0].displayName}`);
+if (explicitAppId) {
+  appId = explicitAppId;
+  success(`指定された Web アプリを使用します: ${appId}`);
 } else {
-  console.log('');
-  apps.forEach((app, index) => {
-    console.log(`  ${String(index + 1).padStart(2)}. ${app.appId}  ${color.dim(app.displayName)}`);
+  const appsResult = firebase(['apps:list', 'WEB', '--project', projectId, '--json'], {
+    allowFailure: true,
   });
-  console.log('');
-  if (isInteractive()) {
-    const answer = await ask('番号または appId を入力してください: ');
-    const index = Number.parseInt(answer, 10);
-    appId =
-      Number.isInteger(index) && index >= 1 && index <= apps.length
-        ? apps[index - 1].appId
-        : answer.trim();
-  } else {
-    appId = apps[0].appId;
-    warn(`複数の Web アプリがあります。先頭を使用します: ${appId}`);
+  const appsJson = cliJson(appsResult);
+  if (appsJson.ok) {
+    noteExitCodeMismatch(appsResult, 'apps:list');
   }
+  const apps = Array.isArray(appsJson.result)
+    ? appsJson.result.map((item) => ({ appId: item.appId, displayName: item.displayName ?? '' }))
+    : [];
+
+  if (!appsJson.ok) {
+    // 一覧そのものが失敗した場合は「アプリが 0 件」とは区別する。
+    // 既に登録済みのアプリが見えていないだけかもしれないので、ここでは作成しない
+    // （見えない状態で作成すると Web アプリが二重にできる）。
+    warn('Web アプリの一覧を取得できませんでした。');
+    const failure = explainFailure(
+      appsResult,
+      ['apps:list', 'WEB', '--project', projectId],
+      appsJson.message,
+    );
+    explainWebAppDenied(failure);
+    info('登録済みの appId が分かっている場合は、直接指定できます:');
+    info(`  npm run firebase:config -- --project=${projectId} --app-id=<appId>`);
+    console.log('');
+    webAppUsable = false;
+  } else if (apps.length === 0) {
+    warn('このプロジェクトに Web アプリが登録されていません。');
+    const shouldCreate =
+      flags.has('yes') || !isInteractive()
+        ? true
+        : await confirmYesNo('Web アプリ「SmileQ Live」を作成しますか？', true);
+
+    if (!shouldCreate) {
+      webAppUsable = false;
+    } else {
+      const created = firebase(
+        ['apps:create', 'WEB', 'SmileQ Live', '--project', projectId, '--json'],
+        { allowFailure: true },
+      );
+      const createdJson = cliJson(created);
+      if (createdJson.ok) {
+        noteExitCodeMismatch(created, 'apps:create');
+        appId = createdJson.result?.appId ?? '';
+        if (appId) {
+          success(`Web アプリを作成しました: ${appId}`);
+        } else {
+          warn('作成した Web アプリの appId を取得できませんでした。');
+          webAppUsable = false;
+        }
+      } else {
+        warn('Web アプリを作成できませんでした。');
+        const failure = explainFailure(
+          created,
+          ['apps:create', 'WEB', 'SmileQ Live', '--project', projectId],
+          createdJson.message,
+        );
+        if (isFirebaseNotEnabled(created)) {
+          fatal(
+            `${projectId} に Firebase が追加されていません。`,
+            [
+              'Google Cloud プロジェクトは存在しますが、Firebase リソースが未追加です。',
+              '',
+              'CLI で追加する場合:',
+              `  ${cli.bin} ${[...cli.prefix, 'projects:addfirebase', projectId].join(' ')}`,
+              '',
+              'GUI で追加する場合:',
+              '  https://console.firebase.google.com/ → プロジェクトを追加 →',
+              `  「既存の Google Cloud プロジェクト」から ${projectId} を選ぶ`,
+            ].join('\n'),
+          );
+        }
+        explainWebAppDenied(failure);
+        webAppUsable = false;
+      }
+    }
+  } else if (apps.length === 1) {
+    appId = apps[0].appId;
+    success(`Web アプリ: ${appId} ${apps[0].displayName}`);
+  } else {
+    console.log('');
+    apps.forEach((app, index) => {
+      console.log(`  ${String(index + 1).padStart(2)}. ${app.appId}  ${color.dim(app.displayName)}`);
+    });
+    console.log('');
+    if (isInteractive()) {
+      const answer = await ask('番号または appId を入力してください: ');
+      const index = Number.parseInt(answer, 10);
+      appId =
+        Number.isInteger(index) && index >= 1 && index <= apps.length
+          ? apps[index - 1].appId
+          : answer.trim();
+    } else {
+      appId = apps[0].appId;
+      warn(`複数の Web アプリがあります。先頭を使用します: ${appId}`);
+    }
+  }
+}
+
+/**
+ * Web アプリ API が拒否されたときに、原因ごとの対処を出す。
+ *
+ * 403 は「権限不足」以外でも返るため、デバッグログの内容で分類してから案内する
+ * （一律に「権限を確認してください」と言うと、権限があるのに直せない）。
+ */
+function explainWebAppDenied(failure) {
+  const kind = classifyApiError(failure?.text ?? '');
+  console.log('');
+
+  if (kind.serviceDisabled) {
+    info('必要な API が無効になっています。');
+    info(
+      `  gcloud services enable firebase.googleapis.com apikeys.googleapis.com --project ${projectId}`,
+    );
+  } else if (kind.insufficientScopes) {
+    info('CLI のログインに必要なスコープが足りません（古いログインで起きます）。');
+    info(`  ${cli.bin} ${[...cli.prefix, 'login', '--reauth'].join(' ')}`);
+  } else if (kind.permissionDenied) {
+    info('Web アプリ API が 403 を返しています。よくある原因:');
+    info('  * apikeys.googleapis.com が無効（Web アプリ作成時にブラウザ用キーを作れない）');
+    info(`      gcloud services enable apikeys.googleapis.com --project ${projectId}`);
+    info('  * CLI のログインスコープが古い');
+    info(`      ${cli.bin} ${[...cli.prefix, 'login', '--reauth'].join(' ')}`);
+    info('  * 権限不足（必要なロール: roles/firebase.developAdmin）');
+    info('  * 組織ポリシーで API キーの作成が禁止されている');
+  } else {
+    info('Web アプリ API を利用できませんでした。');
+    info(`  切り分け: npm run firebase:doctor -- --project ${projectId}`);
+  }
+
+  console.log('');
+  info('Web アプリの登録は SmileQ Live には必須ではありません（appId は Analytics 用）。');
+  console.log('');
 }
 
 // ---------------------------------------------------------------------------
 step('公開設定を取得');
-const sdkResult = firebase(['apps:sdkconfig', 'WEB', appId, '--project', projectId, '--json'], {
-  allowFailure: true,
-});
 
-// 判定は終了コードではなく出力内容で行う（cliJson の説明を参照）。
-// CLI が正しい設定を返しているのに「取得できませんでした」と言わないため。
-const sdkJson = cliJson(sdkResult);
-if (!sdkJson.ok) {
-  reportFailure(sdkResult, ['apps:sdkconfig', 'WEB', appId, '--project', projectId]);
-  if (sdkJson.message) {
-    console.error(`  CLI のエラー: ${sdkJson.message}`);
-    console.error('');
+/** apps:sdkconfig から公開設定を取る（本来の経路）。 */
+function configFromWebApp() {
+  if (!appId) {
+    return null;
   }
-  fatal('公開設定を取得できませんでした。');
+  const sdkResult = firebase(['apps:sdkconfig', 'WEB', appId, '--project', projectId, '--json'], {
+    allowFailure: true,
+  });
+  // 判定は終了コードではなく出力内容で行う（cliJson の説明を参照）。
+  const sdkJson = cliJson(sdkResult);
+  if (!sdkJson.ok) {
+    warn('Web アプリの公開設定を取得できませんでした。');
+    explainFailure(
+      sdkResult,
+      ['apps:sdkconfig', 'WEB', appId, '--project', projectId],
+      sdkJson.message,
+    );
+    return null;
+  }
+  noteExitCodeMismatch(sdkResult, 'apps:sdkconfig');
+  const payload = sdkJson.result ?? {};
+  const sdk = payload.sdkConfig ?? payload;
+  if (!sdk.apiKey) {
+    warn('取得した公開設定に apiKey が含まれていませんでした。');
+    return null;
+  }
+  return {
+    firebaseProjectId: sdk.projectId ?? projectId,
+    firebaseApiKey: sdk.apiKey,
+    firebaseAuthDomain: sdk.authDomain ?? `${projectId}.firebaseapp.com`,
+    firebaseStorageBucket: sdk.storageBucket ?? `${projectId}.firebasestorage.app`,
+    firebaseAppId: sdk.appId ?? appId,
+  };
 }
-noteExitCodeMismatch(sdkResult, 'apps:sdkconfig');
 
-const payload = sdkJson.result ?? {};
-const config = payload.sdkConfig ?? payload;
+/**
+ * gcloud の API キーから公開設定を組み立てる（Web アプリ API が使えないときの代替）。
+ *
+ * apiKey の実体は Google Cloud の API キーであり、Firebase Auth と Firestore の
+ * Web SDK はこれと authDomain / projectId だけで動く。appId は Analytics 用で任意。
+ */
+function configFromGcloud() {
+  if (!commandExists('gcloud')) {
+    info('gcloud が無いため、API キーによる代替取得はできません。');
+    return null;
+  }
 
-const resolved = {
-  firebaseProjectId: config.projectId ?? projectId,
-  firebaseApiKey: config.apiKey ?? '',
-  firebaseAuthDomain: config.authDomain ?? `${projectId}.firebaseapp.com`,
-  firebaseStorageBucket: config.storageBucket ?? `${projectId}.firebasestorage.app`,
-  firebaseAppId: config.appId ?? appId,
-};
+  const list = run(
+    'gcloud',
+    ['services', 'api-keys', 'list', `--project=${projectId}`, '--format=json'],
+    { capture: true, quiet: true, allowFailure: true },
+  );
+  let keys = [];
+  if (list.ok) {
+    try {
+      keys = JSON.parse(list.stdout || '[]');
+    } catch {
+      keys = [];
+    }
+  } else {
+    warn('API キーの一覧を取得できませんでした。');
+    const firstLine = String(list.stderr ?? '').split(/\r?\n/)[0] ?? '';
+    if (firstLine) {
+      info(`  ${firstLine}`);
+    }
+    info(`  有効化: gcloud services enable apikeys.googleapis.com --project ${projectId}`);
+  }
 
-if (!resolved.firebaseApiKey) {
-  fatal('apiKey を取得できませんでした。Web アプリが正しく作成されているか確認してください。');
+  // 削除済み（DELETED）のキーは除く。Firebase が自動生成したブラウザ用キーを優先する。
+  const usable = keys.filter((key) => !key.deleteTime);
+  const preferred =
+    usable.find((key) => /browser key|Web API Key|Firebase/i.test(key.displayName ?? '')) ??
+    usable[0];
+
+  let keyName = preferred?.name ?? '';
+  if (!keyName) {
+    info('使える API キーが見つかりませんでした。新しく作成します。');
+    const createdKey = run(
+      'gcloud',
+      [
+        'services',
+        'api-keys',
+        'create',
+        `--project=${projectId}`,
+        '--display-name=SmileQ Live Web',
+        '--format=value(response.name)',
+      ],
+      { capture: true, quiet: true, allowFailure: true },
+    );
+    if (!createdKey.ok) {
+      warn('API キーを作成できませんでした。');
+      const firstLine = String(createdKey.stderr ?? '').split(/\r?\n/)[0] ?? '';
+      if (firstLine) {
+        info(`  ${firstLine}`);
+      }
+      return null;
+    }
+    keyName = createdKey.stdout.trim();
+    success(`API キーを作成しました: ${keyName.split('/').pop()}`);
+  }
+
+  const keyString = run(
+    'gcloud',
+    ['services', 'api-keys', 'get-key-string', keyName, `--project=${projectId}`, '--format=value(keyString)'],
+    { capture: true, quiet: true, allowFailure: true },
+  );
+  if (!keyString.ok || !keyString.stdout.trim()) {
+    warn('API キーの文字列を取得できませんでした。');
+    const firstLine = String(keyString.stderr ?? '').split(/\r?\n/)[0] ?? '';
+    if (firstLine) {
+      info(`  ${firstLine}`);
+    }
+    return null;
+  }
+
+  return {
+    firebaseProjectId: projectId,
+    firebaseApiKey: keyString.stdout.trim(),
+    firebaseAuthDomain: `${projectId}.firebaseapp.com`,
+    firebaseStorageBucket: `${projectId}.firebasestorage.app`,
+    firebaseAppId: appId,
+  };
+}
+
+let resolved = webAppUsable ? configFromWebApp() : null;
+
+if (!resolved) {
+  console.log('');
+  info('Web アプリからは取得できませんでした。gcloud の API キーで代替します。');
+  info('（apiKey の実体は Google Cloud の API キーです。appId は Analytics 用で任意）');
+  console.log('');
+  resolved = configFromGcloud();
+  if (resolved) {
+    success('gcloud から公開設定を組み立てました。');
+    if (!resolved.firebaseAppId) {
+      info('appId は空のままにします（Analytics を使わないため不要）。');
+    }
+  }
+}
+
+if (!resolved) {
+  fatal(
+    '公開設定を取得できませんでした。',
+    [
+      '次のいずれかで先へ進めます。',
+      '',
+      '── 1. 既に Web アプリがあるなら appId を直接指定する ──',
+      `  npm run firebase:config -- --project=${projectId} --app-id=1:000000000000:web:xxxxxxxx`,
+      '',
+      '── 2. API キーを手で取得して設定ファイルへ書く ──',
+      `  gcloud services api-keys list --project ${projectId}`,
+      `  gcloud services api-keys get-key-string <KEY_ID> --project ${projectId}`,
+      '  deploy/cloud-run.<env>.json の firebaseApiKey へ貼り付けてください。',
+      `  firebaseAuthDomain は ${projectId}.firebaseapp.com です。`,
+      '',
+      '── 3. Firebase コンソールから Web アプリを登録する ──',
+      `  https://console.firebase.google.com/project/${projectId}/settings/general`,
+      '',
+      `切り分け: npm run firebase:doctor -- --project ${projectId}`,
+    ].join('\n'),
+  );
 }
 
 console.log('');

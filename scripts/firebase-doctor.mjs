@@ -15,7 +15,11 @@
  */
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { cliJson } from './lib/cli-json.mjs';
+import { classifyApiError, extractApiError, readDebugLogTail } from './lib/firebase-debug.mjs';
 import { configExists, ENVIRONMENTS, parseArgs } from './lib/config.mjs';
 import { color, heading, info, step, warn } from './lib/log.mjs';
 import { commandExists, detectPackageManager, run } from './lib/proc.mjs';
@@ -62,6 +66,14 @@ const fb = hasFirebaseCli
     ? { bin: 'pnpm', prefix: ['dlx', 'firebase-tools@15'] }
     : { bin: 'npx', prefix: ['--yes', 'firebase-tools@15'] };
 
+// firebase CLI はリポジトリ直下だと firebase.json を読み込む。
+// 診断は配信設定と無関係なので、見えない一時ディレクトリで実行する
+// （デバッグログもここへ集まるので、失敗理由を読み取りやすい）。
+const cliCwd = mkdtempSync(join(tmpdir(), 'smileq-doctor-'));
+process.on('exit', () => {
+  rmSync(cliCwd, { recursive: true, force: true });
+});
+
 const findings = [];
 function record(ok, label, detail) {
   findings.push({ ok, label, detail });
@@ -105,6 +117,7 @@ if (hasGcloud) {
     ['firestore.googleapis.com', 'Firestore'],
     ['firebaserules.googleapis.com', 'Security Rules の配信'],
     ['firebasestorage.googleapis.com', 'Cloud Storage for Firebase'],
+    ['apikeys.googleapis.com', 'API キー（Web アプリ登録時にブラウザ用キーを作る）'],
   ];
   for (const [api, purpose] of required) {
     const on = list.includes(api);
@@ -141,6 +154,7 @@ const projectsList = run(fb.bin, [...fb.prefix, 'projects:list', '--json'], {
   capture: true,
   quiet: true,
   allowFailure: true,
+  cwd: cliCwd,
 });
 let isFirebaseProject = false;
 if (projectsList.ok) {
@@ -163,7 +177,49 @@ if (projectsList.ok) {
 }
 
 // ---------------------------------------------------------------------------
-step('5. Firebase 利用規約への同意');
+step('5. Web アプリ API が使えるか');
+
+// 公開設定の取得はここで失敗することが多い。実際に叩いて切り分ける。
+// projects:list が通っても webApps だけ 403 になる構成があるため、別項目にする。
+{
+  const appsResult = run(fb.bin, [...fb.prefix, 'apps:list', 'WEB', '--project', projectId, '--json'], {
+    capture: true,
+    quiet: true,
+    allowFailure: true,
+    cwd: cliCwd,
+  });
+  const parsed = cliJson(appsResult);
+  if (parsed.ok) {
+    const apps = Array.isArray(parsed.result) ? parsed.result : [];
+    record(true, `Web アプリ一覧を取得できます（${apps.length} 件）`, '');
+    for (const app of apps) {
+      console.log(`          ${app.appId}  ${color.dim(app.displayName ?? '')}`);
+    }
+    if (apps.length > 0) {
+      info('appId を直接指定して設定を取得できます:');
+      info(`  npm run firebase:config -- --project=${projectId} --app-id=${apps[0].appId}`);
+    }
+  } else {
+    const apiError = extractApiError(readDebugLogTail([cliCwd]));
+    const kind = classifyApiError(`${parsed.message}\n${apiError.text}`);
+    const cause = kind.serviceDisabled
+      ? 'API が無効 — gcloud services enable apikeys.googleapis.com firebase.googleapis.com'
+      : kind.insufficientScopes
+        ? `ログインのスコープ不足 — ${fb.bin} ${[...fb.prefix, 'login', '--reauth'].join(' ')}`
+        : kind.permissionDenied
+          ? '403 — apikeys.googleapis.com の有効化 / ログインの再取得 / roles/firebase.developAdmin を確認'
+          : parsed.message || '原因を特定できませんでした';
+    record(false, 'Web アプリ一覧を取得できません', cause);
+    if (apiError.body) {
+      console.log(`        ${color.dim(apiError.body)}`);
+    }
+    info('Web アプリが使えなくても、gcloud の API キーで公開設定は取得できます。');
+    info('  npm run firebase:config   … 自動で代替経路へ切り替わります');
+  }
+}
+
+// ---------------------------------------------------------------------------
+step('6. Firebase 利用規約への同意');
 if (!isFirebaseProject) {
   const otherProjects = (() => {
     try {
@@ -189,7 +245,7 @@ if (!isFirebaseProject) {
 }
 
 // ---------------------------------------------------------------------------
-step('6. 組織ポリシー（プロジェクト単位 + 組織単位）');
+step('7. 組織ポリシー（プロジェクト単位 + 組織単位）');
 
 /** Firebase の追加を妨げうる制約。 */
 const RISKY_CONSTRAINTS = [
@@ -267,7 +323,7 @@ if (hasGcloud) {
 }
 
 // ---------------------------------------------------------------------------
-step('7. Google Workspace 側の Firebase 有効/無効');
+step('8. Google Workspace 側の Firebase 有効/無効');
 info('Google Workspace 管理コンソールで Firebase を無効化していると、');
 info('プロジェクト権限が十分でも API は 403 を返します。');
 info('  管理コンソール → アプリ → その他の Google サービス → Firebase');

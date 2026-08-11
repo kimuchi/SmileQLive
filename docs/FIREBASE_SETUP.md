@@ -337,6 +337,7 @@ npm run firebase:config    # プロジェクトと Web アプリを選び、設�
 npm run firebase:config -- --print            # 書き込まず表示だけ
 npm run firebase:config -- --project my-proj  # プロジェクトを直接指定
 npm run firebase:config -- staging            # staging の設定ファイルへ書き込む
+npm run firebase:config -- --app-id 1:...     # 既知の Web アプリを直接指定
 ```
 
 ブラウザを開けない環境（SSH 越しなど）では:
@@ -359,17 +360,55 @@ npx --yes firebase-tools@15 apps:create WEB "SmileQ Live" --project <PROJECT_ID>
 npx --yes firebase-tools@15 apps:sdkconfig WEB <APP_ID> --project <PROJECT_ID>
 ```
 
-#### gcloud だけで API キーを見る場合
+#### Web アプリ API が使えないとき
 
-`apiKey` の実体は Google Cloud の API キーなので、gcloud でも取得できます。
+組織の制限や API の無効化により、`apps:list` / `apps:create` が
+403 で拒否されることがあります。エラーは画面に出ず
+`firebase-debug.log` にだけ書かれるため、`firebase:config` は
+ログから HTTP ステータスと応答本文を取り出して表示し、
+ログをリポジトリ直下へ残します。
+
+まず切り分けます。
+
+```bash
+npm run firebase:doctor -- --project <PROJECT_ID>
+```
+
+「5. Web アプリ API が使えるか」で原因が分かります。
+
+| 表示 | 対処 |
+|---|---|
+| API が無効 | `gcloud services enable apikeys.googleapis.com firebase.googleapis.com --project <PROJECT_ID>` |
+| ログインのスコープ不足 | `npx --yes firebase-tools@15 login --reauth` |
+| 403（上記以外） | `roles/firebase.developAdmin` の付与、組織ポリシーの確認 |
+
+**登録済みの Web アプリがある場合**は、一覧を経由せず appId を直接指定できます。
+
+```bash
+npm run firebase:config -- --project <PROJECT_ID> --app-id 1:000000000000:web:xxxxxxxx
+```
+
+#### Web アプリ登録なしでも進められる
+
+`firebase:config` は Web アプリから取得できないと、**gcloud の API キーへ自動で切り替えます**。
 
 ```bash
 gcloud services api-keys list --project <PROJECT_ID>
 gcloud services api-keys get-key-string <KEY_ID> --project <PROJECT_ID>
 ```
 
-ただし Firebase が自動生成したキーを判別しづらいので、
-**`firebase apps:sdkconfig` を使うほうが確実**です。
+SmileQ Live に必要な値はこれで揃います。
+
+| 値 | 由来 |
+|---|---|
+| `firebaseApiKey` | API キーの文字列（実体は Google Cloud の API キー） |
+| `firebaseAuthDomain` | `<PROJECT_ID>.firebaseapp.com`（プロジェクト ID から決まる） |
+| `firebaseProjectId` | プロジェクト ID |
+| `firebaseAppId` | **空でよい**（Analytics 用。Auth と Firestore は使わない） |
+
+`appId` が任意なのは、Firebase Authentication と Firestore の Web SDK が
+`apiKey` / `authDomain` / `projectId` だけで動くためです
+（`src/lib/env/server-env.ts` の `firebaseAppId()` も `null` を許容しています）。
 
 ---
 
