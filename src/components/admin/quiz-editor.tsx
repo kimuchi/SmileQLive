@@ -13,7 +13,7 @@ import { Spinner } from '@/components/shared/Spinner';
 import { TextArea } from '@/components/shared/TextArea';
 import { TextInput } from '@/components/shared/TextInput';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
-import { PublishIssueList } from '@/components/admin/publish-issue-list';
+import { PublishIssueList, parsePublishIssues } from '@/components/admin/publish-issue-list';
 import { QuestionCard } from '@/components/admin/question-card';
 import { buildDuplicatePayload } from '@/components/admin/question-draft';
 import { useAutosave } from '@/components/admin/use-autosave';
@@ -60,30 +60,6 @@ type SettingsDraft = {
 };
 
 type PendingDialog = { kind: 'delete-question'; questionId: string; position: number } | null;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-/** 422 応答の details から公開チェック結果を取り出す。形が違えば空配列。 */
-function parsePublishIssues(details: unknown): PublishIssue[] {
-  if (!Array.isArray(details)) {
-    return [];
-  }
-  const issues: PublishIssue[] = [];
-  for (const entry of details) {
-    if (!isRecord(entry) || typeof entry.message !== 'string' || typeof entry.code !== 'string') {
-      continue;
-    }
-    issues.push({
-      questionPosition: typeof entry.questionPosition === 'number' ? entry.questionPosition : null,
-      questionId: typeof entry.questionId === 'string' ? entry.questionId : null,
-      code: entry.code,
-      message: entry.message,
-    });
-  }
-  return issues;
-}
 
 export type QuizEditorProps = {
   quizId: string;

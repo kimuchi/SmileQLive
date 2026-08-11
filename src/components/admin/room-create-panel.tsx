@@ -10,9 +10,11 @@ import { Select } from '@/components/shared/Select';
 import { Spinner } from '@/components/shared/Spinner';
 import { TextInput } from '@/components/shared/TextInput';
 import { JoinUrlPanel } from '@/components/admin/join-url-panel';
+import { PublishIssueList, parsePublishIssues } from '@/components/admin/publish-issue-list';
 import { rememberJoinUrl } from '@/components/admin/join-url-store';
-import { apiGet, apiPost } from '@/lib/client/api-client';
+import { apiGet, apiPost, isApiClientError } from '@/lib/client/api-client';
 import { formatCount } from '@/lib/format';
+import type { PublishIssue } from '@/domain/quiz/publish-validation';
 import type { CreateRoomResponse, QuizListItem, QuizListResponse } from '@/types/api';
 
 /**
@@ -41,6 +43,8 @@ export function RoomCreatePanel({ initialQuizId }: RoomCreatePanelProps) {
   const [maxParticipantsError, setMaxParticipantsError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<unknown>(null);
+  /** 公開条件の不足。details に「第3問: ...」の形で返ってくる。 */
+  const [publishIssues, setPublishIssues] = useState<PublishIssue[]>([]);
   const [created, setCreated] = useState<CreateRoomResponse | null>(null);
 
   // 同期的な setState を含めない（effect から呼ぶため）。
@@ -94,6 +98,7 @@ export function RoomCreatePanel({ initialQuizId }: RoomCreatePanelProps) {
 
     setMaxParticipantsError(null);
     setCreateError(null);
+    setPublishIssues([]);
     setCreating(true);
     try {
       const response = await apiPost<CreateRoomResponse>('/api/rooms', {
@@ -104,7 +109,15 @@ export function RoomCreatePanel({ initialQuizId }: RoomCreatePanelProps) {
       rememberJoinUrl(response.roomId, response.joinUrl);
       setCreated(response);
     } catch (caught) {
-      setCreateError(caught);
+      // 公開条件の不足は「どこを直せばよいか」まで返ってくる。
+      // 見出しだけ出して details を捨てると、利用者は原因に辿り着けない。
+      if (isApiClientError(caught) && caught.code === 'QUIZ_PUBLISH_VALIDATION_FAILED') {
+        setPublishIssues(parsePublishIssues(caught.details));
+        setCreateError(null);
+      } else {
+        setPublishIssues([]);
+        setCreateError(caught);
+      }
     } finally {
       setCreating(false);
     }
@@ -164,6 +177,12 @@ export function RoomCreatePanel({ initialQuizId }: RoomCreatePanelProps) {
     <div className="flex flex-col gap-4">
       {loadError !== null ? <ErrorMessage error={loadError} onRetry={() => void load()} /> : null}
       {createError !== null ? <ErrorMessage error={createError} /> : null}
+      {publishIssues.length > 0 ? (
+        <PublishIssueList
+          issues={publishIssues}
+          title={`このクイズではルームを作成できません（${publishIssues.length}件）`}
+        />
+      ) : null}
 
       {publishedQuizzes.length === 0 ? (
         <Card>

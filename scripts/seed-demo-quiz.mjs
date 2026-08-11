@@ -349,6 +349,91 @@ await batch.commit();
 success(`${questions.length} 問のクイズを作成しました（公開済み）`);
 
 // ---------------------------------------------------------------------------
+step('書き込んだ内容を読み直して点検');
+
+/**
+ * ルーム作成時に効くのは「Firestore に何が入っているか」だけ。
+ * 書いたつもりの値ではなく、実際に読める値を確かめる。
+ *
+ * ルーム作成は公開検証をやり直すため、ここが欠けていると
+ * 「公開条件を満たしていません」で止まる。
+ *   * 問題が読めるか（quizId で引けるか）
+ *   * 画像の mediaAssets が引けるか（引けないと画像は無いものとして扱われる）
+ *   * 文章を持たない選択肢に画像と代替テキストがあるか
+ */
+async function inspect() {
+  const problems = [];
+
+  const storedQuestions = await db.collection('questions').where('quizId', '==', quizId).get();
+  if (storedQuestions.size !== questions.length) {
+    problems.push(`問題が ${storedQuestions.size} 件しか読めません（期待 ${questions.length} 件）`);
+  }
+
+  // 参照している画像 ID をすべて集めて、実在するか確かめる。
+  const referenced = new Set();
+  for (const doc of storedQuestions.docs) {
+    const data = doc.data();
+    for (const id of [data.questionImageAssetId, data.revealImageAssetId]) {
+      if (id) referenced.add(id);
+    }
+    for (const choice of data.choices ?? []) {
+      if (choice.imageAssetId) referenced.add(choice.imageAssetId);
+    }
+  }
+
+  const assetIds = [...referenced];
+  const assetDocs =
+    assetIds.length > 0
+      ? await db.getAll(...assetIds.map((id) => db.collection('mediaAssets').doc(id)))
+      : [];
+  const foundAssets = new Set(
+    assetDocs
+      .filter((doc) => {
+        const data = doc.data();
+        // getAssetRefs と同じ条件（id / bucket / objectPath が揃っていること）。
+        return data && data.id && data.bucket && data.objectPath;
+      })
+      .map((doc) => doc.id),
+  );
+
+  for (const id of assetIds) {
+    if (!foundAssets.has(id)) {
+      problems.push(`画像 ${id} の mediaAssets が読めません`);
+    }
+  }
+
+  // 文章を持たない選択肢は、画像と代替テキストの両方が必要。
+  for (const doc of storedQuestions.docs) {
+    const data = doc.data();
+    for (const choice of data.choices ?? []) {
+      const hasText = typeof choice.text === 'string' && choice.text.trim().length > 0;
+      if (hasText) continue;
+      if (!choice.imageAssetId || !foundAssets.has(choice.imageAssetId)) {
+        problems.push(`第${data.position}問の選択肢に文章も画像もありません`);
+      } else if (!choice.imageAlt || String(choice.imageAlt).trim().length === 0) {
+        problems.push(`第${data.position}問の画像だけの選択肢に代替テキストがありません`);
+      }
+    }
+  }
+
+  return { problems, questionCount: storedQuestions.size, assetCount: foundAssets.size };
+}
+
+const inspection = await inspect();
+if (inspection.problems.length === 0) {
+  success(`問題 ${inspection.questionCount} 件 / 画像 ${inspection.assetCount} 件を読み直せました`);
+} else {
+  warn('読み直しで問題が見つかりました。このままではルームを作成できません。');
+  for (const problem of inspection.problems) {
+    console.log(`    ${problem}`);
+  }
+  console.log('');
+  info(`データベース: ${databaseId} / バケット: ${bucketName}`);
+  info('設定ファイルの firestoreDatabaseId・mediaBucket がアプリ側と一致しているか確認してください。');
+  console.log('');
+}
+
+// ---------------------------------------------------------------------------
 heading('作成した内容');
 for (const question of questions) {
   const kind =
