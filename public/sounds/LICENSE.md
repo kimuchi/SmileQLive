@@ -1,35 +1,34 @@
 # 効果音のライセンス記録
 
-**配布・上演に使う音源は各自で用意し、必ずこの表へ記録してください。**
+## 現在の状態: 同梱音（自家生成）
 
-このリポジトリには本番用の音源を同梱していません。
-`scripts/generate-placeholder-sounds.mjs` が生成する WAV は動作確認用の自家生成音（正弦波）で、
-第三者の権利を含みません。本番前に必ず差し替え、下表を埋めてください。
+`public/sounds/default/*.wav` は `scripts/generate-sounds.mjs` が正弦波から組み立てた自家生成音です。
+第三者の権利を含まないため、このリポジトリへ同梱してあり、そのまま会場で使えます。
 
+| 名前 | ファイル | 出典 | ライセンス | 商用利用 | クレジット表記 |
+|---|---|---|---|---|---|
+| question-start | `default/question-start.wav` | 自家生成（`scripts/generate-sounds.mjs`） | 本リポジトリのライセンスに従う | 可 | 不要 |
+| tick | `default/tick.wav` | 自家生成（同上） | 同上 | 可 | 不要 |
+| answer-lock | `default/answer-lock.wav` | 自家生成（同上） | 同上 | 可 | 不要 |
+| answer-reveal | `default/answer-reveal.wav` | 自家生成（同上） | 同上 | 可 | 不要 |
+| ranking | `default/ranking.wav` | 自家生成（同上） | 同上 | 可 | 不要 |
+| finish | `default/finish.wav` | 自家生成（同上） | 同上 | 可 | 不要 |
+
+## 外部の音源へ差し替えた場合
+
+**`public/sounds/` 直下へ音源を置いて差し替えたときは、必ず下表を埋めてください。**
 記録が空のまま公開イベントで使用しないこと。イベント後の権利確認・再配布の可否判断ができなくなります。
 
-## 現在の状態
-
-`manifest.json` が `*.wav` を指している場合、それは `scripts/generate-placeholder-sounds.mjs` が生成した
-動作確認用のプレースホルダ（正弦波）です。第三者の権利は含みませんが、会場で使う音としては簡素です。
-本番用の音源へ差し替えたら、`manifest.json` のファイル名と下表を同時に更新してください。
-
-## 記録表
+`npm run sounds:install` を使うと、この表の行が自動で更新されます。
 
 | 名前 | ファイル | 出典（配布元 URL・作者） | ライセンス | 商用利用 | クレジット表記 | 入手日 | 記録者 |
 |---|---|---|---|---|---|---|---|
-| question-start | `question-start.mp3` | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
-| tick | `tick.mp3` | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
-| answer-lock | `answer-lock.mp3` | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
-| answer-reveal | `answer-reveal.mp3` | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
-| ranking | `ranking.mp3` | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
-| finish | `finish.mp3` | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
-
-## 記入例
-
-| 名前 | ファイル | 出典 | ライセンス | 商用利用 | クレジット表記 | 入手日 | 記録者 |
-|---|---|---|---|---|---|---|---|
-| tick | `tick.wav` | 自家生成（`scripts/generate-placeholder-sounds.mjs`） | 本リポジトリのライセンスに従う | 可 | 不要 | 2026-08-10 | 運営担当 |
+| question-start | 未使用 | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
+| tick | 未使用 | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
+| answer-lock | 未使用 | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
+| answer-reveal | 未使用 | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
+| ranking | 未使用 | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
+| finish | 未使用 | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
 
 ## 確認する項目
 

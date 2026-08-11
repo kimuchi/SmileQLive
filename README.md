@@ -66,15 +66,17 @@ Firebase の準備は [docs/FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md) を参照
 pnpm emulators     # Firestore / Auth / Storage / UI(http://127.0.0.1:4000)
 ```
 
-効果音は 2 通りあります。
+効果音は**同梱済み**です（`public/sounds/default/*.wav`）。自家生成音なので権利の確認は不要で、
+デプロイした時点でそのまま鳴ります。
 
 ```bash
-node scripts/generate-placeholder-sounds.mjs   # 自家生成のプレースホルダ（すぐ鳴る・権利問題なし）
-npm run sounds:install                          # 効果音ラボから取り込む（手順を表示）
+npm run sounds:generate                         # 同梱音を作り直す
+npm run sounds:install                          # 効果音ラボの音源へ差し替える（手順を表示）
 ```
 
-配布元の規約で**素材の再配布が禁止**されているため、音源はリポジトリに含めていません。
-環境ごとに `npm run sounds:install` を実行してください（出典は `public/sounds/LICENSE.md` へ自動記録されます）。
+効果音ラボは**素材の再配布が禁止**されているため、その音源だけはリポジトリに含めていません。
+差し替える場合のみ `npm run sounds:install` を実行してください
+（出典は `public/sounds/LICENSE.md` へ自動記録されます）。
 
 ---
 

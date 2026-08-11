@@ -105,9 +105,9 @@ function detectAudio(buffer) {
 
 // ---------------------------------------------------------------------------
 if (flags.has('revert')) {
-  heading('効果音をプレースホルダへ戻す');
+  heading('効果音を同梱音へ戻す');
   const { run } = await import('./lib/proc.mjs');
-  run('node', ['scripts/generate-placeholder-sounds.mjs'], { capture: false });
+  run('node', ['scripts/generate-sounds.mjs'], { capture: false });
   process.exit(0);
 }
 
@@ -142,10 +142,12 @@ if (!fromDir) {
   console.log(
     `  ${color.dim('このため音源はリポジトリへ含めず、ダウンロードも自動化していません。')}`,
   );
-  console.log(`  ${color.dim('取り込んだ音源は public/sounds/ に置かれ、Git には入りません。')}`);
+  console.log(
+    `  ${color.dim('取り込んだ音源は public/sounds/ 直下に置かれ、Git には入りません（同梱音より優先されます）。')}`,
+  );
   console.log('');
-  info('音源を用意せずに動作確認する場合は、自家生成のプレースホルダが使えます:');
-  console.log('    node scripts/generate-placeholder-sounds.mjs');
+  info('取り込まなくても、同梱の自家生成音がそのまま鳴ります。作り直す場合:');
+  console.log('    npm run sounds:generate');
   console.log('');
   process.exit(0);
 }

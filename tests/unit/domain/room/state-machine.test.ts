@@ -28,11 +28,11 @@ import type { RoomAction, RoomPhase } from '@/domain/room/state-machine';
 const EXPECTED_ACTIONS: Record<RoomPhase, RoomAction[]> = {
   lobby: ['show_question', 'finish_room'],
   question_ready: ['open_question'],
-  question_open: ['lock_question'],
+  question_open: ['lock_question', 'extend_deadline'],
   question_locked: ['reveal_answer', 'finish_room'],
   answer_revealed: ['show_question', 'show_scoreboard', 'finish_room'],
   scoreboard: ['show_question', 'finish_room'],
-  finished: [],
+  finished: ['reopen_room'],
 };
 
 /** アクション成功後のフェーズ。 */
@@ -40,12 +40,15 @@ const EXPECTED_NEXT_PHASE: Record<RoomAction, RoomPhase> = {
   show_question: 'question_ready',
   open_question: 'question_open',
   lock_question: 'question_locked',
+  extend_deadline: 'question_open',
   reveal_answer: 'answer_revealed',
   show_scoreboard: 'scoreboard',
   finish_room: 'finished',
+  // 出題前に終了した場合の戻り先。出題済みなら scoreboard（別途検証）。
+  reopen_room: 'lobby',
 };
 
-describe('canTransition（全 7 フェーズ × 全 6 アクション）', () => {
+describe('canTransition（全フェーズ × 全アクション）', () => {
   for (const phase of ROOM_PHASES) {
     for (const action of ROOM_ACTIONS) {
       const allowed = EXPECTED_ACTIONS[phase].includes(action);
@@ -55,9 +58,15 @@ describe('canTransition（全 7 フェーズ × 全 6 アクション）', () =>
     }
   }
 
-  it('finished からはどのアクションも実行できない', () => {
+  it('finished から出られるのは reopen_room だけ', () => {
     for (const action of ROOM_ACTIONS) {
-      expect(canTransition('finished', action)).toBe(false);
+      expect(canTransition('finished', action)).toBe(action === 'reopen_room');
+    }
+  });
+
+  it('延長できるのは回答受付中だけ（締切後に延ばさない）', () => {
+    for (const phase of ROOM_PHASES) {
+      expect(canTransition(phase, 'extend_deadline')).toBe(phase === 'question_open');
     }
   });
 
@@ -95,6 +104,23 @@ describe('nextPhase', () => {
       'INVALID_TRANSITION: question_open -> reveal_answer',
     );
     expect(() => nextPhase('finished', 'show_question')).toThrow(/INVALID_TRANSITION/);
+  });
+
+  it('延長してもフェーズは変わらない', () => {
+    expect(nextPhase('question_open', 'extend_deadline')).toBe('question_open');
+  });
+
+  it('再開の戻り先は出題状況で決まる', () => {
+    // まだ 1 問も出していない → 待機中から仕切り直す。
+    expect(nextPhase('finished', 'reopen_room', { hasCurrentQuestion: false })).toBe('lobby');
+    // 出題済み → ランキングへ戻す。ここからは出題も終了も選べる。
+    expect(nextPhase('finished', 'reopen_room', { hasCurrentQuestion: true })).toBe('scoreboard');
+  });
+
+  it('再開した先から進行を続けられる', () => {
+    const resumed = nextPhase('finished', 'reopen_room', { hasCurrentQuestion: true });
+    expect(nextPhase(resumed, 'show_question')).toBe('question_ready');
+    expect(nextPhase(resumed, 'finish_room')).toBe('finished');
   });
 });
 

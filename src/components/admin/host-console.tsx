@@ -17,6 +17,7 @@ import { recallJoinUrl, rememberJoinUrl } from '@/components/admin/join-url-stor
 import type { QuestionType } from '@/domain/quiz/question';
 import type { StaffSnapshot } from '@/domain/room/snapshot';
 import {
+  EXTEND_SECONDS_PRESETS,
   ROOM_ACTION_LABELS,
   ROOM_PHASE_LABELS,
   type RoomAction,
@@ -63,7 +64,10 @@ export type HostConsoleProps = {
   outline: readonly HostQuestionOutline[];
 };
 
-type BusyKey = RoomAction | 'join-toggle' | 'rotate' | 'presentation' | null;
+/** 延長ボタンは秒数ごとに分かれるため、押した 1 つだけを処理中にできるようにする。 */
+type ExtendBusyKey = `extend-${number}`;
+
+type BusyKey = RoomAction | ExtendBusyKey | 'join-toggle' | 'rotate' | 'presentation' | null;
 
 export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
   const { snapshot, error, status, clock, refresh } = useRoomSnapshot<StaffSnapshot>({
@@ -118,18 +122,37 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
     return outline.find((question) => question.position === currentPosition + 1) ?? null;
   }, [outline, snapshot?.currentQuestionPosition]);
 
+  /**
+   * 「進行操作」へ並べる操作。
+   *
+   * 延長と再開はここへ出さず、それぞれ専用の欄へ出す。
+   * 延長は秒数を選ばせる必要があり、再開は「得点が残る」ことを添えないと押しづらいため。
+   */
+  const inlineActions = useMemo(
+    () =>
+      (snapshot?.availableActions ?? []).filter(
+        (action) => action !== 'extend_deadline' && action !== 'reopen_room',
+      ),
+    [snapshot?.availableActions],
+  );
+
   const runAction = useCallback(
-    async (action: RoomAction, questionId?: string) => {
+    async (
+      action: RoomAction,
+      options: { questionId?: string; extendSeconds?: number; busyKey?: ExtendBusyKey } = {},
+    ) => {
       if (!snapshot) {
         return;
       }
-      setBusy(action);
+      // 延長は秒数ごとにボタンが分かれるため、押した 1 つだけを処理中にする。
+      setBusy(options.busyKey ?? action);
       setActionError(null);
       setNotice(null);
       try {
         await apiPost(`/api/rooms/${roomId}/actions`, {
           action,
-          ...(questionId !== undefined ? { questionId } : {}),
+          ...(options.questionId !== undefined ? { questionId: options.questionId } : {}),
+          ...(options.extendSeconds !== undefined ? { extendSeconds: options.extendSeconds } : {}),
           expectedVersion: snapshot.stateVersion,
         });
         await refresh();
@@ -332,10 +355,14 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
       {/* 進行操作 */}
       <Card title="進行操作" description="いまの状態で実行できる操作だけを表示します。">
         <div className="flex flex-wrap gap-2">
-          {snapshot.availableActions.length === 0 ? (
-            <p className="text-sm text-slate-600">実行できる操作はありません。</p>
+          {inlineActions.length === 0 ? (
+            <p className="text-sm text-slate-600">
+              {snapshot.phase === 'finished'
+                ? 'クイズは終了しています。下の「クイズを再開」から続きを再開できます。'
+                : '実行できる操作はありません。'}
+            </p>
           ) : null}
-          {snapshot.availableActions.map((action, index) => {
+          {inlineActions.map((action, index) => {
             if (action === 'show_question') {
               if (nextQuestion === null) {
                 return null;
@@ -347,7 +374,7 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
                   variant="primary"
                   loading={busy === action}
                   disabled={actionsBusy && busy !== action}
-                  onClick={() => void runAction('show_question', nextQuestion.id)}
+                  onClick={() => void runAction('show_question', { questionId: nextQuestion.id })}
                 >
                   第{nextQuestion.position}問を表示
                 </Button>
@@ -384,16 +411,44 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
         </div>
 
         {snapshot.phase === 'question_open' ? (
-          <div className="mt-4 flex flex-wrap items-center gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <p className="text-lg font-bold text-slate-900 tabular-nums">
-              {formatRemainingSeconds(countdown.remainingSeconds)}
-            </p>
-            <p className="text-sm font-bold text-slate-700">
-              回答済み {formatRatioCount(snapshot.answeredCount, snapshot.participantCount)}
-            </p>
-            <p className="text-xs text-slate-600">
-              締切はサーバー時刻で判定します。集計は締切後に表示されます。
-            </p>
+          <div className="mt-4 flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-4">
+              <p className="text-lg font-bold text-slate-900 tabular-nums">
+                {formatRemainingSeconds(countdown.remainingSeconds)}
+              </p>
+              <p className="text-sm font-bold text-slate-700">
+                回答済み {formatRatioCount(snapshot.answeredCount, snapshot.participantCount)}
+              </p>
+              <p className="text-xs text-slate-600">
+                締切はサーバー時刻で判定します。集計は締切後に表示されます。
+              </p>
+            </div>
+
+            {snapshot.availableActions.includes('extend_deadline') ? (
+              <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
+                <span className="text-sm font-bold text-slate-700">回答時間を延長</span>
+                {EXTEND_SECONDS_PRESETS.map((seconds) => (
+                  <Button
+                    key={seconds}
+                    size="sm"
+                    variant="secondary"
+                    loading={busy === `extend-${seconds}`}
+                    disabled={actionsBusy && busy !== `extend-${seconds}`}
+                    onClick={() =>
+                      void runAction('extend_deadline', {
+                        extendSeconds: seconds,
+                        busyKey: `extend-${seconds}`,
+                      })
+                    }
+                  >
+                    +{seconds}秒
+                  </Button>
+                ))}
+                <span className="text-xs text-slate-600">
+                  締切を過ぎていた場合は、押した時点からその秒数だけ受け付けます。
+                </span>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -571,13 +626,29 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
       ) : null}
 
       {snapshot.phase === 'finished' ? (
-        <Card>
-          <p className="text-sm text-slate-700">
-            クイズは終了しました。お疲れさまでした。
-            <Link href="/admin/quizzes" className="text-brand-700 ml-2 font-bold hover:underline">
+        <Card title="クイズは終了しました">
+          <p className="text-sm text-slate-700">お疲れさまでした。</p>
+          <p className="mt-3 text-sm text-slate-700">
+            誤って終了した場合や続きを行う場合は、ここから再開できます。
+            <strong className="font-bold">得点と回答はそのまま残ります。</strong>
+            参加者は同じ二次元コードのまま戻ってこられます。
+          </p>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <Button
+              variant="secondary"
+              loading={busy === 'reopen_room'}
+              disabled={actionsBusy && busy !== 'reopen_room'}
+              onClick={() => void runAction('reopen_room')}
+            >
+              {ROOM_ACTION_LABELS.reopen_room}
+            </Button>
+            <Link href="/admin/rooms" className="text-brand-700 font-bold hover:underline">
+              ルーム一覧へ
+            </Link>
+            <Link href="/admin/quizzes" className="text-brand-700 font-bold hover:underline">
               クイズ一覧へ戻る
             </Link>
-          </p>
+          </div>
         </Card>
       ) : null}
 
@@ -586,8 +657,10 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
         title="クイズを終了しますか？"
         description={
           <>
-            <p>終了すると、これ以降の問題は出題できません。元に戻せません。</p>
-            <p className="mt-2">参加者の画面は結果表示に切り替わります。</p>
+            <p>終了すると出題を続けられなくなり、参加者の画面は結果表示へ切り替わります。</p>
+            <p className="mt-2">
+              終了したあとでも、この画面の「クイズを再開」から続きを再開できます（得点は残ります）。
+            </p>
           </>
         }
         confirmLabel="終了する"

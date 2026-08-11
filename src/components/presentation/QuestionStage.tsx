@@ -85,24 +85,36 @@ export function QuestionStage({
         ) : null}
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col justify-center" style={{ gap: stageSize(28) }}>
+      {/*
+        高さが足りないときに何を削るかを決めておく。
+        問題文と選択肢は会場から読めないと成立しないので縮めない（shrink-0）。
+        余りを吸収するのは画像で、入りきらなければ画像が小さくなる。
+        これが無いと中身が枠を越えて、上の残り秒数や下の回答済み表示へ重なる。
+      */}
+      <div className="flex min-h-0 flex-1 flex-col justify-center" style={{ gap: stageSize(24) }}>
         {question.text !== null && question.text.length > 0 ? (
           <h1
-            className="font-bold break-words text-white"
+            className="shrink-0 font-bold break-words text-white"
             style={{ fontSize: stageSize(STAGE_FONT.question), lineHeight: 1.25 }}
           >
             {question.text}
           </h1>
         ) : null}
 
-        {question.image ? <StageImage image={question.image} maxHeightRatio={0.4} /> : null}
+        {question.image ? (
+          <div className="flex min-h-0 flex-1 items-center justify-center">
+            <StageImage image={question.image} maxHeightRatio={0.4} fill />
+          </div>
+        ) : null}
 
-        {question.type === 'choice' ? (
-          // 受付中は results を渡さない = 選択肢別の人数を出さない。
-          <ChoiceGrid choices={question.choices} />
-        ) : (
-          <NumberQuestionPanel question={question} />
-        )}
+        <div className="shrink-0">
+          {question.type === 'choice' ? (
+            // 受付中は results を渡さない = 選択肢別の人数を出さない。
+            <ChoiceGrid choices={question.choices} />
+          ) : (
+            <NumberQuestionPanel question={question} />
+          )}
+        </div>
       </div>
 
       <div className="shrink-0">

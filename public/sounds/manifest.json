@@ -1,8 +1,8 @@
 {
-  "question-start": "question-start.wav",
-  "tick": "tick.wav",
-  "answer-lock": "answer-lock.wav",
-  "answer-reveal": "answer-reveal.wav",
-  "ranking": "ranking.wav",
-  "finish": "finish.wav"
+  "question-start": "default/question-start.wav",
+  "tick": "default/tick.wav",
+  "answer-lock": "default/answer-lock.wav",
+  "answer-reveal": "default/answer-reveal.wav",
+  "ranking": "default/ranking.wav",
+  "finish": "default/finish.wav"
 }

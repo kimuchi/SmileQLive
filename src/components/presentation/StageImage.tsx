@@ -16,10 +16,19 @@ export function StageImage({
   image,
   /** 画面高に対する最大割合。既定 0.4（40%）。 */
   maxHeightRatio = 0.4,
+  /**
+   * 余った高さいっぱいまで使う。
+   *
+   * 親を `flex min-h-0 flex-1` にしておくと、文字や選択肢が入りきらないときに
+   * **画像が縮んで場所を譲る**。これが無いと画像が高さを押し広げ、
+   * 中身が枠からはみ出して他の表示へ重なる。
+   */
+  fill = false,
   className,
 }: {
   image: PublicImage;
   maxHeightRatio?: number;
+  fill?: boolean;
   className?: string;
 }) {
   return (
@@ -32,7 +41,11 @@ export function StageImage({
       // 投影画面に出る画像は「今まさに見せるもの」なので必ず即時読み込みにする。
       loading="eager"
       decoding="async"
-      className={cn('mx-auto w-auto max-w-full rounded-2xl object-contain', className)}
+      className={cn(
+        'mx-auto w-auto max-w-full rounded-2xl object-contain',
+        fill ? 'h-full min-h-0' : null,
+        className,
+      )}
       style={{ maxHeight: stageHeightRatio(maxHeightRatio) }}
     />
   );

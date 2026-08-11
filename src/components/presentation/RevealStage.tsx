@@ -66,7 +66,10 @@ export function RevealStage({
       </div>
 
       <div className="flex min-h-0 flex-1 items-stretch" style={{ gap: stageSize(32) }}>
-        <div className="flex min-w-0 flex-1 flex-col justify-center" style={{ gap: stageSize(24) }}>
+        <div
+          className="flex min-h-0 min-w-0 flex-1 flex-col justify-center overflow-hidden"
+          style={{ gap: stageSize(24) }}
+        >
           {question.type === 'choice' ? (
             <ChoiceReveal
               question={question}
@@ -84,21 +87,24 @@ export function RevealStage({
 
         {hasSidePanel ? (
           <aside
-            className="flex shrink-0 flex-col justify-center rounded-3xl border-4 border-white/20 bg-white/5 text-white"
+            className="flex min-h-0 shrink-0 flex-col justify-center overflow-hidden rounded-3xl border-4 border-white/20 bg-white/5 text-white"
             style={{ width: stageSize(600), padding: stageSize(32), gap: stageSize(20) }}
           >
             <h2
-              className="font-bold text-white/60"
+              className="shrink-0 font-bold text-white/60"
               style={{ fontSize: stageSize(STAGE_FONT.small) }}
             >
               解説
             </h2>
+            {/* 解説文は読ませたいので縮めない。余りの吸収は画像に任せる。 */}
             {reveal.revealImage ? (
-              <StageImage image={reveal.revealImage} maxHeightRatio={0.34} className="mx-0" />
+              <div className="flex min-h-0 flex-1 items-center justify-center">
+                <StageImage image={reveal.revealImage} maxHeightRatio={0.34} fill />
+              </div>
             ) : null}
             {reveal.explanation !== null && reveal.explanation.length > 0 ? (
               <p
-                className="break-words whitespace-pre-wrap"
+                className="shrink-0 break-words whitespace-pre-wrap"
                 style={{ fontSize: stageSize(STAGE_FONT.body), lineHeight: 1.5 }}
               >
                 {reveal.explanation}

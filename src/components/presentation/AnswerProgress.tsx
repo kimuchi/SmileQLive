@@ -19,14 +19,16 @@ export function AnswerProgress({
   const ratio = safeRatio(answeredCount, participantCount);
 
   return (
+    // 主役は問題と選択肢。進捗はひと目で読めれば足りるので、
+    // ここの数字を大きくしすぎない（選択肢と高さを取り合わせない）。
     <div className="flex flex-col" style={{ gap: stageSize(10) }}>
-      <div className="flex items-baseline" style={{ gap: stageSize(16) }}>
+      <div className="flex flex-wrap items-baseline" style={{ gap: stageSize(16) }}>
         <span className="font-bold text-white/60" style={{ fontSize: stageSize(STAGE_FONT.small) }}>
           回答済み
         </span>
         <span
           className="font-bold text-white tabular-nums"
-          style={{ fontSize: stageSize(STAGE_FONT.emphasis), lineHeight: 1 }}
+          style={{ fontSize: stageSize(STAGE_FONT.heading), lineHeight: 1 }}
         >
           {formatInteger(answeredCount)}
         </span>

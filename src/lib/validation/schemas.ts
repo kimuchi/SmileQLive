@@ -12,7 +12,11 @@ import {
   TIME_LIMIT_MIN_SECONDS,
   UNIT_MAX_LENGTH,
 } from '@/domain/quiz/question';
-import { ROOM_ACTIONS } from '@/domain/room/state-machine';
+import {
+  EXTEND_SECONDS_MAX,
+  EXTEND_SECONDS_MIN,
+  ROOM_ACTIONS,
+} from '@/domain/room/state-machine';
 import { MEDIA_USAGES } from '@/domain/media/image-policy';
 
 /**
@@ -148,11 +152,18 @@ export const createRoomSchema = z.object({
   maxParticipants: z.int().min(2).max(1000).optional(),
 });
 
-export const roomActionSchema = z.object({
-  action: z.enum(ROOM_ACTIONS),
-  questionId: uuidSchema.nullable().optional(),
-  expectedVersion: z.int().min(0),
-});
+export const roomActionSchema = z
+  .object({
+    action: z.enum(ROOM_ACTIONS),
+    questionId: uuidSchema.nullable().optional(),
+    /** extend_deadline で足す秒数。 */
+    extendSeconds: z.int().min(EXTEND_SECONDS_MIN).max(EXTEND_SECONDS_MAX).nullable().optional(),
+    expectedVersion: z.int().min(0),
+  })
+  .refine((value) => value.action !== 'extend_deadline' || typeof value.extendSeconds === 'number', {
+    message: '延長する秒数を指定してください',
+    path: ['extendSeconds'],
+  });
 
 // ---------------------------------------------------------------------------
 // 参加者

@@ -467,7 +467,8 @@ export async function transitionRoom(
     });
   }
 
-  if (room.phase === 'finished') {
+  // 終了済みからは reopen_room だけが出られる（誤って終了しても再開できる）。
+  if (room.phase === 'finished' && input.action !== 'reopen_room') {
     throw new AppError('ROOM_FINISHED');
   }
 
@@ -494,6 +495,7 @@ export async function transitionRoom(
     action: input.action,
     expectedVersion: input.expectedVersion,
     questionId,
+    extendSeconds: input.extendSeconds ?? null,
     actorUserId: user.uid,
   });
 

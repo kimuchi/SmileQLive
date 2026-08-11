@@ -79,7 +79,7 @@ lobby
   ↓ show_question
 question_ready
   ↓ open_question
-question_open
+question_open        ← extend_deadline（回答時間の延長。フェーズは変わらない）
   ↓ lock_question（手動 or 時間切れ）
 question_locked
   ↓ reveal_answer
@@ -89,7 +89,17 @@ scoreboard
   ↓ show_question（次の問題）
   …
 finished
+  ↓ reopen_room（再開。得点・回答は残したまま scoreboard／lobby へ戻る）
 ```
+
+`extend_deadline` は `answer_deadline_at` だけを伸ばします。
+伸ばす起点は**サーバー時刻**で、まだ残っていれば残り時間へ足し、
+すでに過ぎていれば操作した時点から数え直します（締切直後の救済に使えます）。
+締め切ったあとは延長できません（締切を見て回答をやめた人が不利になるため）。
+
+`reopen_room` は `finished` から出られる唯一の遷移です。
+`finished_at` を消し、終了時に閉じた `join_open` を戻します。
+得点・回答・参加者はそのまま残るため、同じ二次元コードで再開できます。
 
 | 状態 | 投影 | 参加者 | 回答 API |
 |---|---|---|---|

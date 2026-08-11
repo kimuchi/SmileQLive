@@ -35,7 +35,15 @@ export function StageFrame({
           style={{ padding: stageSize(56), gap: stageSize(24) }}
         >
           {header ?? null}
-          <div className="flex min-h-0 flex-1 flex-col justify-center">{children}</div>
+          {/*
+            overflow-hidden は最後の砦。中身が高さを超えたとき、
+            justify-center のままだと上下へはみ出して見出しや進捗表示へ重なる。
+            各ステージ側で縮む要素（画像など）を用意したうえで、
+            それでも収まらない場合はここで切る（重ねない）。
+          */}
+          <div className="flex min-h-0 flex-1 flex-col justify-center overflow-hidden">
+            {children}
+          </div>
           {footer ?? null}
         </div>
       </div>

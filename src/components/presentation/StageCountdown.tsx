@@ -15,6 +15,18 @@ import { TICK_SECONDS } from '@/domain/room/timer';
 /** 残りが少ないと判断する秒数（効果音 tick と同じ基準）。 */
 const URGENT_SECONDS = Math.max(...TICK_SECONDS);
 
+/** 円の中へ収まる字の大きさ。桁が増えるほど小さくする。 */
+function numberFontSize(seconds: number): number {
+  const digits = String(seconds).length;
+  if (digits >= 4) {
+    return STAGE_FONT.body;
+  }
+  if (digits === 3) {
+    return STAGE_FONT.heading;
+  }
+  return STAGE_FONT.emphasis;
+}
+
 export function StageCountdown({
   remainingSeconds,
   remainingMs,
@@ -29,16 +41,24 @@ export function StageCountdown({
   const seconds = Math.max(0, remainingSeconds);
   const urgent = seconds <= URGENT_SECONDS;
 
+  // 制限時間は最大 180 秒、延長するとさらに増えるため 3 桁以上になる。
+  // 桁数に合わせて字を小さくしないと、数字が円からはみ出して隣の文字と重なる。
+  const secondsFontSize = numberFontSize(seconds);
+
   // 円環の描画。数字だけだと会場後方から「あとどれくらいか」が掴みにくいので、
   // 減っていく量そのものを面積で見せる。
   const RADIUS = 46;
   const circumference = 2 * Math.PI * RADIUS;
 
   return (
-    <div className="flex items-center" style={{ gap: stageSize(28) }}>
+    <div className="flex shrink-0 items-center" style={{ gap: stageSize(24) }}>
+      {/*
+        円環は問題文・画像・選択肢と高さを取り合う。
+        後方から読める大きさを保ちつつ、本体の表示領域を圧迫しない寸法にしている。
+      */}
       <div
         className="relative shrink-0"
-        style={{ width: stageSize(200), height: stageSize(200) }}
+        style={{ width: stageSize(156), height: stageSize(156) }}
         aria-hidden="true"
       >
         <svg viewBox="0 0 110 110" className="h-full w-full -rotate-90">
@@ -64,19 +84,22 @@ export function StageCountdown({
               'font-bold tabular-nums',
               urgent ? 'stage-urgent text-red-300' : 'text-white',
             )}
-            style={{ fontSize: stageSize(STAGE_FONT.hero), lineHeight: 1 }}
+            style={{ fontSize: stageSize(secondsFontSize), lineHeight: 1 }}
           >
             {seconds}
           </span>
         </div>
       </div>
 
-      <div className="flex flex-col items-start" style={{ gap: stageSize(8) }}>
-        <span className="font-bold text-white/60" style={{ fontSize: stageSize(STAGE_FONT.small) }}>
+      <div className="flex min-w-0 flex-col items-start" style={{ gap: stageSize(8) }}>
+        <span
+          className="font-bold whitespace-nowrap text-white/60"
+          style={{ fontSize: stageSize(STAGE_FONT.small) }}
+        >
           残り秒数
         </span>
         <p
-          className={cn('font-bold', urgent ? 'text-red-200' : 'text-white/50')}
+          className={cn('font-bold whitespace-nowrap', urgent ? 'text-red-200' : 'text-white/50')}
           style={{ fontSize: stageSize(STAGE_FONT.caption) }}
         >
           {urgent ? 'まもなく締切です' : '回答を受け付けています'}

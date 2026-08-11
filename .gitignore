@@ -39,7 +39,9 @@ deploy/cloud-run.*.json
 supabase/.temp/
 supabase/.branches/
 
-# 効果音（配布元の規約で再配布禁止のためコミットしない）
+# 効果音の差し替え置き場。
+# public/sounds/ 直下は外部素材（効果音ラボなど再配布禁止のもの）を入れる場所なのでコミットしない。
+# 同梱音は public/sounds/default/ にあり、こちらは自家生成のため追跡対象。
 # 取得方法は public/sounds/README.md / npm run sounds:install を参照
 /public/sounds/*.mp3
 /public/sounds/*.wav

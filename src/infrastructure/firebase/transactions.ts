@@ -46,6 +46,8 @@ import { awardPoints } from '@/domain/room/scoring';
 import {
   canTransition,
   nextPhase,
+  EXTEND_SECONDS_MAX,
+  EXTEND_SECONDS_MIN,
   type RoomAction,
   type RoomPhase,
 } from '@/domain/room/state-machine';
@@ -62,6 +64,8 @@ export type TransitionRoomInput = {
   expectedVersion: number;
   /** show_question のときだけ必要。 */
   questionId?: string | null;
+  /** extend_deadline のときだけ必要。足す秒数。 */
+  extendSeconds?: number | null;
   /** 認可済みの司会者 uid。トランザクション内でも所有者一致を再確認する。 */
   actorUserId: string;
 };
@@ -162,13 +166,19 @@ async function applyTransition(
   tx: Transaction,
   room: RoomDoc,
   action: RoomAction,
-  options: { questionId?: string | null; actorUserId: string | null },
+  options: {
+    questionId?: string | null;
+    extendSeconds?: number | null;
+    actorUserId: string | null;
+  },
 ): Promise<TransitionResult> {
   const roomId = room.id;
   const snapshot = parseQuizSnapshot(room.quizSnapshot);
   const now = nowTimestamp();
   const nextVersion = room.stateVersion + 1;
-  const phase = nextPhase(room.phase, action);
+  const phase = nextPhase(room.phase, action, {
+    hasCurrentQuestion: room.currentQuestionId !== null,
+  });
 
   let currentQuestionId = room.currentQuestionId;
   let currentQuestionPosition = room.currentQuestionPosition;
@@ -206,6 +216,20 @@ async function applyTransition(
       answerDeadlineAt = timestampFromMillis(now.toMillis() + question.timeLimitSeconds * 1000);
       break;
     }
+    case 'extend_deadline': {
+      const seconds = options.extendSeconds ?? 0;
+      if (!Number.isInteger(seconds) || seconds < EXTEND_SECONDS_MIN || seconds > EXTEND_SECONDS_MAX) {
+        throw new AppError('VALIDATION_FAILED', {
+          details: { reason: 'extend_seconds_out_of_range' },
+        });
+      }
+      // 締切をどこから伸ばすかは**サーバー時刻**だけで決める。
+      // まだ残っていれば残り時間へ足し、すでに過ぎていれば今から数え直す
+      // （締切直後に押しても「もう一度その秒数だけ受け付ける」になる）。
+      const base = Math.max(now.toMillis(), room.answerDeadlineAt?.toMillis() ?? 0);
+      answerDeadlineAt = timestampFromMillis(base + seconds * 1000);
+      break;
+    }
     case 'lock_question':
     case 'reveal_answer': {
       answerDeadlineAt = null;
@@ -224,6 +248,15 @@ async function applyTransition(
       joinOpen = false;
       break;
     }
+    case 'reopen_room': {
+      // 得点・回答は消さない。終了の記録だけを取り消して続きから再開できるようにする。
+      answerDeadlineAt = null;
+      finishedAt = null;
+      // 終了時に閉じた参加受付を戻す。二次元コードもそのまま使える
+      // （参加 URL を無効にしたい場合は司会画面から改めて再発行する）。
+      joinOpen = true;
+      break;
+    }
   }
 
   tx.update(roomRef(roomId), {
@@ -231,7 +264,8 @@ async function applyTransition(
     stateVersion: nextVersion,
     currentQuestionId,
     currentQuestionPosition,
-    phaseStartedAt: now,
+    // 延長はフェーズを変えないので「いつこのフェーズに入ったか」も動かさない。
+    phaseStartedAt: action === 'extend_deadline' ? room.phaseStartedAt : now,
     answerDeadlineAt,
     joinOpen,
     finishedAt,
@@ -320,7 +354,9 @@ export async function transitionRoom(input: TransitionRoomInput): Promise<Transi
         details: { currentVersion: room.stateVersion },
       });
     }
-    if (room.phase === 'finished') {
+    // 終了済みからは reopen_room だけが出られる。
+    // それ以外は「終了しています」と伝えたほうが分かりやすいので先に返す。
+    if (room.phase === 'finished' && input.action !== 'reopen_room') {
       throw new AppError('ROOM_FINISHED');
     }
     if (!canTransition(room.phase, input.action)) {
@@ -329,6 +365,7 @@ export async function transitionRoom(input: TransitionRoomInput): Promise<Transi
 
     return applyTransition(tx, room, input.action, {
       questionId: input.questionId ?? null,
+      extendSeconds: input.extendSeconds ?? null,
       actorUserId: input.actorUserId,
     });
   });

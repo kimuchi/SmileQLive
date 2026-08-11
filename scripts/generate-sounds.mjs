@@ -1,17 +1,23 @@
 #!/usr/bin/env node
 /**
- * 投影画面の効果音プレースホルダを生成する。
+ * 投影画面の**同梱**効果音を生成する。
  *
- *   node scripts/generate-placeholder-sounds.mjs
- *   node scripts/generate-placeholder-sounds.mjs --keep-existing
+ *   npm run sounds:generate
+ *   npm run sounds:generate -- --keep-existing
  *
  * 目的:
- *   ライセンスの確認が済んでいない音源をリポジトリへ置かずに、投影画面の動作確認を可能にする。
+ *   何も用意しなくても投影画面で音が鳴る状態にする。
  *   ここで作るのは正弦波にエンベロープを掛けただけの自家生成音で、第三者の権利を含まない。
+ *   そのためリポジトリへ同梱でき、デプロイにもそのまま入る。
  *
  * 生成物:
- *   public/sounds/*.wav （44.1kHz / 16bit / モノラル）
- *   public/sounds/manifest.json を .wav の名前へ更新する
+ *   public/sounds/default/*.wav （44.1kHz / 16bit / モノラル）
+ *   public/sounds/manifest.json を default/*.wav へ向ける
+ *
+ * 差し替え:
+ *   npm run sounds:install は public/sounds/ 直下へ音源を置き、
+ *   manifest.json をそちらへ向け直す（同梱音より優先される）。
+ *   直下の音源は再配布できない素材を想定しているため .gitignore 済み。
  *
  * 方針:
  *   - 追加の依存パッケージを使わない（Node.js の標準モジュールだけ）。
@@ -27,7 +33,9 @@ import { color, heading, info, step, success, warn } from './lib/log.mjs';
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 process.chdir(repoRoot);
 
-const OUTPUT_DIR = join('public', 'sounds');
+const SOUNDS_DIR = join('public', 'sounds');
+/** 同梱音の置き場。直下（差し替え用）と分けることで、取り違えと誤コミットを防ぐ。 */
+const OUTPUT_DIR = join(SOUNDS_DIR, 'default');
 const SAMPLE_RATE = 44_100;
 const BITS_PER_SAMPLE = 16;
 const CHANNELS = 1;
@@ -323,10 +331,8 @@ const SOUNDS = {
 // 実行
 // ---------------------------------------------------------------------------
 
-heading('投影用 効果音プレースホルダの生成');
-info(
-  color.dim('自家生成の正弦波です。本番用の音源へ差し替え、LICENSE.md へ出典を記録してください。'),
-);
+heading('投影用 同梱効果音の生成');
+info(color.dim('自家生成音のため第三者の権利を含みません。リポジトリへ同梱できます。'));
 
 step(`出力先: ${OUTPUT_DIR}`);
 mkdirSync(OUTPUT_DIR, { recursive: true });
@@ -338,7 +344,8 @@ let skipped = 0;
 for (const [name, build] of Object.entries(SOUNDS)) {
   const fileName = `${name}.wav`;
   const filePath = join(OUTPUT_DIR, fileName);
-  manifest[name] = fileName;
+  // manifest.json から見た相対パス（manifest は public/sounds/ 直下にある）。
+  manifest[name] = `default/${fileName}`;
 
   if (keepExisting && existsSync(filePath)) {
     warn(`${fileName} は既に存在するため残しました（--keep-existing）`);
@@ -354,14 +361,14 @@ for (const [name, build] of Object.entries(SOUNDS)) {
 }
 
 step('manifest.json を更新');
-const manifestPath = join(OUTPUT_DIR, 'manifest.json');
+const manifestPath = join(SOUNDS_DIR, 'manifest.json');
 writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-success(`${manifestPath} を .wav の名前へ更新しました`);
+success(`${manifestPath} を default/*.wav へ向けました`);
 
 console.log('');
 console.log(
-  `  ${color.green(`効果音プレースホルダを生成しました（作成 ${written} 件 / 据え置き ${skipped} 件）。`)}`,
+  `  ${color.green(`同梱効果音を生成しました（作成 ${written} 件 / 据え置き ${skipped} 件）。`)}`,
 );
 console.log(
-  `  ${color.dim('本番用の音源へ差し替えたら public/sounds/LICENSE.md の表を必ず埋めてください。')}\n`,
+  `  ${color.dim('別の音源へ差し替える場合は npm run sounds:install を使い、LICENSE.md へ出典を記録してください。')}\n`,
 );
