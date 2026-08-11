@@ -2,6 +2,10 @@
 node_modules/
 .pnp
 .pnp.*
+# このリポジトリは pnpm を正とする（package.json の packageManager）。
+# npm install で生成される package-lock.json は成果物として扱わない
+# （2 つのロックファイルが食い違うのを避け、デプロイ前のクリーン判定も汚さない）。
+package-lock.json
 
 # next.js
 /.next/

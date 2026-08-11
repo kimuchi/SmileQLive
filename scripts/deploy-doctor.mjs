@@ -24,6 +24,7 @@ import {
   secretHasVersion,
   serviceExists,
 } from './lib/gcloud.mjs';
+import { checkDependencies } from './lib/deps.mjs';
 import { color, heading, info } from './lib/log.mjs';
 import { probeCommand, run } from './lib/proc.mjs';
 
@@ -74,6 +75,19 @@ check(
       ? `npm ${npmProbe.version}（pnpm 未導入。npm でも動作します。pnpm を使う場合は npm install -g pnpm）`
       : 'pnpm も npm も起動できません。Node.js を再インストールしてください。',
 );
+// 依存パッケージ。未導入だと deploy は verify（lint/typecheck/test/build）で失敗する。
+// ここを見ていなかったため「診断は全部 ✔ なのにデプロイが落ちる」状態になっていた。
+const deps = checkDependencies();
+check(
+  '依存パッケージ',
+  deps.ok,
+  deps.ok
+    ? '導入済み'
+    : deps.installed
+      ? `不足: ${deps.missing.join(', ')} — ${deps.command}`
+      : `node_modules がありません — ${deps.command}`,
+);
+
 const dockerfileExists = existsSync(new URL('../Dockerfile', import.meta.url));
 check(
   'Dockerfile',
@@ -199,12 +213,16 @@ if (config && gcloudProbe.ok) {
       }
 
       // Firestore が作られていないと、デプロイは通っても起動直後に必ず失敗する。
+      // --database を省くと (default) を見てしまう。既存アプリの (default) は
+      // 常に存在するため、専用データベースが無くても ✔ になってしまう。
       const firestoreOk = run(
         'gcloud',
         [
           'firestore',
           'databases',
           'describe',
+          '--database',
+          config.firestoreDatabaseId,
           '--project',
           config.firebaseProjectId,
           '--format=value(name)',
@@ -215,8 +233,8 @@ if (config && gcloudProbe.ok) {
         'Firestore データベース',
         firestoreOk,
         firestoreOk
-          ? config.firebaseProjectId
-          : 'まだ作成されていません（docs/FIREBASE_SETUP.md §4。ロケーションは後から変更できません）',
+          ? `${config.firebaseProjectId} / ${config.firestoreDatabaseId}`
+          : `${config.firestoreDatabaseId} がありません — npm run gcp:bootstrap -- ${config.environment}`,
       );
 
       const url = serviceExists(config.projectId, config.region, config.serviceName);

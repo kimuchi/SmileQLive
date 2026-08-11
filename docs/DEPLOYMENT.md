@@ -75,6 +75,12 @@ pnpm install --frozen-lockfile
 > `npm install` でも動作しますが、`pnpm-lock.yaml` を正とするため pnpm を推奨します。
 > `npm run deploy` 自体は、npm / pnpm どちらから実行しても動きます
 > （スクリプトが呼び出し元のパッケージマネージャを自動判定します）。
+> `npm install` が作る `package-lock.json` は `.gitignore` 済みです
+> （ロックファイルを 2 つ抱えないため。デプロイ前のクリーン判定も汚しません）。
+
+**この手順を飛ばすと `npm run deploy` は検証段階で止まります**
+（`'eslint' は認識されていません` のような失敗になります）。
+`npm run deploy:doctor` の「依存パッケージ」で導入済みか確認できます。
 
 #### Windows で `corepack enable` が EPERM で失敗する場合
 

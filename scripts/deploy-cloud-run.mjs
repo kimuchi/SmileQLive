@@ -36,6 +36,7 @@ import {
   serviceExists,
   serviceUrl,
 } from './lib/gcloud.mjs';
+import { checkDependencies, installHint } from './lib/deps.mjs';
 import { color, fatal, heading, info, step, success, warn } from './lib/log.mjs';
 import { run, runPackageScript } from './lib/proc.mjs';
 import { confirmExact, isInteractive } from './lib/prompt.mjs';
@@ -143,6 +144,12 @@ if (skipVerify || !config.runVerifyBeforeDeploy) {
 } else if (dryRun) {
   info('dry-run のため検証をスキップします。');
 } else {
+  // 依存パッケージが無いまま verify へ入ると
+  // 「'eslint' は認識されていません」という分かりにくい失敗になる。先に確かめる。
+  const deps = checkDependencies();
+  if (!deps.ok) {
+    fatal('依存パッケージが導入されていないため検証できません。', installHint(deps));
+  }
   runPackageScript('verify');
   success('すべての検証に成功しました');
 }
