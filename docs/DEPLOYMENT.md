@@ -238,7 +238,15 @@ cp deploy/cloud-run.staging.example.json deploy/cloud-run.staging.json
 ```bash
 npm run firebase:config -- production
 npm run gcp:bootstrap -- production
+npm run firebase:auth -- production
 ```
+
+> `firebase:auth` は Authentication の初期化・匿名認証の有効化・承認済みドメインの追加を行います。
+> これを飛ばすと `npm run host:add` が
+> `There is no configuration corresponding to the provided identifier.` で失敗します
+> （API を有効化しただけでは Auth は使えず、プロジェクトごとの初期化が要るため）。
+> **Google プロバイダの有効化だけはコンソールでの操作が必要です**（OAuth クライアントの作成を伴うため）。
+> コマンドが該当の URL を表示します。
 
 このスクリプトが行うこと（**冪等**。既存リソースは壊しません）:
 

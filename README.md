@@ -92,6 +92,7 @@ cp deploy/cloud-run.production.example.json deploy/cloud-run.production.json
 npm run firebase:login                    # 初回のみ（ブラウザが開きます）
 npm run firebase:config                   # Firebase の公開設定をCLIで取得し設定ファイルへ書き込む
 npm run gcp:bootstrap -- production       # API 有効化・SA 作成・Firebase 権限付与
+npm run firebase:auth -- production       # Authentication の初期化（Google 有効化のみ GUI）
 npm run rules:deploy -- production        # Security Rules とインデックスを反映
 npm run deploy -- production
 npm run host:add -- you@example.com --name "あなたの名前"   # 最初の司会者
@@ -138,6 +139,7 @@ npm run domain:map -- production          # カスタムドメイン
 | `npm run host:list` / `host:add` / `host:remove` | 司会者の確認・登録・削除 |
 | `npm run domain:map` / `domain:status` | カスタムドメイン設定・確認 |
 | `npm run firebase:config` | Firebase の公開設定を CLI で取得し設定ファイルへ書き込む（GUI 不要） |
+| `npm run firebase:auth` | Authentication の初期化・匿名認証の有効化・承認済みドメインの追加 |
 | `npm run firebase:doctor` | Firebase が使える状態か診断（変更しない） |
 | `npm run gcp:bootstrap` | Google Cloud 初期設定（冪等） |
 

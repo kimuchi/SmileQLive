@@ -167,6 +167,36 @@ async function listHosts() {
   info('この一覧に載っている利用者だけが管理画面を使えます（docs/HOST_ACCESS.md）。');
 }
 
+/**
+ * Firebase Authentication が初期化されていない状態か。
+ *
+ * API を有効化しただけでは Auth は使えず、プロジェクトごとの初期化が要る。
+ * その状態で Admin SDK を呼ぶと、原因の見当がつかない次の文言が返る。
+ *   There is no configuration corresponding to the provided identifier.
+ */
+function isAuthNotConfigured(error) {
+  const text = `${error?.code ?? ''} ${error?.message ?? ''}`;
+  return (
+    /no configuration corresponding to the provided identifier/i.test(text) ||
+    /CONFIGURATION_NOT_FOUND/i.test(text)
+  );
+}
+
+function fatalAuthNotConfigured() {
+  fatal(
+    `${projectId} で Firebase Authentication が有効になっていません。`,
+    [
+      'API の有効化とは別に、プロジェクトごとの初期化が必要です。',
+      '',
+      '次を実行してください:',
+      `  npm run firebase:auth -- --project ${projectId}`,
+      '',
+      '（Google ログインの有効化だけはコンソールでの操作が必要です。',
+      '  上のコマンドが該当の URL を表示します）',
+    ].join('\n'),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // add
 // ---------------------------------------------------------------------------
@@ -187,6 +217,9 @@ async function addHost() {
     user = await admin.auth.getUserByEmail(email);
     success(`見つかりました (uid: ${user.uid})`);
   } catch (error) {
+    if (isAuthNotConfigured(error)) {
+      fatalAuthNotConfigured();
+    }
     if (error?.code !== 'auth/user-not-found') {
       fatal(`Auth ユーザーの検索に失敗しました: ${error?.message ?? error}`);
     }
