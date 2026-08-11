@@ -51,8 +51,16 @@ function safeNextPath(candidate: string): string {
   return '/admin/quizzes';
 }
 
-/** 画面に出す案内。ここに技術用語・エラーコードを混ぜない。 */
-type LoginNotice = { title: string; description: string };
+/**
+ * 画面に出す案内。
+ *
+ * 本文には技術用語を混ぜない。ただし `code` は別枠で小さく添える。
+ * ここは参加者ではなく**運営担当者だけが見る画面**であり、
+ * 設定不備（プロバイダ未有効・承認済みドメイン漏れ）は本人には直せない。
+ * コードを隠すと問い合わせを受けた側も原因を特定できず、
+ * 実際に「時間をおいて、もう一度お試しください」だけが出て詰まった。
+ */
+type LoginNotice = { title: string; description: string; code?: string };
 
 const NO_PERMISSION_NOTICE: LoginNotice = {
   title: 'この Google アカウントには管理権限がありません',
@@ -72,7 +80,7 @@ function domainNotAllowedNotice(allowedDomains: string[]): LoginNotice {
  * Firebase Auth / セッション交換の失敗を日本語の案内へ丸める。
  * 利用者が自分で解決できない失敗（設定不備・通信断）は素直にそう伝える。
  */
-function toLoginNotice(error: unknown, allowedDomains: string[]): LoginNotice | null {
+export function toLoginNotice(error: unknown, allowedDomains: string[]): LoginNotice | null {
   if (error instanceof FirebaseError) {
     switch (error.code) {
       case 'auth/popup-closed-by-user':
@@ -92,16 +100,34 @@ function toLoginNotice(error: unknown, allowedDomains: string[]): LoginNotice | 
           description: 'ネットワークの状況を確認して、もう一度お試しください',
         };
       case 'auth/unauthorized-domain':
-      case 'auth/operation-not-allowed':
         return {
-          title: 'ログインの設定が完了していません',
+          title: 'このドメインからはログインできません',
           description:
-            'Firebase Authentication の Google ログインと承認済みドメインの設定を確認してください',
+            'Firebase Authentication の「承認済みドメイン」へこのサイトのドメインを追加してください',
+          code: error.code,
+        };
+      case 'auth/operation-not-allowed':
+      case 'auth/configuration-not-found':
+        // Authentication 自体が未初期化、または Google プロバイダが未有効。
+        // 設定が済むまで何度試しても必ず失敗するので、その旨を明示する。
+        return {
+          title: 'Google ログインが有効になっていません',
+          description:
+            'Firebase Authentication で Google プロバイダを有効にしてください。設定するまで、何度試しても同じ結果になります',
+          code: error.code,
+        };
+      case 'auth/invalid-api-key':
+      case 'auth/api-key-not-valid':
+        return {
+          title: 'Firebase の設定が正しくありません',
+          description: 'firebaseApiKey の値を確認してください',
+          code: error.code,
         };
       default:
         return {
           title: 'ログインできませんでした',
           description: '時間をおいて、もう一度お試しください',
+          code: error.code,
         };
     }
   }
@@ -133,10 +159,14 @@ function toLoginNotice(error: unknown, allowedDomains: string[]): LoginNotice | 
         description: 'ネットワークの状況を確認して、もう一度お試しください',
       };
     }
-    return { title: 'ログインできませんでした', description: error.message };
+    return { title: 'ログインできませんでした', description: error.message, code: error.code };
   }
 
-  return { title: 'ログインできませんでした', description: '時間をおいて、もう一度お試しください' };
+  return {
+    title: 'ログインできませんでした',
+    description: '時間をおいて、もう一度お試しください',
+    code: error instanceof Error ? error.name : undefined,
+  };
 }
 
 export function LoginPanel({ missingServerEnv, nextPath }: LoginPanelProps) {
@@ -225,6 +255,11 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
         {notice !== null ? (
           <Alert variant="error" title={notice.title}>
             {notice.description}
+            {notice.code ? (
+              <span className="mt-1 block font-mono text-xs text-slate-500">
+                詳細コード: {notice.code}
+              </span>
+            ) : null}
           </Alert>
         ) : null}
 
