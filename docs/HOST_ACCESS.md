@@ -66,6 +66,25 @@ npm run host:remove -- user@example.com
 2. `profiles/{uid}` を作成
 3. 監査のため作成者と作成日時を記録
 
+> **書き込み先のデータベースを必ず確認してください。**
+> SmileQ Live は専用の名前付きデータベース（既定 `smileq-live`）を使います。
+> 実行時に対象を表示します。
+>
+> ```text
+> プロジェクト  : idl-application
+> データベース  : smileq-live
+> ```
+>
+> 既定 `(default)` へ書き込むと、アプリは `smileq-live` を読むため
+> **「登録は成功したのにログインできない」**状態になります。
+> 同居している既存アプリのデータベースを汚すことにもなります。
+> 別のデータベースを対象にする場合だけ `--database` を使います。
+>
+> ```bash
+> npm run host:list -- --database="(default)"     # 誤登録の確認
+> npm run host:remove -- user@example.com --database="(default)"   # 誤登録の削除
+> ```
+
 ### 方法 B: Firebase コンソール
 
 **Firestore → profiles → ドキュメントを追加**

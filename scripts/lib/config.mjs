@@ -40,6 +40,8 @@ const VALUE_FLAGS = new Set([
   'only', // rules:deploy の対象を絞る
   'name', // host:add の表示名
   'uid', // host:remove で uid を直接指定する
+  'database', // host:* で Firestore データベースを直接指定する
+  'app-id', // firebase:config で既知の Web アプリを指定する
 ]);
 
 export function parseArgs(argv) {

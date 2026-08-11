@@ -72,7 +72,44 @@ function resolveProjectId() {
   return '';
 }
 
+/**
+ * 使用する Firestore データベース ID。
+ *
+ * **既定の `(default)` は使わない。**
+ * SmileQ Live は専用の名前付きデータベースを使う（docs/FIREBASE_SETUP.md）。
+ * ここで指定を忘れると `(default)`（＝同居している既存アプリのデータベース）へ
+ * 書き込んでしまい、しかもアプリ側は `smileq-live` を読むため
+ * 「登録は成功したのにログインできない」状態になる。実際にそうなった。
+ */
+function resolveDatabaseId() {
+  const explicit =
+    (typeof flags.get('database') === 'string' ? flags.get('database') : '') ||
+    process.env.FIRESTORE_DATABASE_ID;
+  if (explicit) {
+    return explicit;
+  }
+
+  const available = ENVIRONMENTS.filter(configExists);
+  const target =
+    (typeof flags.get('env') === 'string' ? flags.get('env') : '') ||
+    (available.length === 1 ? available[0] : '');
+
+  if (target) {
+    const path = new URL(`../deploy/cloud-run.${target}.json`, import.meta.url);
+    if (existsSync(path)) {
+      const config = JSON.parse(readFileSync(path, 'utf8'));
+      if (config.firestoreDatabaseId) {
+        return String(config.firestoreDatabaseId);
+      }
+    }
+  }
+
+  // サーバー側 firestoreDatabaseId() と同じ既定値。
+  return 'smileq-live';
+}
+
 const projectId = resolveProjectId();
+const databaseId = resolveDatabaseId();
 
 // ---------------------------------------------------------------------------
 // Admin SDK
@@ -90,7 +127,8 @@ try {
 
   admin = {
     auth: authModule.getAuth(app),
-    db: firestoreModule.getFirestore(app),
+    // データベース ID を必ず渡す。省くと (default) を触ってしまう。
+    db: firestoreModule.getFirestore(app, databaseId),
     Timestamp: firestoreModule.Timestamp,
   };
 } catch (error) {
@@ -108,6 +146,20 @@ try {
 
 const PROFILES = 'profiles';
 
+/**
+ * 対象を必ず表示する。
+ *
+ * どのデータベースを触っているかが見えないと、
+ * 「登録は成功したのにアプリからは見えない」状態に気付けない。
+ */
+function showTarget() {
+  info(`プロジェクト  : ${projectId}`);
+  info(`データベース  : ${databaseId}`);
+  if (databaseId === '(default)') {
+    warn('既定データベースを対象にしています。既存アプリと同居している場合は注意してください。');
+  }
+}
+
 function normalizeEmail(value) {
   return String(value ?? '')
     .trim()
@@ -119,6 +171,7 @@ function normalizeEmail(value) {
 // ---------------------------------------------------------------------------
 async function listHosts() {
   heading(`司会者一覧 — ${projectId}`);
+  showTarget();
 
   const snapshot = await admin.db.collection(PROFILES).get();
   if (snapshot.empty) {
@@ -210,6 +263,7 @@ async function addHost() {
   }
 
   heading(`司会者を追加 — ${email}`);
+  showTarget();
 
   step('Firebase Auth のユーザーを検索');
   let user = null;
@@ -292,6 +346,7 @@ async function removeHost() {
   }
 
   heading(`司会者を削除 — ${email}`);
+  showTarget();
 
   let uid = typeof flags.get('uid') === 'string' ? flags.get('uid') : '';
   if (!uid) {

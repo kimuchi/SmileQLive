@@ -23,7 +23,9 @@ import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 const PROJECT_ID = process.env.GCLOUD_PROJECT ?? 'smileq-live-emulator';
 
 const app = initializeApp({ projectId: PROJECT_ID });
-const db = getFirestore(app);
+// 本番と同じ名前付きデータベースを対象にする。
+// (default) で検証すると、実際の配線と違うものを確かめてしまう。
+const db = getFirestore(app, process.env.FIRESTORE_DATABASE_ID ?? 'smileq-live');
 db.settings({ ignoreUndefinedProperties: true });
 
 let passed = 0;
