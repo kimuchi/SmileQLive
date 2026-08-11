@@ -71,7 +71,7 @@ import { logger } from '@/infrastructure/logging/logger';
 import {
   requireHostUser,
   requireParticipant,
-  requireQuizOwner,
+  requireQuizAccess,
   requireRoomMember,
   requireRoomOwner,
 } from '@/lib/auth/session';
@@ -195,7 +195,8 @@ export async function createRoom(input: {
   quizId: string;
   maxParticipants?: number;
 }): Promise<CreateRoomResponse> {
-  const { user, quiz } = await requireQuizOwner(input.quizId);
+  // 共有されたクイズでもルームを作れる。ルームの所有者は作成した本人になる。
+  const { user, quiz } = await requireQuizAccess(input.quizId);
 
   if (quiz.status !== 'published') {
     throw new AppError('QUIZ_NOT_PUBLISHED');

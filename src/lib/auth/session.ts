@@ -181,6 +181,27 @@ export async function requireQuizOwner(quizId: string): Promise<{ user: AuthUser
   return { user, quiz };
 }
 
+/**
+ * クイズを**利用**できることを要求する（所有者、または共有された司会者）。
+ *
+ * 共有された側にできるのは閲覧とルーム作成まで。
+ * 編集・削除・公開・共有設定は requireQuizOwner を使うこと。
+ */
+export async function requireQuizAccess(
+  quizId: string,
+): Promise<{ user: AuthUser; quiz: QuizDoc; owned: boolean }> {
+  const { user } = await requireHostUser();
+  const quiz = await fetchQuiz(quizId);
+
+  const owned = quiz.ownerId === user.uid;
+  const shared = (quiz.sharedWith ?? []).includes(user.uid);
+  if (!owned && !shared) {
+    throw new AppError('FORBIDDEN');
+  }
+
+  return { user, quiz, owned };
+}
+
 /** 問題の所有者（＝親クイズの所有者）であることを要求する。 */
 export async function requireQuestionOwner(
   questionId: string,

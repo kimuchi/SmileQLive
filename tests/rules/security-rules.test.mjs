@@ -86,6 +86,29 @@ export default async function run(report, ctx) {
   await report.denied('投影担当が quizzes/{quizId}/questions/{questionId} を読む', () =>
     readDoc(presenter, 'quizzes', IDS.quiz, 'questions', IDS.question)(),
   );
+  // 共有: 所有者と共有相手だけが読める。共有しても参加者へは広がらない。
+  await report.allowed('共有された司会者が quizzes/{quizId} を読む', () =>
+    readDoc(host, 'quizzes', IDS.sharedQuiz)(),
+  );
+  await report.allowed('共有された司会者が共有クイズの questions を読む', () =>
+    readDoc(host, 'quizzes', IDS.sharedQuiz, 'questions', IDS.sharedQuestion)(),
+  );
+  await report.denied('共有されていない司会者が他人のクイズを読む', () =>
+    readDoc(host, 'quizzes', IDS.otherQuiz)(),
+  );
+  await report.denied('匿名参加者が共有されたクイズを読む', () =>
+    readDoc(participant, 'quizzes', IDS.sharedQuiz)(),
+  );
+  await report.denied('匿名参加者が共有されたクイズの questions を読む', () =>
+    readDoc(participant, 'quizzes', IDS.sharedQuiz, 'questions', IDS.sharedQuestion)(),
+  );
+  await report.denied('投影担当が共有されたクイズを読む', () =>
+    readDoc(presenter, 'quizzes', IDS.sharedQuiz)(),
+  );
+  await report.denied('共有相手でもクイズを書き換える', () =>
+    setDoc(doc(host.db, 'quizzes', IDS.sharedQuiz), { title: '書き換え' }, { merge: true }),
+  );
+
   await report.denied(
     '匿名参加者が collectionGroup("questions") で回り込む（横断クエリでも漏れない）',
     () => getDocs(query(collectionGroup(participant.db, 'questions'))),

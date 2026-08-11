@@ -14,6 +14,7 @@ import { TextArea } from '@/components/shared/TextArea';
 import { TextInput } from '@/components/shared/TextInput';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import { PublishIssueList, parsePublishIssues } from '@/components/admin/publish-issue-list';
+import { QuizSharePanel } from '@/components/admin/quiz-share-panel';
 import { QuestionCard } from '@/components/admin/question-card';
 import { buildDuplicatePayload } from '@/components/admin/question-draft';
 import { useAutosave } from '@/components/admin/use-autosave';
@@ -411,6 +412,13 @@ export function QuizEditor({ quizId }: QuizEditorProps) {
         ) : null}
       </div>
 
+      {quiz !== null && quiz.owned === false ? (
+        // 共有されたクイズ。サーバー側でも更新は所有者に限られている。
+        <Alert variant="info" title="共有されたクイズです">
+          内容の確認とルーム作成ができます。編集・公開・削除は所有者だけが行えます。
+        </Alert>
+      ) : null}
+
       {publishedNotice ? (
         <Alert variant="success" title="公開しました">
           このクイズからルームを作成できます。
@@ -420,6 +428,8 @@ export function QuizEditor({ quizId }: QuizEditorProps) {
       <PublishIssueList issues={publishIssues} />
       {structureError !== null ? <Alert variant="error">{structureError}</Alert> : null}
       {loadError !== null ? <ErrorMessage error={loadError} onRetry={() => void load()} /> : null}
+
+      <QuizSharePanel quizId={quizId} owned={quiz?.owned !== false} />
 
       <Card title="クイズの設定">
         <div className="flex flex-col gap-4">

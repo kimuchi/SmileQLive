@@ -123,6 +123,14 @@ export const updateQuestionSchema = z.discriminatedUnion('type', [
   }),
 ]);
 
+/**
+ * 共有相手の指定。メールアドレスで受け取り、サーバー側で司会者へ解決する。
+ * 一覧をそのまま置き換えるため、空配列は「共有をすべて解除」を意味する。
+ */
+export const quizShareInputSchema = z.object({
+  emails: z.array(z.email().max(254)).max(50),
+});
+
 export const reorderQuestionsSchema = z.object({
   questionIds: z.array(uuidSchema).min(1).max(100),
 });

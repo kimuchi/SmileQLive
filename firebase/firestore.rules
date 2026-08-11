@@ -65,16 +65,26 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    /**
+     * クイズを読めるのは所有者と共有相手だけ。
+     * sharedWith が無い古いドキュメントは共有なしとして扱う。
+     */
+    function canReadQuiz(quiz) {
+      return quiz.ownerId == uid()
+        || (quiz.keys().hasAny(['sharedWith']) && uid() in quiz.sharedWith);
+    }
+
     // -------------------------------------------------------------------------
-    // quizzes — 所有者だけ。参加者には正解・解説が絶対に見えない
+    // quizzes — 所有者と共有相手だけ。参加者には正解・解説が絶対に見えない
     // -------------------------------------------------------------------------
     match /quizzes/{quizId} {
-      allow read: if isStaffUser() && resource.data.ownerId == uid();
+      // 所有者と、共有された司会者だけが読める。参加者はどちらにも該当しない。
+      allow read: if isStaffUser() && canReadQuiz(resource.data);
       allow write: if false;
 
       match /questions/{questionId} {
         allow read: if isStaffUser()
-          && get(/databases/$(database)/documents/quizzes/$(quizId)).data.ownerId == uid();
+          && canReadQuiz(get(/databases/$(database)/documents/quizzes/$(quizId)).data);
         allow write: if false;
       }
     }

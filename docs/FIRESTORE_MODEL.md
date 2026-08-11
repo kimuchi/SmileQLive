@@ -38,6 +38,7 @@ mediaAssets/{assetId}
 
 quizzes/{quizId}
     クイズ本体。questions は配列ではなくサブコレクション。
+    sharedWith: 閲覧・利用を許可した司会者の uid（所有者は 1 人のまま）。
     └─ questions/{questionId}
            選択肢は最大 5 件なので、ドキュメント内に配列として埋め込む
            （1 問の更新が 1 回の書き込みで原子的に済む）。
@@ -149,7 +150,7 @@ Rules は「万一クライアントが直接叩いても何も漏れない」�
 | `rooms/{id}/staff/progress` | ✗ | 読み取り可 | 読み取り可 |
 | `rooms/{id}/members/{mid}` | 自分の行のみ | 自分の行のみ | 全件 |
 | `rooms/{id}/answers/{aid}` | 自分の回答のみ | ✗ | 全件 |
-| `quizzes/**` | ✗ | ✗ | 所有者のみ |
+| `quizzes/**` | ✗ | ✗ | 所有者と共有相手のみ |
 | `mediaAssets/**` | ✗ | ✗ | 所有者のみ |
 | すべての書き込み | ✗ | ✗ | ✗ |
 

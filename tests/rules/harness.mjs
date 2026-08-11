@@ -202,6 +202,9 @@ export const IDS = {
   otherRoom: 'room-rules-other',
   quiz: 'quiz-rules',
   otherQuiz: 'quiz-rules-other',
+  /** otherHost が所有し、host へ共有しているクイズ。 */
+  sharedQuiz: 'quiz-rules-shared',
+  sharedQuestion: 'question-rules-shared',
   question: 'question-rules-1',
   choiceCorrect: 'choice-correct',
   choiceWrong: 'choice-wrong',
@@ -270,6 +273,45 @@ async function seed(adminDb, roles) {
         { id: IDS.choiceWrong, position: 1, text: '不正解', isCorrect: false },
         { id: IDS.choiceCorrect, position: 2, text: '正解', isCorrect: true },
       ],
+      numberMode: null,
+      numberDecimalPlaces: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+  // 別の司会者が所有し、host へ共有しているクイズ。
+  await adminDb.collection('quizzes').doc(IDS.sharedQuiz).set({
+    id: IDS.sharedQuiz,
+    ownerId: roles.otherHost.uid,
+    sharedWith: [roles.host.uid],
+    title: '共有されたクイズ',
+    description: null,
+    status: 'published',
+    showLeaderboard: true,
+    soundTheme: 'default',
+    questionCount: 1,
+    choiceQuestionCount: 1,
+    numberQuestionCount: 0,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await adminDb
+    .collection('quizzes')
+    .doc(IDS.sharedQuiz)
+    .collection('questions')
+    .doc(IDS.sharedQuestion)
+    .set({
+      id: IDS.sharedQuestion,
+      quizId: IDS.sharedQuiz,
+      ownerId: roles.otherHost.uid,
+      position: 1,
+      questionType: 'choice',
+      questionText: '共有されたクイズの問題',
+      explanation: '共有相手は読めるが、参加者は読めない。',
+      timeLimitSeconds: 20,
+      points: 1000,
+      choices: [{ id: 'shared-choice', position: 1, text: 'A', isCorrect: true }],
       numberMode: null,
       numberDecimalPlaces: 0,
       createdAt: now,

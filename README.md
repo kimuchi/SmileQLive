@@ -178,6 +178,7 @@ npm run seed:demo                         # 動作確認用のデモクイズ（
 - 画像は magic bytes 判定後に sharp で再エンコード（SVG は受け付けない）。Storage は直接読み取り不可
 - 決定的ドキュメント ID + `create()` で二重回答を防止
 - 管理画面を使えるのは `profiles/{uid}` がある利用者だけ（自己登録は不可 — [docs/HOST_ACCESS.md](docs/HOST_ACCESS.md)）
+- クイズの共有は閲覧とルーム作成まで。編集・公開・削除・共有設定は所有者だけ
 - コンテナは非 root で実行
 
 ---

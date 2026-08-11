@@ -147,29 +147,40 @@ if (flags.has('cleanup-stray')) {
 }
 
 // ---------------------------------------------------------------------------
-step('所有者を決定');
+step('対象の司会者を決定');
 
 /**
- * クイズの所有者。
+ * デモクイズを入れる相手。
  *
- * 司会者として登録済みの利用者でなければ、作っても管理画面から見えない
- * （一覧は所有者で絞り込まれる）。profiles から選ぶ。
+ * クイズは所有者ごとに分かれており、他人のクイズは一覧に出ない
+ * （quiz-repository.ts の listQuizIds が ownerId で絞る）。
+ * 共有のしくみが無いため、全員に配るには**人数分の複製を作る**しかない。
+ * 既定は「登録済みの司会者全員」。--owner で相手を絞れる。
  */
-async function resolveOwnerId() {
-  const email = typeof flags.get('owner') === 'string' ? flags.get('owner').trim() : '';
-  if (email) {
-    const user = await auth.getUserByEmail(email.toLowerCase());
-    const profile = await db.collection('profiles').doc(user.uid).get();
-    if (!profile.exists) {
-      fatal(
-        `${email} は司会者として登録されていません。`,
-        `先に登録してください:\n  npm run host:add -- ${email} --name "表示名"`,
-      );
+async function resolveOwners() {
+  const raw = typeof flags.get('owner') === 'string' ? flags.get('owner') : '';
+  const emails = raw
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => value.length > 0);
+
+  if (emails.length > 0) {
+    const owners = [];
+    for (const email of emails) {
+      const user = await auth.getUserByEmail(email);
+      const profile = await db.collection('profiles').doc(user.uid).get();
+      if (!profile.exists) {
+        fatal(
+          `${email} は司会者として登録されていません。`,
+          `先に登録してください:\n  npm run host:add -- ${email} --name "表示名"`,
+        );
+      }
+      owners.push({ uid: user.uid, label: email });
     }
-    return user.uid;
+    return owners;
   }
 
-  const snapshot = await db.collection('profiles').limit(5).get();
+  const snapshot = await db.collection('profiles').get();
   if (snapshot.empty) {
     fatal(
       '司会者が 1 人も登録されていません。',
@@ -181,94 +192,20 @@ async function resolveOwnerId() {
       ].join('\n'),
     );
   }
-  if (snapshot.size > 1) {
-    info(`司会者が ${snapshot.size} 名います。--owner で指定できます。`);
-  }
-  return snapshot.docs[0].id;
+  return snapshot.docs.map((doc) => ({
+    uid: doc.id,
+    label: doc.data().email ?? doc.data().displayName ?? doc.id,
+  }));
 }
 
-const ownerId = await resolveOwnerId();
-success(`所有者: ${ownerId}`);
-
-// ---------------------------------------------------------------------------
-step('既存のデモクイズを確認');
-
-const existing = await db
-  .collection('quizzes')
-  .where('ownerId', '==', ownerId)
-  .where('title', '==', DEMO_TITLE)
-  .get();
-
-if (!existing.empty) {
-  const replace =
-    flags.has('replace') ||
-    (isInteractive() ? await confirmYesNo('同名のデモクイズがあります。作り直しますか？', false) : false);
-
-  if (!replace) {
-    warn('既存のデモクイズを残します。作り直す場合は --replace を付けてください。');
-    info(`  npm run seed:demo -- --replace`);
-    process.exit(0);
-  }
-
-  for (const doc of existing.docs) {
-    // 問題 → 画像 → クイズ の順に消す（参照が残らないようにする）。
-    const questions = await questionsRef(doc.id).get();
-    for (const question of questions.docs) {
-      await question.ref.delete();
-    }
-    // 以前のバージョンがトップレベルの questions へ書いていた分も片付ける。
-    const strays = await db.collection('questions').where('quizId', '==', doc.id).get();
-    for (const stray of strays.docs) {
-      await stray.ref.delete();
-    }
-    const assets = await db.collection('mediaAssets').where('ownerId', '==', ownerId).get();
-    for (const asset of assets.docs) {
-      const objectPath = asset.data().objectPath ?? '';
-      if (objectPath.includes(`/${doc.id}/`)) {
-        await bucket.file(objectPath).delete({ ignoreNotFound: true });
-        await asset.ref.delete();
-      }
-    }
-    await doc.ref.delete();
-  }
-  success(`既存のデモクイズを削除しました（${existing.size} 件）`);
+const owners = await resolveOwners();
+success(`対象の司会者: ${owners.length} 名`);
+for (const owner of owners) {
+  console.log(`    ${owner.label}`);
 }
 
 // ---------------------------------------------------------------------------
-step('画像を生成してアップロード');
-
-const quizId = randomUUID();
-
-/**
- * 生成した画像を Storage へ置き、mediaAssets を作る。
- * 保存パスはアプリ本体と同じ規則（buildObjectPath）に合わせる。
- */
-async function putImage(result, label) {
-  const assetId = randomUUID();
-  const objectPath = `${ownerId}/${quizId}/${assetId}.webp`;
-
-  await bucket.file(objectPath).save(result.data, {
-    resumable: false,
-    contentType: 'image/webp',
-    metadata: { cacheControl: 'private, max-age=31536000, immutable' },
-  });
-
-  const now = Timestamp.now();
-  await db.collection('mediaAssets').doc(assetId).set({
-    id: assetId,
-    ownerId,
-    bucket: bucketName,
-    objectPath,
-    mimeType: 'image/webp',
-    byteSize: result.info.size,
-    width: result.info.width,
-    height: result.info.height,
-    createdAt: now,
-  });
-
-  info(`  ${label} (${result.info.width}x${result.info.height}, ${Math.round(result.info.size / 1024)} KB)`);
-  return assetId;
-}
+step('画像を生成');
 
 /** DEMO_MEDIA の定義どおりに画像を作る。 */
 async function renderMedia(spec) {
@@ -292,102 +229,187 @@ async function renderMedia(spec) {
   return shapeChoiceImage(spec.shape, paletteOf(spec.palette[0]));
 }
 
-/** 画像キー → 実際の asset。DEMO_MEDIA を 1 件ずつ生成・アップロードする。 */
-const mediaByKey = new Map();
+// 画像は所有者に依存しないので 1 回だけ描く。アップロードだけ人数分行う。
+const rendered = new Map();
 for (const [key, spec] of Object.entries(DEMO_MEDIA)) {
-  const rendered = await renderMedia(spec);
-  const assetId = await putImage(rendered, key);
-  mediaByKey.set(key, {
-    assetId,
-    url: '',
-    width: rendered.info.width,
-    height: rendered.info.height,
-  });
+  rendered.set(key, await renderMedia(spec));
 }
+const totalBytes = [...rendered.values()].reduce((sum, item) => sum + item.info.size, 0);
+success(`${rendered.size} 枚（合計 ${Math.round(totalBytes / 1024)} KB）`);
 
 // ---------------------------------------------------------------------------
-step('クイズと問題を作成');
+/** 1 人分のデモクイズを作る。 */
+async function seedFor(owner) {
+  const ownerId = owner.uid;
 
-// 公開検証と同じ定義から問題を組み立てる（tests/unit/scripts/demo-quiz.test.ts が検証済み）。
-const domainQuestions = toDomainQuestions((key) => {
-  const asset = mediaByKey.get(key);
-  if (!asset) {
-    fatal(`画像キーが見つかりません: ${key}`);
+  // 既存のデモクイズ（同じ所有者・同じ題名）を確認する。
+  const existing = await db
+    .collection('quizzes')
+    .where('ownerId', '==', ownerId)
+    .where('title', '==', DEMO_TITLE)
+    .get();
+
+  if (!existing.empty) {
+    // 既にあるものが「使える状態か」を先に見る。
+    // 壊れている（問題が読めない）場合は、確認を待たずに作り直す。
+    // 以前トップレベルの questions へ書いていた分がこれに当たり、
+    // 作り直さないと「問題を1問以上作成してください」が消えない。
+    let broken = false;
+    for (const doc of existing.docs) {
+      const stored = await questionsRef(doc.id).get();
+      if (stored.empty) {
+        broken = true;
+      }
+    }
+
+    if (!replaceExisting && !broken) {
+      info(`${owner.label}: 既にあります（作り直すには --replace）`);
+      return { owner, skipped: true };
+    }
+    if (broken && !replaceExisting) {
+      warn(`${owner.label}: 既存のデモクイズから問題を読めません。作り直します。`);
+    }
+    for (const doc of existing.docs) {
+      // 問題 → 画像 → クイズ の順に消す（参照が残らないようにする）。
+      const questions = await questionsRef(doc.id).get();
+      for (const question of questions.docs) {
+        await question.ref.delete();
+      }
+      // 以前のバージョンがトップレベルの questions へ書いていた分も片付ける。
+      const strays = await db.collection('questions').where('quizId', '==', doc.id).get();
+      for (const stray of strays.docs) {
+        await stray.ref.delete();
+      }
+      const assets = await db.collection('mediaAssets').where('ownerId', '==', ownerId).get();
+      for (const asset of assets.docs) {
+        const objectPath = asset.data().objectPath ?? '';
+        if (objectPath.includes(`/${doc.id}/`)) {
+          await bucket.file(objectPath).delete({ ignoreNotFound: true });
+          await asset.ref.delete();
+        }
+      }
+      await doc.ref.delete();
+    }
   }
-  return asset;
-});
 
-/** ドメインの Question を Firestore ドキュメント形へ落とす。 */
-function toQuestionDoc(question) {
+  const quizId = randomUUID();
+
+  /**
+   * 生成済みの画像を Storage へ置き、mediaAssets を作る。
+   * 保存パスはアプリ本体と同じ規則（buildObjectPath）に合わせる。
+   * 画像は所有者ごとに複製する（所有者が認可の単位になっているため共有しない）。
+   */
+  async function putImage(result) {
+    const assetId = randomUUID();
+    const objectPath = `${ownerId}/${quizId}/${assetId}.webp`;
+
+    await bucket.file(objectPath).save(result.data, {
+      resumable: false,
+      contentType: 'image/webp',
+      metadata: { cacheControl: 'private, max-age=31536000, immutable' },
+    });
+
+    await db.collection('mediaAssets').doc(assetId).set({
+      id: assetId,
+      ownerId,
+      bucket: bucketName,
+      objectPath,
+      mimeType: 'image/webp',
+      byteSize: result.info.size,
+      width: result.info.width,
+      height: result.info.height,
+      createdAt: Timestamp.now(),
+    });
+    return assetId;
+  }
+
+  const mediaByKey = new Map();
+  for (const [key, result] of rendered.entries()) {
+    mediaByKey.set(key, {
+      assetId: await putImage(result),
+      url: '',
+      width: result.info.width,
+      height: result.info.height,
+    });
+  }
+
+  // 公開検証と同じ定義から問題を組み立てる（tests/unit/scripts/demo-quiz.test.ts が検証済み）。
+  const domainQuestions = toDomainQuestions((key) => {
+    const asset = mediaByKey.get(key);
+    if (!asset) {
+      fatal(`画像キーが見つかりません: ${key}`);
+    }
+    return asset;
+  });
+
+  const questions = domainQuestions.map((question) => {
+    const now = Timestamp.now();
+    const isChoice = question.type === 'choice';
+    const rule = isChoice ? null : question.numberRule;
+
+    return {
+      id: randomUUID(),
+      quizId,
+      ownerId,
+      position: question.position,
+      questionType: question.type,
+      questionText: question.text,
+      questionImageAssetId: question.image?.assetId ?? null,
+      questionImageAlt: question.image?.alt ?? null,
+      revealImageAssetId: question.revealImage?.assetId ?? null,
+      revealImageAlt: question.revealImage?.alt ?? null,
+      explanation: question.explanation,
+      timeLimitSeconds: question.timeLimitSeconds,
+      points: question.points,
+      choices: isChoice
+        ? question.choices.map((choice) => ({
+            id: randomUUID(),
+            position: choice.position,
+            text: choice.text,
+            imageAssetId: choice.image?.assetId ?? null,
+            imageAlt: choice.image?.alt ?? null,
+            isCorrect: choice.isCorrect,
+          }))
+        : [],
+      numberMode: rule?.mode ?? null,
+      numberCorrectValue: rule && 'correctValue' in rule ? rule.correctValue : null,
+      numberTolerance: rule && 'tolerance' in rule ? rule.tolerance : null,
+      numberMinValue: rule && 'minValue' in rule ? rule.minValue : null,
+      numberMaxValue: rule && 'maxValue' in rule ? rule.maxValue : null,
+      numberUnit: isChoice ? null : question.unit,
+      numberDecimalPlaces: isChoice ? 0 : question.decimalPlaces,
+      createdAt: now,
+      updatedAt: now,
+    };
+  });
+
   const now = Timestamp.now();
-  const isChoice = question.type === 'choice';
-  const rule = isChoice ? null : question.numberRule;
+  const batch = db.batch();
 
-  return {
-    id: randomUUID(),
-    quizId,
+  batch.set(db.collection('quizzes').doc(quizId), {
+    id: quizId,
     ownerId,
-    position: question.position,
-    questionType: question.type,
-    questionText: question.text,
-    questionImageAssetId: question.image?.assetId ?? null,
-    questionImageAlt: question.image?.alt ?? null,
-    revealImageAssetId: question.revealImage?.assetId ?? null,
-    revealImageAlt: question.revealImage?.alt ?? null,
-    explanation: question.explanation,
-    timeLimitSeconds: question.timeLimitSeconds,
-    points: question.points,
-    choices: isChoice
-      ? question.choices.map((choice) => ({
-          id: randomUUID(),
-          position: choice.position,
-          text: choice.text,
-          imageAssetId: choice.image?.assetId ?? null,
-          imageAlt: choice.image?.alt ?? null,
-          isCorrect: choice.isCorrect,
-        }))
-      : [],
-    numberMode: rule?.mode ?? null,
-    numberCorrectValue: rule && 'correctValue' in rule ? rule.correctValue : null,
-    numberTolerance: rule && 'tolerance' in rule ? rule.tolerance : null,
-    numberMinValue: rule && 'minValue' in rule ? rule.minValue : null,
-    numberMaxValue: rule && 'maxValue' in rule ? rule.maxValue : null,
-    numberUnit: isChoice ? null : question.unit,
-    numberDecimalPlaces: isChoice ? 0 : question.decimalPlaces,
+    title: DEMO_TITLE,
+    description: DEMO_DESCRIPTION,
+    status: 'published',
+    showLeaderboard: true,
+    soundTheme: 'default',
+    questionCount: questions.length,
+    choiceQuestionCount: questions.filter((q) => q.questionType === 'choice').length,
+    numberQuestionCount: questions.filter((q) => q.questionType === 'number').length,
     createdAt: now,
     updatedAt: now,
-  };
+  });
+
+  for (const question of questions) {
+    batch.set(questionsRef(quizId).doc(question.id), question);
+  }
+
+  await batch.commit();
+
+  const inspection = await inspect(quizId, questions.length);
+  return { owner, quizId, questions, inspection, skipped: false };
 }
-
-const questions = domainQuestions.map(toQuestionDoc);
-
-const now = Timestamp.now();
-const batch = db.batch();
-
-batch.set(db.collection('quizzes').doc(quizId), {
-  id: quizId,
-  ownerId,
-  title: DEMO_TITLE,
-  description: DEMO_DESCRIPTION,
-  status: 'published',
-  showLeaderboard: true,
-  soundTheme: 'default',
-  questionCount: questions.length,
-  choiceQuestionCount: questions.filter((q) => q.questionType === 'choice').length,
-  numberQuestionCount: questions.filter((q) => q.questionType === 'number').length,
-  createdAt: now,
-  updatedAt: now,
-});
-
-for (const question of questions) {
-  batch.set(questionsRef(quizId).doc(question.id), question);
-}
-
-await batch.commit();
-success(`${questions.length} 問のクイズを作成しました（公開済み）`);
-
-// ---------------------------------------------------------------------------
-step('書き込んだ内容を読み直して点検');
 
 /**
  * ルーム作成時に効くのは「Firestore に何が入っているか」だけ。
@@ -395,21 +417,17 @@ step('書き込んだ内容を読み直して点検');
  *
  * ルーム作成は公開検証をやり直すため、ここが欠けていると
  * 「公開条件を満たしていません」で止まる。
- *   * 問題が読めるか（quizId で引けるか）
- *   * 画像の mediaAssets が引けるか（引けないと画像は無いものとして扱われる）
- *   * 文章を持たない選択肢に画像と代替テキストがあるか
  */
-async function inspect() {
+async function inspect(quizId, expectedCount) {
   const problems = [];
 
   // アプリと同じ場所（quizzes/{quizId}/questions）から読む。
   // ここを別の場所にすると、点検が自分の書き間違いを追認してしまう。
   const storedQuestions = await questionsRef(quizId).get();
-  if (storedQuestions.size !== questions.length) {
-    problems.push(`問題が ${storedQuestions.size} 件しか読めません（期待 ${questions.length} 件）`);
+  if (storedQuestions.size !== expectedCount) {
+    problems.push(`問題が ${storedQuestions.size} 件しか読めません（期待 ${expectedCount} 件）`);
   }
 
-  // 参照している画像 ID をすべて集めて、実在するか確かめる。
   const referenced = new Set();
   for (const doc of storedQuestions.docs) {
     const data = doc.data();
@@ -428,9 +446,9 @@ async function inspect() {
       : [];
   const foundAssets = new Set(
     assetDocs
+      // getAssetRefs と同じ条件（id / bucket / objectPath が揃っていること）。
       .filter((doc) => {
         const data = doc.data();
-        // getAssetRefs と同じ条件（id / bucket / objectPath が揃っていること）。
         return data && data.id && data.bucket && data.objectPath;
       })
       .map((doc) => doc.id),
@@ -459,38 +477,67 @@ async function inspect() {
   return { problems, questionCount: storedQuestions.size, assetCount: foundAssets.size };
 }
 
-const inspection = await inspect();
-if (inspection.problems.length === 0) {
-  success(`問題 ${inspection.questionCount} 件 / 画像 ${inspection.assetCount} 件を読み直せました`);
-} else {
-  warn('読み直しで問題が見つかりました。このままではルームを作成できません。');
-  for (const problem of inspection.problems) {
-    console.log(`    ${problem}`);
+// ---------------------------------------------------------------------------
+step('デモクイズを作成');
+
+const replaceExisting =
+  flags.has('replace') ||
+  flags.has('yes') ||
+  !isInteractive() ||
+  false;
+
+const results = [];
+for (const owner of owners) {
+  const result = await seedFor(owner);
+  results.push(result);
+  if (result.skipped) {
+    continue;
   }
-  console.log('');
-  info(`データベース: ${databaseId} / バケット: ${bucketName}`);
-  info('設定ファイルの firestoreDatabaseId・mediaBucket がアプリ側と一致しているか確認してください。');
-  console.log('');
+  if (result.inspection.problems.length === 0) {
+    success(
+      `${owner.label}: 問題 ${result.inspection.questionCount} 件 / 画像 ${result.inspection.assetCount} 件`,
+    );
+  } else {
+    warn(`${owner.label}: 読み直しで問題が見つかりました`);
+    for (const problem of result.inspection.problems) {
+      console.log(`      ${problem}`);
+    }
+  }
 }
+
+const created = results.filter((result) => !result.skipped);
+const skipped = results.filter((result) => result.skipped);
 
 // ---------------------------------------------------------------------------
-heading('作成した内容');
-for (const question of questions) {
-  const kind =
-    question.questionType === 'choice'
-      ? `${question.choices.length} 択`
-      : `数値 / ${{ exact: '完全一致', absolute_tolerance: '許容誤差', range: '範囲指定' }[question.numberMode]}`;
-  console.log(
-    `  ${String(question.position).padStart(2)}. ${color.bold(kind.padEnd(14))} ${question.questionText ?? ''}`,
-  );
+heading('結果');
+console.log(`  作成: ${created.length} 名 / 既存のまま: ${skipped.length} 名`);
+if (skipped.length > 0) {
+  console.log('');
+  info('既にある分を作り直す場合:');
+  console.log('    npm run seed:demo -- --replace');
 }
 
+if (created.length > 0) {
+  console.log('');
+  console.log('  収録している問題:');
+  for (const question of created[0].questions) {
+    const kind =
+      question.questionType === 'choice'
+        ? `${question.choices.length} 択`
+        : `数値 / ${{ exact: '完全一致', absolute_tolerance: '許容誤差', range: '範囲指定' }[question.numberMode]}`;
+    console.log(
+      `    ${String(question.position).padStart(2)}. ${color.bold(kind.padEnd(14))} ${question.questionText ?? ''}`,
+    );
+  }
+}
+
+console.log('');
+info('クイズは所有者ごとに分かれています（他人のクイズは一覧に出ません）。');
+info('あとから司会者を追加したときは、もう一度このコマンドを実行してください。');
 console.log('');
 info('次の手順:');
 console.log('  1. 管理画面でルームを作成する');
 console.log(`       ${config?.appBaseUrl ?? ''}/admin/quizzes`);
 console.log('  2. 投影画面を開く（効果音はこの画面だけで鳴ります）');
 console.log('  3. 二次元コードを読んで参加者として入る');
-console.log('');
-info('効果音がまだプレースホルダの場合: npm run sounds:install');
 console.log('');

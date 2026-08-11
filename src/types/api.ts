@@ -29,7 +29,18 @@ export type QuizListItem = {
   showLeaderboard: boolean;
   createdAt: string;
   updatedAt: string;
+  /** 自分が所有者か。false は共有されているクイズ（編集できない）。 */
+  owned: boolean;
 };
+
+/** 共有相手。 */
+export type QuizShareTarget = {
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+};
+
+export type QuizShareResponse = { shares: QuizShareTarget[] };
 
 export type QuizListResponse = { quizzes: QuizListItem[] };
 
@@ -78,6 +89,12 @@ export type AdminQuizDetail = {
   soundTheme: string;
   updatedAt: string;
   questions: AdminQuestion[];
+  /**
+   * 閲覧者が所有者か。
+   * false は共有されたクイズで、編集・削除・公開・共有設定はできない。
+   * リポジトリは閲覧者を知らないため、サービス層で埋める。
+   */
+  owned?: boolean;
 };
 
 export type QuizDetailResponse = { quiz: AdminQuizDetail };

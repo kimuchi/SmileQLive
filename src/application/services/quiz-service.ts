@@ -30,13 +30,20 @@ import {
   reorderChoices as reorderChoicesRepo,
   reorderQuestions as reorderQuestionsRepo,
   updateQuestion as updateQuestionRepo,
+  getQuizShares as getQuizSharesRepo,
+  setQuizShares as setQuizSharesRepo,
   updateQuiz as updateQuizRepo,
   validateQuizForPublishById,
 } from '@/infrastructure/firebase/repositories/quiz-repository';
 import {
+  findHostProfileByEmail,
+  resolveHostProfiles,
+} from '@/infrastructure/firebase/repositories/profile-repository';
+import {
   requireChoiceOwner,
   requireHostUser,
   requireQuestionOwner,
+  requireQuizAccess,
   requireQuizOwner,
 } from '@/lib/auth/session';
 import { AppError } from '@/lib/errors/app-error';
@@ -52,6 +59,7 @@ import type {
   AdminQuizDetail,
   PublishResponse,
   QuizListItem,
+  QuizShareTarget,
 } from '@/types/api';
 
 export async function listQuizzes(): Promise<QuizListItem[]> {
@@ -60,12 +68,14 @@ export async function listQuizzes(): Promise<QuizListItem[]> {
 }
 
 export async function getQuiz(quizId: string): Promise<AdminQuizDetail> {
-  await requireQuizOwner(quizId);
+  // 共有された司会者も中身を見られる（編集は各更新 API 側で所有者に限定する）。
+  const { owned } = await requireQuizAccess(quizId);
   const detail = await getQuizDetail(quizId);
   if (!detail) {
     throw new AppError('QUIZ_NOT_FOUND');
   }
-  return detail;
+  // 画面が編集導線を出すかどうかの判断に使う。認可そのものはサーバー側で行う。
+  return { ...detail, owned };
 }
 
 export async function createQuiz(input: CreateQuizInput): Promise<AdminQuizDetail> {
@@ -188,6 +198,57 @@ function dedupeIssues(issues: readonly PublishIssue[]): PublishIssue[] {
  *
  * 認可は呼び出し側（room-service）が済ませていること。
  */
+/**
+ * 共有相手の一覧。所有者だけが見られる。
+ */
+export async function listQuizShares(quizId: string): Promise<QuizShareTarget[]> {
+  await requireQuizOwner(quizId);
+  const uids = await getQuizSharesRepo(quizId);
+  return resolveHostProfiles(uids);
+}
+
+/**
+ * 共有相手を設定し直す（渡した一覧で置き換える）。
+ *
+ * 相手は**司会者として登録済み**でなければならない。
+ * profiles にない利用者へ共有しても管理画面へ入れないため、
+ * ここで弾いて「共有したのに使えない」状態を作らない。
+ */
+export async function setQuizShares(
+  quizId: string,
+  emails: readonly string[],
+): Promise<QuizShareTarget[]> {
+  const { user } = await requireQuizOwner(quizId);
+
+  const targets: QuizShareTarget[] = [];
+  for (const rawEmail of emails) {
+    const email = rawEmail.trim().toLowerCase();
+    if (email.length === 0) {
+      continue;
+    }
+
+    const profile = await findHostProfileByEmail(email);
+    if (!profile) {
+      throw new AppError('VALIDATION_FAILED', {
+        details: [
+          {
+            path: 'emails',
+            message: `${email} は司会者として登録されていません。先に登録が必要です`,
+          },
+        ],
+      });
+    }
+    if (profile.uid === user.uid) {
+      // 所有者自身は共有相手に含めない（含めても意味が無い）。
+      continue;
+    }
+    targets.push(profile);
+  }
+
+  await setQuizSharesRepo(quizId, targets.map((target) => target.uid));
+  return targets;
+}
+
 export async function buildSnapshotForQuiz(quizId: string): Promise<QuizSnapshot> {
   // URL 解決は不要（スナップショットへ期限付き URL を入れない）。
   const detail = await getQuizDetail(quizId, { resolveUrls: false });

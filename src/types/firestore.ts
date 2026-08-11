@@ -72,6 +72,14 @@ export type QuizStatus = 'draft' | 'published' | 'archived';
 export type QuizDoc = {
   id: string;
   ownerId: string;
+  /**
+   * 閲覧・利用を許可した司会者の uid。
+   *
+   * 共有された側は「見る」「ルームを作る」ができるが、**編集・削除・共有はできない**。
+   * 所有者を 1 人に保つことで、同じクイズを同時に編集して壊す事故を避ける。
+   * 未設定（古いドキュメント）は共有なしとして扱う。
+   */
+  sharedWith?: string[];
   title: string;
   description: string | null;
   status: QuizStatus;

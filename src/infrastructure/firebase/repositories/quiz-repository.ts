@@ -217,7 +217,7 @@ async function touchQuiz(quizId: string): Promise<void> {
 // 取得系
 // ---------------------------------------------------------------------------
 
-function toQuizListItem(quiz: QuizDoc): QuizListItem {
+function toQuizListItem(quiz: QuizDoc, viewerId: string): QuizListItem {
   return {
     id: quiz.id,
     title: quiz.title,
@@ -229,17 +229,49 @@ function toQuizListItem(quiz: QuizDoc): QuizListItem {
     showLeaderboard: quiz.showLeaderboard,
     createdAt: toIsoOr(quiz.createdAt),
     updatedAt: toIsoOr(quiz.updatedAt),
+    owned: quiz.ownerId === viewerId,
   };
 }
 
-export async function listQuizzes(ownerId: string): Promise<QuizListItem[]> {
-  const snapshot = await quizzesCollection()
-    .where('ownerId', '==', ownerId)
-    .where('status', 'in', [...LISTED_STATUSES])
-    .orderBy('updatedAt', 'desc')
-    .get();
+/**
+ * 自分のクイズと、自分へ共有されたクイズを合わせて返す。
+ *
+ * Firestore は OR 条件を 1 クエリで書けないため 2 回引いて結合する。
+ * 共有されたものは `owned: false` で返し、画面側で編集導線を出さない。
+ */
+export async function listQuizzes(viewerId: string): Promise<QuizListItem[]> {
+  const [owned, shared] = await Promise.all([
+    quizzesCollection()
+      .where('ownerId', '==', viewerId)
+      .where('status', 'in', [...LISTED_STATUSES])
+      .get(),
+    quizzesCollection()
+      .where('sharedWith', 'array-contains', viewerId)
+      .where('status', 'in', [...LISTED_STATUSES])
+      .get(),
+  ]);
 
-  return snapshot.docs.map((doc) => toQuizListItem(doc.data()));
+  const byId = new Map<string, QuizDoc>();
+  for (const doc of [...owned.docs, ...shared.docs]) {
+    byId.set(doc.id, doc.data());
+  }
+
+  return [...byId.values()]
+    .sort((a, b) => toIsoOr(b.updatedAt).localeCompare(toIsoOr(a.updatedAt)))
+    .map((quiz) => toQuizListItem(quiz, viewerId));
+}
+
+/** 共有相手を置き換える（所有者自身は含めない）。 */
+export async function setQuizShares(quizId: string, uids: readonly string[]): Promise<void> {
+  const quiz = await requireQuiz(quizId);
+  const unique = [...new Set(uids)].filter((uid) => uid !== quiz.ownerId);
+  await quizRef(quizId).update({ sharedWith: unique, updatedAt: nowTimestamp() });
+}
+
+/** 共有相手の uid 一覧。 */
+export async function getQuizShares(quizId: string): Promise<string[]> {
+  const quiz = await requireQuiz(quizId);
+  return quiz.sharedWith ?? [];
 }
 
 async function buildQuizDetail(
@@ -309,6 +341,8 @@ export async function createQuiz(
     status: 'draft',
     showLeaderboard: true,
     soundTheme: 'default',
+    // 既定は共有なし。array-contains のクエリ対象になるため空配列で作る。
+    sharedWith: [],
     questionCount: 0,
     choiceQuestionCount: 0,
     numberQuestionCount: 0,
@@ -385,6 +419,8 @@ export async function duplicateQuiz(quizId: string, ownerId: string): Promise<Ad
     status: 'draft',
     showLeaderboard: source.showLeaderboard,
     soundTheme: source.soundTheme,
+    // 共有設定は引き継がない。複製の所有者が改めて決める。
+    sharedWith: [],
     questionCount: questions.length,
     choiceQuestionCount: questions.filter((question) => question.questionType === 'choice').length,
     numberQuestionCount: questions.filter((question) => question.questionType === 'number').length,

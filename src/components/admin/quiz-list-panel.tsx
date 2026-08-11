@@ -178,32 +178,52 @@ export function QuizListPanel() {
                         {formatCount(quiz.numberQuestionCount, '問')}
                       </td>
                       <td className="px-4 py-3">
-                        <Badge variant={STATUS_VARIANT[quiz.status]}>
-                          {STATUS_LABEL[quiz.status]}
-                        </Badge>
+                        <div className="flex flex-wrap items-center gap-1">
+                          <Badge variant={STATUS_VARIANT[quiz.status]}>
+                            {STATUS_LABEL[quiz.status]}
+                          </Badge>
+                          {quiz.owned ? null : (
+                            // 共有されたクイズ。編集はできず、ルーム作成だけ行える。
+                            <Badge variant="neutral">共有</Badge>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-slate-600">
                         {formatShortDateTime(quiz.updatedAt)}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap items-center gap-2">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => {
-                              router.push(`/admin/quizzes/${quiz.id}/edit`);
-                            }}
-                          >
-                            編集
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            loading={busy}
-                            onClick={() => void handleDuplicate(quiz)}
-                          >
-                            複製
-                          </Button>
+                          {quiz.owned ? (
+                            <>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => {
+                                  router.push(`/admin/quizzes/${quiz.id}/edit`);
+                                }}
+                              >
+                                編集
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                loading={busy}
+                                onClick={() => void handleDuplicate(quiz)}
+                              >
+                                複製
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => {
+                                router.push(`/admin/quizzes/${quiz.id}/edit`);
+                              }}
+                            >
+                              内容を見る
+                            </Button>
+                          )}
                           <Button
                             variant="primary"
                             size="sm"
@@ -219,7 +239,7 @@ export function QuizListPanel() {
                           >
                             ルーム作成
                           </Button>
-                          {quiz.status === 'archived' ? null : (
+                          {quiz.owned && quiz.status !== 'archived' ? (
                             <Button
                               variant="ghost"
                               size="sm"
@@ -229,7 +249,7 @@ export function QuizListPanel() {
                             >
                               アーカイブ
                             </Button>
-                          )}
+                          ) : null}
                         </div>
                       </td>
                     </tr>
