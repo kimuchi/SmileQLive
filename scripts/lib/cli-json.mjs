@@ -24,33 +24,53 @@
 export function extractJsonObject(text) {
   const source = String(text ?? '');
   for (let start = source.indexOf('{'); start >= 0; start = source.indexOf('{', start + 1)) {
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-    for (let i = start; i < source.length; i += 1) {
-      const ch = source[i];
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-        } else if (ch === '\\') {
-          escaped = true;
-        } else if (ch === '"') {
-          inString = false;
-        }
-        continue;
+    const found = extractJsonObjectAt(source, start);
+    if (found !== null) {
+      return found;
+    }
+  }
+  return null;
+}
+
+/**
+ * `start` の '{' から対応する '}' までを JSON として解釈する。
+ *
+ * 改行を含む整形済み JSON でも取り出せるよう、行ではなく波括弧の対応で切る。
+ *
+ * @param {string} source
+ * @param {number} start  '{' の位置
+ * @returns {any | null}
+ */
+export function extractJsonObjectAt(source, start) {
+  if (source[start] !== '{') {
+    return null;
+  }
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < source.length; i += 1) {
+    const ch = source[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
       }
-      if (ch === '"') {
-        inString = true;
-      } else if (ch === '{') {
-        depth += 1;
-      } else if (ch === '}') {
-        depth -= 1;
-        if (depth === 0) {
-          try {
-            return JSON.parse(source.slice(start, i + 1));
-          } catch {
-            break; // この '{' からは解釈できない。次の候補を試す。
-          }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === '{') {
+      depth += 1;
+    } else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          return JSON.parse(source.slice(start, i + 1));
+        } catch {
+          return null;
         }
       }
     }

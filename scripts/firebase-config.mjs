@@ -36,7 +36,12 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import { cliJson } from './lib/cli-json.mjs';
-import { classifyApiError, extractApiError, readDebugLogTail } from './lib/firebase-debug.mjs';
+import {
+  classifyApiError,
+  extractApiError,
+  readDebugLogTail,
+  relevantLogLines,
+} from './lib/firebase-debug.mjs';
 import { configPath, ENVIRONMENTS, parseArgs } from './lib/config.mjs';
 import { color, fatal, heading, info, step, success, warn } from './lib/log.mjs';
 import { commandExists, detectPackageManager, run } from './lib/proc.mjs';
@@ -181,16 +186,27 @@ function explainFailure(cmdResult, args, jsonMessage = '') {
     console.error('');
   }
 
-  const apiError = extractApiError(readCliDebugLog());
+  const logText = readCliDebugLog();
+  const apiError = extractApiError(logText);
   if (apiError.status || apiError.body) {
     console.error('  API の応答:');
     if (apiError.status) {
-      console.error(`    ${apiError.status}`);
+      console.error(`    HTTP ${apiError.status}`);
     }
     if (apiError.body) {
       console.error(`    ${apiError.body}`);
     }
     console.error('');
+  } else {
+    // 構造化された本文が取れないログもある。読める形でそのまま見せる。
+    const lines = relevantLogLines(logText);
+    if (lines.length > 0) {
+      console.error('  firebase-debug.log より:');
+      for (const line of lines) {
+        console.error(`    ${line.slice(0, 200)}`);
+      }
+      console.error('');
+    }
   }
 
   const saved = preserveDebugLog();

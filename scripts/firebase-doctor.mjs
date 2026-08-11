@@ -15,11 +15,16 @@
  */
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { cliJson } from './lib/cli-json.mjs';
-import { classifyApiError, extractApiError, readDebugLogTail } from './lib/firebase-debug.mjs';
+import {
+  classifyApiError,
+  extractApiError,
+  readDebugLogTail,
+  relevantLogLines,
+} from './lib/firebase-debug.mjs';
 import { configExists, ENVIRONMENTS, parseArgs } from './lib/config.mjs';
 import { color, heading, info, step, warn } from './lib/log.mjs';
 import { commandExists, detectPackageManager, run } from './lib/proc.mjs';
@@ -69,10 +74,33 @@ const fb = hasFirebaseCli
 // firebase CLI はリポジトリ直下だと firebase.json を読み込む。
 // 診断は配信設定と無関係なので、見えない一時ディレクトリで実行する
 // （デバッグログもここへ集まるので、失敗理由を読み取りやすい）。
+const repoRoot = process.cwd();
 const cliCwd = mkdtempSync(join(tmpdir(), 'smileq-doctor-'));
 process.on('exit', () => {
   rmSync(cliCwd, { recursive: true, force: true });
 });
+
+/**
+ * CLI のデバッグログをリポジトリ直下へ退避する。
+ * 作業ディレクトリは終了時に消えるため、写しておかないと利用者が読めない。
+ * （firebase-debug.log* は .gitignore 済み）
+ */
+function preserveDebugLog() {
+  for (const name of ['firebase-debug.log', 'firebase-debug.log.1']) {
+    const from = join(cliCwd, name);
+    if (!existsSync(from)) {
+      continue;
+    }
+    try {
+      const to = join(repoRoot, name);
+      copyFileSync(from, to);
+      return to;
+    } catch {
+      // 写せなければ諦める（診断のための処理で失敗を増やさない）。
+    }
+  }
+  return '';
+}
 
 const findings = [];
 function record(ok, label, detail) {
@@ -149,6 +177,63 @@ if (hasGcloud) {
 }
 
 // ---------------------------------------------------------------------------
+/**
+ * firebase CLI の失敗を、原因が分かる形で表示する。
+ *
+ * CLI は「See firebase-debug.log for more info」としか言わない。
+ * ログから HTTP ステータスと応答本文を取り出し、それも取れなければ
+ * 関係しそうな行をそのまま見せる。ここを省くと利用者は先へ進めない。
+ *
+ * @returns {{kind: object, cause: string}}
+ */
+function diagnoseCliFailure(cmdResult, message) {
+  const logText = readDebugLogTail([cliCwd]);
+  const apiError = extractApiError(logText);
+  const kind = classifyApiError(
+    `${message}\n${cmdResult.stdout ?? ''}\n${cmdResult.stderr ?? ''}\n${apiError.text}`,
+  );
+
+  // 「API が無効」は 403 の一種なので、より具体的なものから先に判定する。
+  const reauth = `${fb.bin} ${[...fb.prefix, 'login', '--reauth'].join(' ')}`;
+  const cause = kind.serviceDisabled
+    ? `API が無効 — gcloud services enable firebase.googleapis.com --project ${projectId}`
+    : kind.insufficientScopes
+      ? `ログインのスコープ不足 — ${reauth}`
+      : kind.unauthenticated
+        ? `認証切れ（${apiError.status || '401'}）— ${reauth}`
+        : kind.permissionDenied
+          ? `${apiError.status || '403'} — ログインの取り直し（${reauth}）／権限／組織ポリシー／Workspace の Firebase 設定を確認`
+          : kind.notFound
+            ? `${apiError.status || '404'} — Firebase が未追加の可能性`
+            : message || '原因を特定できませんでした';
+
+  return { kind, cause, apiError, logText };
+}
+
+/** 失敗の根拠（API の応答やログ）を表示し、ログを退避する。 */
+function showFailureEvidence({ apiError, logText }) {
+  if (apiError.body) {
+    console.log(`        ${color.dim(apiError.body)}`);
+  } else {
+    // 構造化された本文が取れないログもある。読める形でそのまま見せる。
+    const lines = relevantLogLines(logText);
+    if (lines.length > 0) {
+      console.log(`        ${color.dim('firebase-debug.log より:')}`);
+      for (const line of lines) {
+        console.log(`          ${color.dim(line.slice(0, 200))}`);
+      }
+    } else {
+      console.log(`        ${color.dim('firebase-debug.log から詳細を取得できませんでした。')}`);
+    }
+  }
+
+  const saved = preserveDebugLog();
+  if (saved) {
+    console.log(`        ${color.dim(`詳細ログ: ${saved}`)}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 step('4. Firebase として認識されているか');
 const projectsList = run(fb.bin, [...fb.prefix, 'projects:list', '--json'], {
   capture: true,
@@ -156,24 +241,26 @@ const projectsList = run(fb.bin, [...fb.prefix, 'projects:list', '--json'], {
   allowFailure: true,
   cwd: cliCwd,
 });
+// 終了コードではなく出力内容で判定する（CLI は正しい JSON を出しつつ 0 以外で終わることがある）。
+const projectsJson = cliJson(projectsList);
+const projectList = Array.isArray(projectsJson.result) ? projectsJson.result : [];
 let isFirebaseProject = false;
-if (projectsList.ok) {
-  try {
-    const parsed = JSON.parse(projectsList.stdout);
-    const projects = parsed.result ?? [];
-    isFirebaseProject = projects.some((item) => item.projectId === projectId);
-    record(
-      isFirebaseProject,
-      isFirebaseProject ? 'Firebase プロジェクトとして登録済み' : 'Firebase が未追加',
-      isFirebaseProject
-        ? ''
-        : `firebase projects:list に ${projectId} が出てきません（一覧には ${projects.length} 件）`,
-    );
-  } catch {
-    record(false, 'projects:list の結果を解釈できませんでした', '');
-  }
+/** projects:list 自体が失敗したか（「0 件」と区別する）。 */
+let projectListUsable = projectsJson.ok;
+
+if (projectsJson.ok) {
+  isFirebaseProject = projectList.some((item) => item.projectId === projectId);
+  record(
+    isFirebaseProject,
+    isFirebaseProject ? 'Firebase プロジェクトとして登録済み' : 'Firebase が未追加',
+    isFirebaseProject
+      ? ''
+      : `firebase projects:list に ${projectId} が出てきません（一覧には ${projectList.length} 件）`,
+  );
 } else {
-  record(false, 'projects:list を実行できませんでした', 'firebase login を確認してください');
+  const diagnosis = diagnoseCliFailure(projectsList, projectsJson.message);
+  record(false, 'projects:list を実行できませんでした', diagnosis.cause);
+  showFailureEvidence(diagnosis);
 }
 
 // ---------------------------------------------------------------------------
@@ -182,12 +269,11 @@ step('5. Web アプリ API が使えるか');
 // 公開設定の取得はここで失敗することが多い。実際に叩いて切り分ける。
 // projects:list が通っても webApps だけ 403 になる構成があるため、別項目にする。
 {
-  const appsResult = run(fb.bin, [...fb.prefix, 'apps:list', 'WEB', '--project', projectId, '--json'], {
-    capture: true,
-    quiet: true,
-    allowFailure: true,
-    cwd: cliCwd,
-  });
+  const appsResult = run(
+    fb.bin,
+    [...fb.prefix, 'apps:list', 'WEB', '--project', projectId, '--json'],
+    { capture: true, quiet: true, allowFailure: true, cwd: cliCwd },
+  );
   const parsed = cliJson(appsResult);
   if (parsed.ok) {
     const apps = Array.isArray(parsed.result) ? parsed.result : [];
@@ -200,19 +286,10 @@ step('5. Web アプリ API が使えるか');
       info(`  npm run firebase:config -- --project=${projectId} --app-id=${apps[0].appId}`);
     }
   } else {
-    const apiError = extractApiError(readDebugLogTail([cliCwd]));
-    const kind = classifyApiError(`${parsed.message}\n${apiError.text}`);
-    const cause = kind.serviceDisabled
-      ? 'API が無効 — gcloud services enable apikeys.googleapis.com firebase.googleapis.com'
-      : kind.insufficientScopes
-        ? `ログインのスコープ不足 — ${fb.bin} ${[...fb.prefix, 'login', '--reauth'].join(' ')}`
-        : kind.permissionDenied
-          ? '403 — apikeys.googleapis.com の有効化 / ログインの再取得 / roles/firebase.developAdmin を確認'
-          : parsed.message || '原因を特定できませんでした';
-    record(false, 'Web アプリ一覧を取得できません', cause);
-    if (apiError.body) {
-      console.log(`        ${color.dim(apiError.body)}`);
-    }
+    const diagnosis = diagnoseCliFailure(appsResult, parsed.message);
+    record(false, 'Web アプリ一覧を取得できません', diagnosis.cause);
+    showFailureEvidence(diagnosis);
+    console.log('');
     info('Web アプリが使えなくても、gcloud の API キーで公開設定は取得できます。');
     info('  npm run firebase:config   … 自動で代替経路へ切り替わります');
   }
@@ -220,19 +297,17 @@ step('5. Web アプリ API が使えるか');
 
 // ---------------------------------------------------------------------------
 step('6. Firebase 利用規約への同意');
-if (!isFirebaseProject) {
-  const otherProjects = (() => {
-    try {
-      return (JSON.parse(projectsList.stdout).result ?? []).length;
-    } catch {
-      return 0;
-    }
-  })();
-
-  if (otherProjects > 0) {
+if (!projectListUsable) {
+  // 一覧が取れていないので「0 件」なのか「見えていない」のか判断できない。
+  // ここで断定すると、規約は同意済みなのに無関係な作業へ誘導してしまう。
+  info('projects:list が失敗しているため、規約同意の状態は判定できません。');
+  info('  https://console.firebase.google.com/ を開いてプロジェクトが見えるか確認してください。');
+  info(`  見えるのに CLI から失敗する場合は、${fb.bin} ${[...fb.prefix, 'login', '--reauth'].join(' ')} を試してください。`);
+} else if (!isFirebaseProject) {
+  if (projectList.length > 0) {
     record(
       true,
-      `この アカウントは他に ${otherProjects} 件の Firebase プロジェクトを持っています`,
+      `このアカウントは他に ${projectList.length} 件の Firebase プロジェクトを持っています`,
       '規約同意は済んでいる可能性が高いです',
     );
   } else {
