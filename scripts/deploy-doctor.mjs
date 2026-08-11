@@ -212,6 +212,63 @@ if (config && gcloudProbe.ok) {
         check('Secret Manager', true, '不要（Cloud Run の実行サービスアカウントで認証）');
       }
 
+      // 実行サービスアカウントの権限。
+      //
+      // gcp:bootstrap の権限付与は失敗しても続行する作りなので、
+      // 「作成もデプロイも成功したのに実行時だけ失敗する」状態になりうる。
+      // とくに serviceAccountTokenCreator が無いと、ログインの最後で
+      // セッションクッキーを発行できず 500 になる（画面には原因が出ない）。
+      const projectRoles = run(
+        'gcloud',
+        [
+          'projects',
+          'get-iam-policy',
+          config.projectId,
+          '--flatten=bindings[].members',
+          `--filter=bindings.members:serviceAccount:${config.serviceAccount}`,
+          '--format=value(bindings.role)',
+        ],
+        { capture: true, quiet: true, allowFailure: true },
+      );
+      const selfRoles = run(
+        'gcloud',
+        [
+          'iam',
+          'service-accounts',
+          'get-iam-policy',
+          config.serviceAccount,
+          '--project',
+          config.projectId,
+          '--flatten=bindings[].members',
+          `--filter=bindings.members:serviceAccount:${config.serviceAccount}`,
+          '--format=value(bindings.role)',
+        ],
+        { capture: true, quiet: true, allowFailure: true },
+      );
+
+      if (projectRoles.ok) {
+        const granted = new Set(
+          `${projectRoles.stdout}\n${selfRoles.ok ? selfRoles.stdout : ''}`
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter(Boolean),
+        );
+        const required = [
+          ['roles/datastore.user', 'Firestore の読み書き'],
+          ['roles/firebaseauth.admin', 'セッションクッキー発行・ユーザー管理'],
+          ['roles/storage.objectAdmin', '画像の読み書き'],
+          ['roles/iam.serviceAccountTokenCreator', '署名付き URL の発行'],
+        ];
+        const missingRoles = required.filter(([role]) => !granted.has(role));
+        check(
+          '実行サービスアカウントの権限',
+          missingRoles.length === 0,
+          missingRoles.length === 0
+            ? config.serviceAccount
+            : `未付与: ${missingRoles.map(([role, why]) => `${role}（${why}）`).join(' / ')} — npm run gcp:bootstrap -- ${config.environment}`,
+        );
+      }
+
       // Firestore が作られていないと、デプロイは通っても起動直後に必ず失敗する。
       // --database を省くと (default) を見てしまう。既存アプリの (default) は
       // 常に存在するため、専用データベースが無くても ✔ になってしまう。
