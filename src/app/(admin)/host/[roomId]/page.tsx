@@ -5,8 +5,8 @@ import { AdminPageBody } from '@/components/admin/admin-page-body';
 import { HostConsole, type HostQuestionOutline } from '@/components/admin/host-console';
 import { FullScreenMessage } from '@/components/shared/FullScreenMessage';
 import { parseQuizSnapshot } from '@/application/services/quiz-snapshot-codec';
+import { logger } from '@/infrastructure/logging/logger';
 import { requireRoomOwner } from '@/lib/auth/session';
-import { AppError } from '@/lib/errors/app-error';
 import { uuidSchema } from '@/lib/validation/schemas';
 
 /**
@@ -68,7 +68,19 @@ export default async function HostRoomPage({ params }: { params: Promise<{ roomI
     // この画面は司会者だけが開ける（未ログインは手前で弾かれる）。
     // 相手が運営担当者である以上、原因を伏せると自分で直せない。
     // 「見つからない」と「自分のルームではない」は対処が違うので分けて伝える。
-    const code = error instanceof AppError ? error.code : '';
+    //
+    // instanceof は使わない。Server Component と Route Handler で
+    // 同じモジュールが別々に読み込まれることがあり、クラスの同一性が保証されない。
+    // クラスではなく構造（code フィールド）で判定する。
+    const code = errorCode(error);
+
+    // 画面の表示だけでは追えないことがあるため、サーバー側にも残す。
+    // トークン・メールアドレスは出さない（roomId と分類だけ）。
+    logger.warn('host.open_failed', {
+      roomId: parsed.data,
+      code: code || errorName(error),
+      message: error instanceof Error ? error.message : String(error),
+    });
 
     if (code === 'ROOM_NOT_FOUND') {
       return (
@@ -86,10 +98,20 @@ export default async function HostRoomPage({ params }: { params: Promise<{ roomI
         />
       );
     }
+    if (code === 'UNAUTHENTICATED') {
+      return (
+        <HostUnavailable
+          title="ログインの有効期限が切れています"
+          description="もう一度ログインしてから、ルーム一覧を開き直してください。"
+          code={code}
+        />
+      );
+    }
     return (
       <HostUnavailable
         title="このルームを開けません"
         description="ルームが見つからないか、司会の権限がありません。URL をご確認ください。"
+        code={code || errorName(error)}
       />
     );
   }
@@ -112,16 +134,46 @@ export default async function HostRoomPage({ params }: { params: Promise<{ roomI
   );
 }
 
-function HostUnavailable({ title, description }: { title: string; description: string }) {
+/** 例外から AppError のコードを構造で取り出す（クラスの同一性に依存しない）。 */
+function errorCode(error: unknown): string {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    const value = (error as { code?: unknown }).code;
+    return typeof value === 'string' ? value : '';
+  }
+  return '';
+}
+
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : '';
+}
+
+function HostUnavailable({
+  title,
+  description,
+  code,
+}: {
+  title: string;
+  description: string;
+  /** 運営担当者が原因を特定するための手掛かり。伏せると問い合わせても分からない。 */
+  code?: string;
+}) {
   return (
     <FullScreenMessage
       title={title}
       description={description}
       tone="error"
       actions={
-        <Link href="/admin/quizzes" className="text-brand-700 font-bold hover:underline">
-          クイズ一覧へ戻る
-        </Link>
+        <div className="flex flex-col items-center gap-3">
+          <div className="flex flex-wrap items-center justify-center gap-4">
+            <Link href="/admin/rooms" className="text-brand-700 font-bold hover:underline">
+              ルーム一覧へ
+            </Link>
+            <Link href="/admin/quizzes" className="text-brand-700 font-bold hover:underline">
+              クイズ一覧へ戻る
+            </Link>
+          </div>
+          {code ? <p className="font-mono text-xs text-slate-500">詳細コード: {code}</p> : null}
+        </div>
       }
     />
   );

@@ -41,7 +41,8 @@ describe.skipIf(!available)('同じ端末での再参加', () => {
     process.env.APP_BASE_URL = 'http://localhost';
   });
 
-  it('2 回登録しても同じ参加者になり、人数も増えない', async () => {
+  // 初回はエミュレータへの接続確立に時間がかかる。既定の 5 秒では足りないことがある。
+  it('2 回登録しても同じ参加者になり、人数も増えない', { timeout: 20000 }, async () => {
     const { getDb } = await import('@/infrastructure/firebase/admin');
     const { registerParticipant } = await import('@/infrastructure/firebase/transactions');
     const { Timestamp } = await import('firebase-admin/firestore');
@@ -90,7 +91,7 @@ describe.skipIf(!available)('同じ端末での再参加', () => {
     expect(members.size).toBe(1);
   });
 
-  it('別の端末（別の uid）は別の参加者になる', async () => {
+  it('別の端末（別の uid）は別の参加者になる', { timeout: 20000 }, async () => {
     const { getDb } = await import('@/infrastructure/firebase/admin');
     const { registerParticipant } = await import('@/infrastructure/firebase/transactions');
 

@@ -145,6 +145,9 @@ export function RoomCreatePanel({ initialQuizId }: RoomCreatePanelProps) {
             >
               司会画面を開く
             </Link>
+            <Link href="/admin/rooms" className="text-brand-700 font-bold hover:underline">
+              ルーム一覧
+            </Link>
             <Link href="/admin/quizzes" className="text-brand-700 font-bold hover:underline">
               クイズ一覧へ戻る
             </Link>

@@ -20,7 +20,34 @@ import { getStorage, type Storage } from 'firebase-admin/storage';
  * したがって認可は必ずアプリケーション側（src/lib/auth/session.ts）で行うこと。
  */
 
-let cachedApp: App | null = null;
+/**
+ * 生成済みインスタンスの置き場。
+ *
+ * **モジュール変数では足りない。** Next.js はこのファイルを層ごとに
+ * （Server Component 用と Route Handler 用に）別々のモジュール実体として読み込むため、
+ * `let cached = ...` は層ごとに別々の値になる。
+ * 一方 firebase-admin の `getFirestore(app, databaseId)` は
+ * **同じ Firestore インスタンスを返す**（App の内部で使い回される）。
+ * その結果、後から読み込まれた層が `settings()` を二度目に呼び、
+ *   「Firestore has already been initialized.」
+ * で落ちていた（司会画面だけが開けなくなる原因）。
+ *
+ * プロセス全体で 1 つになる `globalThis` へ置いて、層をまたいで共有する。
+ */
+const CACHE_KEY = Symbol.for('smileq-live.firebase-admin');
+
+type AdminCache = { app: App | null; firestore: Firestore | null };
+
+function cache(): AdminCache {
+  const store = globalThis as typeof globalThis & { [CACHE_KEY]?: AdminCache };
+  const existing = store[CACHE_KEY];
+  if (existing) {
+    return existing;
+  }
+  const created: AdminCache = { app: null, firestore: null };
+  store[CACHE_KEY] = created;
+  return created;
+}
 
 function firebaseProjectId(): string {
   const value =
@@ -43,14 +70,15 @@ function storageBucketName(): string {
 }
 
 export function getFirebaseAdminApp(): App {
-  if (cachedApp) {
-    return cachedApp;
+  const cached = cache();
+  if (cached.app) {
+    return cached.app;
   }
 
   const existing = getApps();
   if (existing.length > 0 && existing[0]) {
-    cachedApp = existing[0];
-    return cachedApp;
+    cached.app = existing[0];
+    return cached.app;
   }
 
   const projectId = firebaseProjectId();
@@ -66,7 +94,7 @@ export function getFirebaseAdminApp(): App {
       client_email: string;
       private_key: string;
     };
-    cachedApp = initializeApp({
+    cached.app = initializeApp({
       credential: cert({
         projectId: parsed.project_id,
         clientEmail: parsed.client_email,
@@ -76,14 +104,12 @@ export function getFirebaseAdminApp(): App {
       projectId,
       storageBucket,
     });
-    return cachedApp;
+    return cached.app;
   }
 
-  cachedApp = initializeApp({ projectId, storageBucket });
-  return cachedApp;
+  cached.app = initializeApp({ projectId, storageBucket });
+  return cached.app;
 }
-
-let cachedFirestore: Firestore | null = null;
 
 /**
  * 使用する Firestore データベース ID。
@@ -99,15 +125,31 @@ export function firestoreDatabaseId(): string {
 }
 
 export function getDb(): Firestore {
-  if (cachedFirestore) {
-    return cachedFirestore;
+  const cached = cache();
+  if (cached.firestore) {
+    return cached.firestore;
   }
   const db = getFirestore(getFirebaseAdminApp(), firestoreDatabaseId());
   // undefined のフィールドを書き込みエラーにせず無視する。
   // 省略可能な項目（画像なしなど）を毎回 null 埋めしなくてよくなる。
-  db.settings({ ignoreUndefinedProperties: true });
-  cachedFirestore = db;
-  return cachedFirestore;
+  //
+  // settings() は 1 インスタンスにつき 1 回しか呼べない。
+  // 上のキャッシュで通常は 1 回に収まるが、テストで resetFirebaseAdmin() を
+  // 呼んだ後など、SDK 側だけが同じインスタンスを返す場合がある。
+  // 設定内容は常に同じなので、二度目は黙って受け入れる。
+  try {
+    db.settings({ ignoreUndefinedProperties: true });
+  } catch (error) {
+    if (!isAlreadyInitialized(error)) {
+      throw error;
+    }
+  }
+  cached.firestore = db;
+  return cached.firestore;
+}
+
+function isAlreadyInitialized(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('has already been initialized');
 }
 
 export function getAdminAuth(): Auth {
@@ -124,8 +166,9 @@ export function getMediaBucket() {
 
 /** テスト用にキャッシュを破棄する。 */
 export function resetFirebaseAdmin(): void {
-  cachedApp = null;
-  cachedFirestore = null;
+  const cached = cache();
+  cached.app = null;
+  cached.firestore = null;
 }
 
 /** 起動時の構成確認（管理画面の診断で使う）。 */
