@@ -32,13 +32,43 @@ export function isSoundName(value: string): value is SoundName {
   return (SOUND_NAMES as readonly string[]).includes(value);
 }
 
+/** 音源を用意できなかった理由。会場でそのまま読める言葉にする。 */
+export type SoundFailureReason =
+  /** manifest.json にその音の指定が無い。 */
+  | 'not-listed'
+  /** 指定されたファイルがサーバーに無い（404 など）。 */
+  | 'not-found'
+  /** 取得できたが、再生できる形式へ変換できなかった。 */
+  | 'decode-failed';
+
+export type SoundFailure = { name: SoundName; reason: SoundFailureReason };
+
+/** 先読みの結果。投影準備の画面へそのまま出せる形にする。 */
+export type AudioReadiness = {
+  /** manifest.json 自体を読めたか。 */
+  manifestOk: boolean;
+  /** すぐ鳴らせる音。 */
+  ready: SoundName[];
+  /** 用意できなかった音と、その理由。 */
+  failed: SoundFailure[];
+};
+
 export interface ProjectorAudioManager {
   /** 操作者のクリックイベント内から呼ぶこと。AudioContext を作り、再生を許可させる。 */
   unlock(): Promise<void>;
-  /** manifest.json を読み、音源を取得・デコードする。失敗しても例外は投げない。 */
-  preload(): Promise<void>;
+  /**
+   * manifest.json を読み、音源を取得・デコードする。失敗しても例外は投げない。
+   * どれが鳴らせてどれが鳴らせないかを返すので、呼び出し側は必ず画面へ出すこと
+   * （黙って失敗すると、会場で「音が出ない」だけが分かって原因が分からない）。
+   */
+  preload(): Promise<AudioReadiness>;
   /** 効果音を鳴らす。dedupeKey を渡すと同じキーでは二度鳴らさない。 */
   play(name: SoundName, dedupeKey?: string): void;
+  /**
+   * 動作確認用に 1 音鳴らし、鳴らせたかどうかを返す。
+   * 進行中の合図と違って**時間に追われないため、読み込みを最後まで待つ**。
+   */
+  playTest(name: SoundName): Promise<{ ok: boolean; reason: string | null }>;
   setMuted(muted: boolean): void;
   /** 0.0〜1.0。範囲外は丸める。 */
   setVolume(volume: number): void;
@@ -83,6 +113,20 @@ function resolveAudioContextConstructor(): AudioContextConstructor | null {
   // typeof window を基点に拡張する（Safari の webkit 接頭辞にも対応）。
   const candidate = window as typeof window & { webkitAudioContext?: AudioContextConstructor };
   return candidate.AudioContext ?? candidate.webkitAudioContext ?? null;
+}
+
+/** 失敗の理由を、会場の操作者がそのまま読める言葉にする。 */
+export function describeFailure(name: SoundName, reason: SoundFailureReason | undefined): string {
+  switch (reason) {
+    case 'not-listed':
+      return `「${name}」が manifest.json にありません`;
+    case 'not-found':
+      return `「${name}」の音源ファイルがサーバーにありません`;
+    case 'decode-failed':
+      return `「${name}」の音源をこのブラウザで再生できません`;
+    default:
+      return `「${name}」を用意できませんでした`;
+  }
 }
 
 function clampVolume(value: number): number {
@@ -153,6 +197,10 @@ export function createProjectorAudioManager(
 
   let manifest: Map<SoundName, string> | null = null;
   let manifestPromise: Promise<Map<SoundName, string>> | null = null;
+  let manifestOk = false;
+
+  /** 用意できなかった音とその理由。投影準備の画面へ出す。 */
+  const failures = new Map<SoundName, SoundFailureReason>();
 
   /** 同じ警告を会場で何度も出さない。 */
   const warned = new Set<string>();
@@ -201,6 +249,7 @@ export function createProjectorAudioManager(
         }
         const payload: unknown = await response.json();
         const parsed = parseManifest(payload, manifestUrl);
+        manifestOk = true;
         if (parsed.size === 0) {
           warn('manifest-empty', '効果音の一覧が空でした。効果音なしで進行します。');
         }
@@ -226,15 +275,17 @@ export function createProjectorAudioManager(
     const table = await loadManifest();
     const url = table.get(name);
     if (!url) {
+      failures.set(name, 'not-listed');
       warn(`missing:${name}`, `効果音「${name}」が一覧にありません。この音は鳴りません。`);
       return null;
     }
     try {
       const response = await fetch(url, { credentials: 'same-origin' });
       if (!response.ok) {
+        failures.set(name, 'not-found');
         warn(
           `fetch:${name}`,
-          `効果音「${name}」のファイルが見つかりません (${response.status})。この音は鳴りません。`,
+          `効果音「${name}」のファイル (${url}) が見つかりません (${response.status})。この音は鳴りません。`,
         );
         return null;
       }
@@ -245,12 +296,19 @@ export function createProjectorAudioManager(
       encoded.set(name, bytes);
       return bytes;
     } catch {
+      failures.set(name, 'not-found');
       warn(`fetch:${name}`, `効果音「${name}」を取得できませんでした。この音は鳴りません。`);
       return null;
     }
   };
 
-  /** 取得とデコードをまとめて行う。AudioContext が無い間はデコードできないため null を返す。 */
+  /**
+   * 取得とデコードをまとめて行う。AudioContext が無い間はデコードできないため null を返す。
+   *
+   * **失敗を覚え込まないこと。** `loading` に「null を返す約束」を残したままにすると、
+   * あとで操作者が投影を開始しても、通信が戻っても、その音は二度と読み込まれない。
+   * そのため、どの経路を通っても最後に必ず `loading` から取り除く。
+   */
   const ensureDecoded = (name: SoundName): Promise<AudioBuffer | null> => {
     const ready = decoded.get(name);
     if (ready) {
@@ -262,27 +320,31 @@ export function createProjectorAudioManager(
     }
 
     const task = (async (): Promise<AudioBuffer | null> => {
-      const bytes = await fetchBytes(name);
-      if (!bytes || disposed) {
-        return null;
-      }
-      const target = context;
-      if (!target) {
-        // まだ操作者のクリックが無い。デコードは unlock 後にやり直す。
-        return null;
-      }
       try {
-        // decodeAudioData は渡した ArrayBuffer を切り離すため、必ず複製を渡す。
-        const copy = bytes.slice().buffer;
-        const buffer = await target.decodeAudioData(copy);
-        if (disposed) {
+        const bytes = await fetchBytes(name);
+        if (!bytes || disposed) {
           return null;
         }
-        decoded.set(name, buffer);
-        return buffer;
-      } catch {
-        warn(`decode:${name}`, `効果音「${name}」を再生できる形式に変換できませんでした。`);
-        return null;
+        const target = context;
+        if (!target) {
+          // まだ操作者のクリックが無い。デコードは unlock 後にやり直す。
+          return null;
+        }
+        try {
+          // decodeAudioData は渡した ArrayBuffer を切り離すため、必ず複製を渡す。
+          const copy = bytes.slice().buffer;
+          const buffer = await target.decodeAudioData(copy);
+          if (disposed) {
+            return null;
+          }
+          decoded.set(name, buffer);
+          failures.delete(name);
+          return buffer;
+        } catch {
+          failures.set(name, 'decode-failed');
+          warn(`decode:${name}`, `効果音「${name}」を再生できる形式に変換できませんでした。`);
+          return null;
+        }
       } finally {
         loading.delete(name);
       }
@@ -387,13 +449,30 @@ export function createProjectorAudioManager(
       }
     },
 
-    async preload(): Promise<void> {
+    async preload(): Promise<AudioReadiness> {
       if (disposed) {
-        return;
+        return { manifestOk: false, ready: [], failed: [] };
       }
       await loadManifest();
       // 1 つ失敗しても他は読み込む。
-      await Promise.all(SOUND_NAMES.map((name) => ensureDecoded(name)));
+      const buffers = await Promise.all(SOUND_NAMES.map((name) => ensureDecoded(name)));
+
+      const ready: SoundName[] = [];
+      const failed: SoundFailure[] = [];
+      SOUND_NAMES.forEach((name, index) => {
+        if (buffers[index]) {
+          ready.push(name);
+          return;
+        }
+        const reason = failures.get(name);
+        // AudioContext がまだ無いだけの場合は失敗として数えない
+        // （投影開始の操作より前は、そもそもデコードできない）。
+        if (reason) {
+          failed.push({ name, reason });
+        }
+      });
+
+      return { manifestOk, ready, failed };
     },
 
     play(name: SoundName, dedupeKey?: string): void {
@@ -432,6 +511,30 @@ export function createProjectorAudioManager(
         }
         startSource(buffer);
       });
+    },
+
+    async playTest(name: SoundName): Promise<{ ok: boolean; reason: string | null }> {
+      if (disposed) {
+        return { ok: false, reason: '画面を離れました' };
+      }
+      if (!unlocked || !context || !gain) {
+        return { ok: false, reason: 'ブラウザが音を止めています。もう一度押してください' };
+      }
+      if (muted) {
+        return { ok: false, reason: '消音になっています' };
+      }
+
+      await resumeIfNeeded();
+
+      // 進行中の合図と違い、確認の音は遅れても構わない。
+      // ここで打ち切ると「押しても何も起きない」になり、原因が分からなくなる。
+      const buffer = await ensureDecoded(name);
+      if (!buffer) {
+        const reason = failures.get(name);
+        return { ok: false, reason: describeFailure(name, reason) };
+      }
+      startSource(buffer);
+      return { ok: true, reason: null };
     },
 
     setMuted(nextMuted: boolean): void {

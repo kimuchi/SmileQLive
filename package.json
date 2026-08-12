@@ -45,6 +45,7 @@
     "firebase:auth": "node scripts/firebase-auth-init.mjs",
     "seed:demo": "node scripts/seed-demo-quiz.mjs",
     "sounds:generate": "node scripts/generate-sounds.mjs",
+    "sounds:check": "node scripts/check-sounds.mjs",
     "sounds:install": "node scripts/install-sounds.mjs"
   },
   "dependencies": {

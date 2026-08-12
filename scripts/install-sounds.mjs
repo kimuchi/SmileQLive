@@ -280,10 +280,28 @@ writeFileSync(licensePath, license);
 success('LICENSE.md へ出典を記録しました');
 
 // ---------------------------------------------------------------------------
-heading('確認方法');
+// 取り込んだだけでは公開先に載らない。ここを飛ばすと会場で無音になる。
+heading('この先が必要です');
+
+warn('取り込んだ音源は Git に入りません（再配布禁止のため .gitignore 済み）。');
+console.log('  そのため、次のどちらかをしないと**公開中のサイトでは鳴りません**。');
+console.log('');
+console.log(`  ${color.bold('1. この端末から配信する')}`);
+console.log('     npm run deploy -- production');
+console.log('');
+console.log(`  ${color.bold('2. 同梱音のまま使う（差し替えをやめる）')}`);
+console.log('     npm run sounds:generate');
+console.log('');
+
+info('配信したあと、公開先に音源が載っているか確かめられます:');
+console.log('    npm run sounds:check -- --url https://<公開URL>');
+console.log('');
+
+// ---------------------------------------------------------------------------
+heading('会場での確認方法');
 console.log('  1. 投影画面を開く（効果音はこの画面だけで鳴ります）');
-console.log('  2. 画面内の操作で一度クリックする（ブラウザの自動再生制限の解除）');
-console.log('  3. 出題 → 締切 → 正解発表 と進めて音を確認する');
+console.log('  2. 「音声テスト」を押す（結果が画面に出ます）');
+console.log('  3. 「投影を開始」すると、読み込めた件数が画面に表示されます');
 console.log('');
 info('参加者のスマートフォンからは音は出ません（設計上の約束）。');
 console.log('');

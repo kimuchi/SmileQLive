@@ -87,16 +87,12 @@ export function PresentScreen({ roomId }: { roomId: string }) {
    * 全画面要求も同じクリックの有効期間で出すため、先読みの完了は待たない。
    */
   const handleTest = useCallback(() => {
-    void enable().then(() => {
-      playTest();
-    });
+    void enable().then(() => playTest());
   }, [enable, playTest]);
 
   const handleStart = useCallback(() => {
     setStarted(true);
-    void enable().then(() => {
-      playTest();
-    });
+    void enable().then(() => playTest());
     fullscreen.request();
   }, [enable, fullscreen, playTest]);
 
@@ -113,6 +109,8 @@ export function PresentScreen({ roomId }: { roomId: string }) {
       quizTitle={snapshot?.quizTitle ?? null}
       previouslyEnabled={audio.previouslyEnabled}
       warning={audio.warning}
+      status={audio.status}
+      testResult={audio.testResult}
       onTest={handleTest}
       onStart={handleStart}
     />

@@ -30,6 +30,19 @@ npm run sounds:install -- --from ~/Downloads # ダウンロード済みのフォ
 取り込むと `manifest.json` と `LICENSE.md` が自動更新されます。
 同梱音へ戻したいときは `npm run sounds:generate` を実行してください。
 
+## 鳴らないときの確かめ方
+
+```bash
+npm run sounds:check                            # 手元のファイルを確かめる
+npm run sounds:check -- --url https://<公開URL> # 公開中のサイトを確かめる
+```
+
+投影画面の「投影準備」にも、読み込めた件数と足りない音が表示されます。
+「音声テスト」を押すと、鳴らせたかどうかが文字で返ります。
+
+`public/sounds/` 直下へ置いた音源は Git に入らないため、
+**取り込んだ端末からデプロイしないと公開先では鳴りません。**
+
 ## 手作業で差し替える
 
 1. `public/sounds/` へ置く

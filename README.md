@@ -72,11 +72,17 @@ pnpm emulators     # Firestore / Auth / Storage / UI(http://127.0.0.1:4000)
 ```bash
 npm run sounds:generate                         # 同梱音を作り直す
 npm run sounds:install                          # 効果音ラボの音源へ差し替える（手順を表示）
+npm run sounds:check                            # 音源が揃っているか確かめる
+npm run sounds:check -- --url https://<公開URL> # 公開中のサイトを確かめる
 ```
 
 効果音ラボは**素材の再配布が禁止**されているため、その音源だけはリポジトリに含めていません。
 差し替える場合のみ `npm run sounds:install` を実行してください
 （出典は `public/sounds/LICENSE.md` へ自動記録されます）。
+
+**差し替えた音源は Git に入りません。** そのため取り込んだ端末から `npm run deploy` する必要があります。
+公開先に音源が載っているかは `npm run sounds:check -- --url https://<公開URL>` で確かめられます。
+投影画面の「投影準備」でも、読み込めた件数と足りない音が表示されます。
 
 ---
 
@@ -147,7 +153,9 @@ npm run seed:demo                         # 動作確認用のデモクイズ（
 | `npm run firebase:config` | Firebase の公開設定を CLI で取得し設定ファイルへ書き込む（GUI 不要） |
 | `npm run firebase:auth` | Authentication の初期化・匿名認証の有効化・承認済みドメインの追加 |
 | `npm run seed:demo` | 動作確認用のデモクイズを作成（画像つき 6 問） |
+| `npm run sounds:generate` | 同梱の効果音（自家生成）を作り直す |
 | `npm run sounds:install` | 効果音の入手手順を表示 / ダウンロード済みの音源を取り込む |
+| `npm run sounds:check` | 効果音が揃っているか確かめる（`--url` で公開先も検査） |
 | `npm run firebase:doctor` | Firebase が使える状態か診断（変更しない） |
 | `npm run gcp:bootstrap` | Google Cloud 初期設定（冪等） |
 

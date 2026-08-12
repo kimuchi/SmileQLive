@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   createProjectorAudioManager,
+  describeFailure,
+  type AudioReadiness,
   type ProjectorAudioManager,
   type SoundName,
 } from '@/lib/audio/projector-audio-manager';
@@ -80,6 +82,17 @@ function writeEnabledFlag(roomId: string): void {
   }
 }
 
+/** 投影準備の画面へ出す、効果音の状態。 */
+export type AudioStatus =
+  /** まだ投影開始の操作をしていない。 */
+  | { kind: 'idle' }
+  /** 読み込み中。 */
+  | { kind: 'loading' }
+  /** すべて鳴らせる。 */
+  | { kind: 'ready'; count: number }
+  /** 一部または全部が鳴らせない。理由つき。 */
+  | { kind: 'partial'; count: number; total: number; problems: string[] };
+
 export type ProjectorAudio = {
   /** 効果音を鳴らせる状態か。 */
   isUnlocked: boolean;
@@ -87,16 +100,41 @@ export type ProjectorAudio = {
   volume: number;
   /** 音源が見つからないなど、操作者へ伝えたい注意。 */
   warning: string | null;
+  /** 何件鳴らせるか・何が足りないか。会場で原因を切り分けるために必ず表示する。 */
+  status: AudioStatus;
+  /** 音声テストの結果（押すたびに更新）。 */
+  testResult: string | null;
   /** 以前この端末（タブ）で音を有効にしたか。案内文の出し分けに使う。 */
   previouslyEnabled: boolean;
   /** **クリックイベント内から呼ぶこと。** AudioContext を作り、音源の先読みを始める。 */
   enable: () => Promise<void>;
-  /** 動作確認用に 1 音鳴らす（二重再生防止の対象外）。 */
-  playTest: () => void;
+  /** 動作確認用に 1 音鳴らす（二重再生防止の対象外）。結果は testResult に入る。 */
+  playTest: () => Promise<void>;
   play: (name: SoundName, dedupeKey?: string) => void;
   setMuted: (muted: boolean) => void;
   setVolume: (volume: number) => void;
 };
+
+function toStatus(readiness: AudioReadiness): AudioStatus {
+  const total = readiness.ready.length + readiness.failed.length;
+  if (!readiness.manifestOk) {
+    return {
+      kind: 'partial',
+      count: 0,
+      total: 0,
+      problems: ['効果音の一覧 (/sounds/manifest.json) を読み込めませんでした'],
+    };
+  }
+  if (readiness.failed.length === 0 && readiness.ready.length > 0) {
+    return { kind: 'ready', count: readiness.ready.length };
+  }
+  return {
+    kind: 'partial',
+    count: readiness.ready.length,
+    total,
+    problems: readiness.failed.map((failure) => describeFailure(failure.name, failure.reason)),
+  };
+}
 
 export function useProjectorAudio(roomId: string): ProjectorAudio {
   const managerRef = useRef<ProjectorAudioManager | null>(null);
@@ -105,6 +143,8 @@ export function useProjectorAudio(roomId: string): ProjectorAudio {
   const [muted, setMutedState] = useState(false);
   const [volume, setVolumeState] = useState(DEFAULT_VOLUME);
   const [warning, setWarning] = useState<string | null>(null);
+  const [status, setStatus] = useState<AudioStatus>({ kind: 'idle' });
+  const [testResult, setTestResult] = useState<string | null>(null);
   const [previouslyEnabled, setPreviouslyEnabled] = useState(false);
 
   useEffect(() => {
@@ -148,16 +188,28 @@ export function useProjectorAudio(roomId: string): ProjectorAudio {
     }
 
     // 先読みは待たない。待つと全画面要求までにクリックの有効期間を使い切ってしまう。
-    void manager.preload();
+    // 結果は届き次第、画面へ出す（黙って失敗させない）。
+    setStatus({ kind: 'loading' });
+    void manager.preload().then((readiness) => {
+      if (managerRef.current === manager) {
+        setStatus(toStatus(readiness));
+      }
+    });
   }, [roomId]);
 
   const play = useCallback((name: SoundName, dedupeKey?: string): void => {
     managerRef.current?.play(name, dedupeKey);
   }, []);
 
-  const playTest = useCallback((): void => {
+  const playTest = useCallback(async (): Promise<void> => {
+    const manager = managerRef.current;
+    if (!manager) {
+      return;
+    }
+    setTestResult(null);
     // 動作確認は何度でも鳴らせるようにキーを渡さない。
-    managerRef.current?.play(TEST_SOUND);
+    const result = await manager.playTest(TEST_SOUND);
+    setTestResult(result.ok ? 'テスト音を鳴らしました。会場のスピーカーを確認してください。' : (result.reason ?? '鳴らせませんでした'));
   }, []);
 
   const setMuted = useCallback(
@@ -184,6 +236,8 @@ export function useProjectorAudio(roomId: string): ProjectorAudio {
     muted,
     volume,
     warning,
+    status,
+    testResult,
     previouslyEnabled,
     enable,
     playTest,
