@@ -42,10 +42,13 @@ function installFakeAudioContext(): {
   startTimes: () => number[];
   stopped: () => number;
   currentTime: () => number;
+  /** 繰り返し再生で鳴らし始めたもの（回答時間中のタイマー音）。 */
+  loopingSources: () => { stopped: boolean }[];
 } {
   let started = 0;
   let stopped = 0;
   const startTimes: number[] = [];
+  const loopingSources: { stopped: boolean }[] = [];
   const CURRENT_TIME = 12.5;
 
   class FakeGainNode {
@@ -59,7 +62,10 @@ function installFakeAudioContext(): {
 
   class FakeSourceNode {
     buffer: unknown = null;
+    loop = false;
     onended: (() => void) | null = null;
+    /** 繰り返し再生として記録した控え。stop されたら印を付ける。 */
+    private record: { stopped: boolean } | null = null;
     connect = vi.fn();
     start = vi.fn((when?: number) => {
       // 解除用の無音（1 サンプル）は数えない。
@@ -69,9 +75,16 @@ function installFakeAudioContext(): {
       }
       started += 1;
       startTimes.push(when ?? 0);
+      if (this.loop) {
+        this.record = { stopped: false };
+        loopingSources.push(this.record);
+      }
     });
     stop = vi.fn(() => {
       stopped += 1;
+      if (this.record) {
+        this.record.stopped = true;
+      }
     });
   }
 
@@ -99,6 +112,7 @@ function installFakeAudioContext(): {
     startTimes: () => [...startTimes],
     stopped: () => stopped,
     currentTime: () => CURRENT_TIME,
+    loopingSources: () => [...loopingSources],
   };
 }
 
@@ -337,7 +351,7 @@ describe('鳴らし方', () => {
   });
 
   it('同じ音が続けて鳴るとき、前の音を止めて重ねない', async () => {
-    // 残り 5,4,3,2,1,0 秒の合図。素材が長くても重ならないこと。
+    // 素材が長くても、同じ種類の音が積み重なって濁らないこと。
     const warnings = collectWarnings();
     const manager = createProjectorAudioManager({
       dedupeNamespace: 'tick',
@@ -371,6 +385,82 @@ describe('鳴らし方', () => {
     expect(audio.started()).toBe(2);
     expect(audio.stopped()).toBe(0);
     manager.dispose();
+  });
+
+  /**
+   * 回答受付中のタイマー音。
+   *
+   * 一度きりの再生にすると、素材の長さのぶんしか鳴らず（既定の素材は 1 秒）、
+   * 会場では「最初だけ鳴ってすぐ止まった」ように聞こえる。実際にそうなった。
+   */
+  describe('回答受付中のタイマー音', () => {
+    it('繰り返し再生で鳴らし始める', async () => {
+      const warnings = collectWarnings();
+      const manager = createProjectorAudioManager({
+        dedupeNamespace: 'loop-start',
+        onWarning: warnings.onWarning,
+      });
+      await manager.unlock();
+      await manager.preload();
+
+      manager.startLoop('tick');
+
+      expect(audio.loopingSources()).toHaveLength(1);
+      manager.dispose();
+    });
+
+    it('二度呼んでも鳴らし直さない（延長で鳴り直すと不自然）', async () => {
+      const warnings = collectWarnings();
+      const manager = createProjectorAudioManager({
+        dedupeNamespace: 'loop-twice',
+        onWarning: warnings.onWarning,
+      });
+      await manager.unlock();
+      await manager.preload();
+
+      manager.startLoop('tick');
+      manager.startLoop('tick');
+
+      expect(audio.loopingSources()).toHaveLength(1);
+      expect(audio.stopped()).toBe(0);
+      manager.dispose();
+    });
+
+    it('止めると鳴りやみ、そのあと鳴らし直せる', async () => {
+      const warnings = collectWarnings();
+      const manager = createProjectorAudioManager({
+        dedupeNamespace: 'loop-stop',
+        onWarning: warnings.onWarning,
+      });
+      await manager.unlock();
+      await manager.preload();
+
+      manager.startLoop('tick');
+      manager.stopLoop('tick');
+      expect(audio.loopingSources()[0]?.stopped).toBe(true);
+
+      // 締切から受付へ戻したときに、もう一度鳴らせること。
+      manager.startLoop('tick');
+      expect(audio.loopingSources()).toHaveLength(2);
+      expect(audio.loopingSources()[1]?.stopped).toBe(false);
+      manager.dispose();
+    });
+
+    it('消音にすると鳴りやむ', async () => {
+      const warnings = collectWarnings();
+      const manager = createProjectorAudioManager({
+        dedupeNamespace: 'loop-mute',
+        onWarning: warnings.onWarning,
+      });
+      await manager.unlock();
+      await manager.preload();
+
+      manager.startLoop('tick');
+      manager.setMuted(true);
+
+      expect(audio.loopingSources()[0]?.stopped).toBe(true);
+      manager.dispose();
+    });
   });
 
   it('音の長さを返す（ためる時間を素材に合わせるため）', async () => {

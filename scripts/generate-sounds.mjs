@@ -190,9 +190,15 @@ const SOUNDS = {
     return samples;
   },
 
-  /** 残り 5〜1 秒: 次の秒に重ならない短い合図。控えめな音量。 */
+  /**
+   * 回答受付中: 受け付けている間ずっと繰り返し鳴らす。
+   *
+   * **長さを 1 秒ちょうどにする。** 投影画面はこの音を繰り返して鳴らすため、
+   * 長さがそのまま「カチ」の間隔になる。1 秒なら秒針と同じ間隔になり、
+   * 残り時間が音だけでも分かる。控えめな音量にして司会の声を消さない。
+   */
   tick: () => {
-    const samples = createSamples(0.16);
+    const samples = createSamples(1);
     addTone(samples, {
       startSec: 0,
       durationSec: 0.12,
