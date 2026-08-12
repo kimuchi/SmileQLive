@@ -24,6 +24,7 @@
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build && npm run verify:bundle",
     "test:rules": "node scripts/test-rules.mjs",
     "test:emulator": "node scripts/test-emulator.mjs",
+    "load:test": "node scripts/load-test.mjs",
     "emulators": "npx --yes firebase-tools emulators:start",
     "rules:deploy": "node scripts/deploy-rules.mjs",
     "host:list": "node scripts/host-admin.mjs list",

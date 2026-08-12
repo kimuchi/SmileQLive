@@ -33,6 +33,27 @@ import type { RoomDoc } from '@/types/firestore';
 /** ニックネーム候補の最大試行数。 */
 const NICKNAME_SUGGESTION_LIMIT = 99;
 
+/**
+ * 同じ回線からの参加登録の上限（60 秒あたり）。
+ *
+ * **会場では全員が同じ Wi-Fi を使う。** 出口の IP アドレスは 1 つなので、
+ * ここを小さくすると「11 人目から誰も入れない」という事故になる。
+ * 実際、以前は 10 件だったため 500 人規模では成立しなかった。
+ *
+ * ここでの役割は「1 台の端末による連打を安く弾く」ことに絞り、
+ * 総量の抑制はルーム単位の上限（下の joinLimitForRoom）に任せる。
+ * なお参加登録は冪等（同じ匿名利用者なら何度送っても増えない）。
+ */
+const JOIN_REGISTER_PER_CLIENT_LIMIT = 300;
+
+/**
+ * 1 つの二次元コードに対する参加登録の上限（60 秒あたり）。
+ * 定員の 3 倍まで許し、やり直しや再送に耐えられるようにする。
+ */
+function joinLimitForRoom(maxParticipants: number): number {
+  return Math.max(600, maxParticipants * 3);
+}
+
 /** ニックネームの最大長（schemas.ts の nicknameSchema と揃える）。 */
 const NICKNAME_MAX_LENGTH = 20;
 
@@ -92,14 +113,18 @@ export async function registerParticipant(
   request: Request,
 ): Promise<JoinRegisterResponse> {
   checkRateLimit(clientKeyFromRequest(request, 'join-register'), {
-    limit: 10,
+    limit: JOIN_REGISTER_PER_CLIENT_LIMIT,
     windowMs: 60_000,
   });
 
   const room = await resolveRoomOrThrow(token);
 
   // トークン単位でも制限し、1 つの QR への総当たりを抑える。
-  checkRateLimit(`join-register-room:${room.id}`, { limit: 600, windowMs: 60_000 });
+  // 上限は定員に合わせる（定員 500 のルームを 600 件で頭打ちにしない）。
+  checkRateLimit(`join-register-room:${room.id}`, {
+    limit: joinLimitForRoom(room.maxParticipants),
+    windowMs: 60_000,
+  });
 
   if (room.phase === 'finished') {
     throw new AppError('ROOM_FINISHED');

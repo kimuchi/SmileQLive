@@ -101,4 +101,70 @@ describe.skipIf(!available)('同じ端末での再参加', () => {
     const room = await getDb().collection('rooms').doc(roomId).get();
     expect(room.data()?.participantCount).toBe(2);
   });
+
+  /**
+   * 開場直後は全員が同時に二次元コードを読む。
+   *
+   * 以前はここをトランザクションで囲み、その中で `rooms/{id}` を読んで
+   * 人数を書き戻していた。同じドキュメントを読んで書くトランザクションは
+   * 同時に走ると片方がやり直しになるため、**500 人で試したところ
+   * 499 人が入れなかった**（tests/load/scale.test.ts）。
+   * ここでは軽い人数で同じ性質を見張る。会場規模は npm run load:test で確かめる。
+   */
+  it('同時に来ても全員が入れて、人数がずれない', { timeout: 60000 }, async () => {
+    const { getDb } = await import('@/infrastructure/firebase/admin');
+    const { registerParticipant } = await import('@/infrastructure/firebase/transactions');
+
+    const burstRoomId = `${roomId}-burst`;
+    const people = 60;
+
+    const db = getDb();
+    const { Timestamp } = await import('firebase-admin/firestore');
+    const now = Timestamp.now();
+    await db
+      .collection('rooms')
+      .doc(burstRoomId)
+      .set({
+        id: burstRoomId,
+        ownerId: 'owner-uid',
+        quizId: 'quiz-x',
+        joinTokenHash: 'hash-burst',
+        joinTokenRotatedAt: now,
+        phase: 'lobby',
+        quizSnapshot: { quizId: 'quiz-x', title: 'テスト', settings: {}, questions: [] },
+        currentQuestionId: null,
+        currentQuestionPosition: null,
+        phaseStartedAt: null,
+        answerDeadlineAt: null,
+        stateVersion: 0,
+        joinOpen: true,
+        maxParticipants: people + 10,
+        participantCount: 0,
+        createdAt: now,
+        updatedAt: now,
+        finishedAt: null,
+      });
+
+    const results = await Promise.allSettled(
+      Array.from({ length: people }, (_, index) =>
+        registerParticipant(burstRoomId, `burst-uid-${index}`, `参加者${index}`),
+      ),
+    );
+
+    const rejected = results.filter((result) => result.status === 'rejected');
+    // 1 人でも弾かれたら会場では事故になる。
+    expect(rejected).toHaveLength(0);
+
+    const members = await db
+      .collection('rooms')
+      .doc(burstRoomId)
+      .collection('members')
+      .count()
+      .get();
+    expect(members.data().count).toBe(people);
+
+    const room = await db.collection('rooms').doc(burstRoomId).get();
+    // 表示に使う人数が実数と食い違わないこと。
+    expect(room.data()?.participantCount).toBe(people);
+  });
 });

@@ -106,7 +106,14 @@ export type SubmitAnswerDbInput = {
 export type SubmitAnswerDbResult = {
   accepted: true;
   answeredAt: string;
-  answeredCount: number;
+  /**
+   * 現在問題の回答数。**null は「今回は数えていない」**という意味。
+   *
+   * 進捗は書き込みを間引いているため、毎回数え直さない
+   * （500 人ぶん数え直すと、そのほとんどが捨てられる）。
+   * 0 を返すと「まだ誰も答えていない」と読めてしまうので区別する。
+   */
+  answeredCount: number | null;
 };
 
 /** 進捗ドキュメントへの書き込み間隔の下限（§3.4 の書き込み集中対策）。 */
@@ -434,8 +441,28 @@ export async function lockQuestionIfExpired(
  * - すでに参加済みなら既存の行をそのまま返す（再訪・二重送信でも増えない）。
  * - 人数上限は ROOM_FULL、受付終了は JOIN_CLOSED、終了済みは ROOM_FINISHED。
  * - ニックネーム重複は nicknameLower の等価検索で判定する。
- *   （Firestore のトランザクションは「まだ存在しない行」を締め出せないため、
+ *   （Firestore は「まだ存在しない行」を締め出せないため、
  *     ほぼ同時の登録で重複がすり抜ける可能性は残る。会場運用上は許容範囲。）
+ *
+ * ---------------------------------------------------------------------------
+ * なぜトランザクションを使わないか
+ * ---------------------------------------------------------------------------
+ * 以前はこの全体を 1 つのトランザクションで行い、その中で
+ * `rooms/{id}` を読んで `participantCount + 1` を書き戻していた。
+ * 同じドキュメントを読んで書くトランザクションは、同時に走ると
+ * 片方がやり直しになる。開場直後は全員が同時に二次元コードを読むため、
+ * **500 人で試したところ 499 人が ABORTED で入れなかった**
+ * （tests/load/scale.test.ts で再現できる）。
+ *
+ * 二重登録を防いでいるのはトランザクションではなく
+ * 「参加者 uid を丸ごとドキュメント ID にした create()」であり、
+ * これは UNIQUE 制約と同じ強さで、同時実行でも 1 件しか通らない。
+ * そこでトランザクションをやめ、人数の加算は競合しない
+ * FieldValue.increment に置き換えた。
+ *
+ * 代償として人数上限の判定はわずかに緩くなる（同時に来た人が上限を
+ * 数人超えることがある）。会場の上限は運用の目安なので、
+ * 「入れなかった人が出る」よりこちらを選ぶ。
  */
 export async function registerParticipant(
   roomId: string,
@@ -444,67 +471,114 @@ export async function registerParticipant(
 ): Promise<RegisterParticipantResult> {
   const nicknameLower = nickname.toLowerCase();
 
-  return getDb().runTransaction(async (tx) => {
-    const roomSnapshot = await tx.get(roomRef(roomId));
-    const room = roomSnapshot.data();
-    if (!room) {
-      throw new AppError('ROOM_NOT_FOUND');
-    }
+  const existingMember = (await memberRef(roomId, uid).get()).data();
+  if (existingMember) {
+    // 司会・投影担当を参加者へ降格させない。参加者ならそのまま返す。
+    return {
+      roomId,
+      participantId: existingMember.id,
+      nickname: existingMember.nickname ?? nickname,
+      role: existingMember.role,
+      alreadyJoined: true,
+    };
+  }
 
-    const memberSnapshot = await tx.get(memberRef(roomId, uid));
-    const existing = memberSnapshot.data();
-    if (existing) {
-      // 司会・投影担当を参加者へ降格させない。参加者ならそのまま返す。
+  const room = (await roomRef(roomId).get()).data();
+  if (!room) {
+    throw new AppError('ROOM_NOT_FOUND');
+  }
+  if (room.finishedAt || room.phase === 'finished') {
+    throw new AppError('ROOM_FINISHED');
+  }
+  if (!room.joinOpen) {
+    throw new AppError('JOIN_CLOSED');
+  }
+  if (room.participantCount >= room.maxParticipants) {
+    throw new AppError('ROOM_FULL');
+  }
+
+  const duplicate = await membersCollection(roomId)
+    .where('nicknameLower', '==', nicknameLower)
+    .limit(1)
+    .get();
+  if (!duplicate.empty) {
+    throw new AppError('NICKNAME_TAKEN');
+  }
+
+  const now = nowTimestamp();
+  const member: RoomMemberDoc = {
+    id: uid,
+    roomId,
+    authUserId: uid,
+    role: 'participant',
+    nickname,
+    nicknameLower,
+    joinedAt: now,
+    lastSeenAt: now,
+    isActive: true,
+    totalPoints: 0,
+    correctCount: 0,
+    correctElapsedMsTotal: 0,
+  };
+
+  try {
+    // 決定的なドキュメント ID + create() が UNIQUE 制約の役目を果たす。
+    // 同じ人が連打しても、ここを通るのは 1 回だけ。
+    await memberRef(roomId, uid).create(member);
+  } catch (error) {
+    if (isAlreadyExistsError(error)) {
+      // ほぼ同時の二重送信。先に通ったほうの行をそのまま返す。
+      const stored = (await memberRef(roomId, uid).get()).data();
       return {
         roomId,
-        participantId: existing.id,
-        nickname: existing.nickname ?? nickname,
-        role: existing.role,
+        participantId: uid,
+        nickname: stored?.nickname ?? nickname,
+        role: stored?.role ?? 'participant',
         alreadyJoined: true,
       };
     }
+    throw error;
+  }
 
-    if (room.finishedAt || room.phase === 'finished') {
-      throw new AppError('ROOM_FINISHED');
-    }
-    if (!room.joinOpen) {
-      throw new AppError('JOIN_CLOSED');
-    }
-    if (room.participantCount >= room.maxParticipants) {
-      throw new AppError('ROOM_FULL');
-    }
+  await bumpParticipantCount(roomId);
 
-    const duplicate = await tx.get(
-      membersCollection(roomId).where('nicknameLower', '==', nicknameLower).limit(1),
-    );
-    if (!duplicate.empty) {
-      throw new AppError('NICKNAME_TAKEN');
-    }
+  return { roomId, participantId: uid, nickname, role: 'participant', alreadyJoined: false };
+}
 
-    const now = nowTimestamp();
-    const member: RoomMemberDoc = {
-      id: uid,
-      roomId,
-      authUserId: uid,
-      role: 'participant',
-      nickname,
-      nicknameLower,
-      joinedAt: now,
-      lastSeenAt: now,
-      isActive: true,
-      totalPoints: 0,
-      correctCount: 0,
-      correctElapsedMsTotal: 0,
-    };
-    const participantCount = room.participantCount + 1;
+/**
+ * 参加人数の表示値を 1 増やす。
+ *
+ * `rooms/{id}` は誰も購読していないので、都度きっちり増やす（表示と実数がずれない）。
+ * `public/state` は**参加者全員が購読している**ため、1 件書くたびに人数ぶんの
+ * 読み取りが発生する。500 人が一斉に入ると 500×500 になってしまうので、
+ * こちらは間引いて書く（遅れても「参加 N 人」の表示が少し遅れるだけ）。
+ * 進行操作のたびに applyTransition が正確な値で上書きするため、ずれは残らない。
+ */
+async function bumpParticipantCount(roomId: string): Promise<void> {
+  const now = nowTimestamp();
+  try {
+    await roomRef(roomId).update({
+      participantCount: FieldValue.increment(1),
+      updatedAt: now,
+    });
+  } catch {
+    // 人数表示のための更新。失敗しても参加そのものは成立している。
+    return;
+  }
 
-    tx.create(memberRef(roomId, uid), member);
-    tx.update(roomRef(roomId), { participantCount, updatedAt: now });
-    tx.set(publicStateRef(roomId), { participantCount, updatedAt: now }, { merge: true });
-    tx.set(staffProgressRef(roomId), { participantCount, updatedAt: now }, { merge: true });
+  if (!shouldWriteProgress(participantCountThrottleKey(roomId))) {
+    return;
+  }
 
-    return { roomId, participantId: uid, nickname, role: 'participant', alreadyJoined: false };
-  });
+  try {
+    const participantCount = (await roomRef(roomId).get()).data()?.participantCount ?? 0;
+    const batch = getDb().batch();
+    batch.set(publicStateRef(roomId), { participantCount, updatedAt: now }, { merge: true });
+    batch.set(staffProgressRef(roomId), { participantCount, updatedAt: now }, { merge: true });
+    await batch.commit();
+  } catch {
+    // 同上。
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -670,14 +744,37 @@ export type AnswerProgressOptions = {
   force?: boolean;
 };
 
-export type AnswerProgressResult = { answeredCount: number; written: boolean };
+export type AnswerProgressResult = {
+  /** 数えたときだけ件数が入る。間引いた回は null。 */
+  answeredCount: number | null;
+  written: boolean;
+};
 
 /**
- * 直近に進捗を書いた時刻（ルームごと）。
+ * 直近に共有ドキュメントへ書いた時刻（用途ごと・ルームごと）。
  * 進行状態そのものではなく「書き込みを間引くためのヒント」なので、
  * インスタンスごとに独立していても問題ない（最悪、少し多く書くだけ）。
  */
 const lastProgressWriteAt = new Map<string, number>();
+
+/** 参加人数の間引き用キー。回答進捗とは別枠で数える。 */
+function participantCountThrottleKey(roomId: string): string {
+  return `participants:${roomId}`;
+}
+
+/**
+ * 間引きの判定。書いてよければ true を返し、同時に時刻を記録する。
+ * 「判定してから重い処理をする」ために、集計より**先に**呼ぶこと。
+ */
+function shouldWriteProgress(key: string): boolean {
+  const now = Date.now();
+  const last = lastProgressWriteAt.get(key) ?? 0;
+  if (now - last < ANSWER_PROGRESS_MIN_INTERVAL_MS) {
+    return false;
+  }
+  lastProgressWriteAt.set(key, now);
+  return true;
+}
 
 /** テスト用にスロットリング状態を破棄する。 */
 export function resetAnswerProgressThrottle(): void {
@@ -690,8 +787,12 @@ export function resetAnswerProgressThrottle(): void {
  * 200 人が 10 秒で回答すると 1 ドキュメントへ毎秒 20 回書き込むことになり、
  * Firestore の 1 ドキュメントあたりの上限に当たる。
  * そこで **前回書き込みから 400ms 未満はスキップ**する（docs/FIRESTORE_MODEL.md §3.4）。
- * 件数そのものは集計クエリ count() で毎回正確に数えるので、
- * 締切・正解発表時は force: true で必ず反映すること。
+ *
+ * 間引きの判定は集計クエリより**先に**行う。あとで判定すると、
+ * 書かないと決まっている呼び出しでも人数ぶんの count() が走ってしまう
+ * （500 人なら 1 問につき 500 回。これは丸ごと無駄になる）。
+ * そのぶん、書かなかったときに返す件数は「呼び出し側が渡した値か 0」になる。
+ * 締切・正解発表など正確な件数が要る場面は force: true で呼ぶこと。
  */
 export async function updateAnswerProgress(
   roomId: string,
@@ -706,14 +807,11 @@ export async function updateAnswerProgress(
     return { answeredCount: 0, written: false };
   }
 
-  const answeredCount = options.answeredCount ?? (await countAnswers(roomId, questionId));
-
-  const now = Date.now();
-  const last = lastProgressWriteAt.get(roomId) ?? 0;
-  if (options.force !== true && now - last < ANSWER_PROGRESS_MIN_INTERVAL_MS) {
-    return { answeredCount, written: false };
+  if (options.force !== true && !shouldWriteProgress(roomId)) {
+    return { answeredCount: options.answeredCount ?? null, written: false };
   }
-  lastProgressWriteAt.set(roomId, now);
+
+  const answeredCount = options.answeredCount ?? (await countAnswers(roomId, questionId));
 
   const updatedAt = nowTimestamp();
   const batch = getDb().batch();

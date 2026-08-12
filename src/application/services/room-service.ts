@@ -28,7 +28,7 @@ import {
   questionAtPosition,
   type QuizSnapshot,
 } from '@/domain/quiz/quiz-snapshot';
-import { rankParticipants, topRanking, type RankedParticipant } from '@/domain/room/scoring';
+import type { RankedParticipant } from '@/domain/room/scoring';
 import type { ParticipantSnapshot, StaffSnapshot } from '@/domain/room/snapshot';
 import {
   availableActions,
@@ -45,9 +45,9 @@ import { parseQuizSnapshot } from '@/application/services/quiz-snapshot-codec';
 import { resolveQuestionMedia } from '@/application/services/media-service';
 import {
   getBreakdown as getAnswerBreakdown,
-  getLeaderboard as getParticipantScores,
   getMyAnswer,
 } from '@/infrastructure/firebase/repositories/answer-repository';
+import { getRankedParticipants } from '@/application/services/ranking-cache';
 import {
   consumePresentationLink,
   countActiveParticipants,
@@ -94,8 +94,13 @@ import type {
 } from '@/types/api';
 import type { RoomDoc } from '@/types/firestore';
 
-/** 参加人数の既定上限。 */
-const DEFAULT_MAX_PARTICIPANTS = 200;
+/**
+ * 参加人数の既定上限。
+ *
+ * 500 人までは実測で確かめてある（tests/load/scale.test.ts）。
+ * 上限を超えた人は ROOM_FULL で入れないため、既定は検証済みの人数にそろえる。
+ */
+const DEFAULT_MAX_PARTICIPANTS = 500;
 
 // ---------------------------------------------------------------------------
 // 共通ヘルパー
@@ -306,7 +311,8 @@ export async function getStaffSnapshot(
       ? await requireRoomMember(roomId, ['host'])
       : await requireRoomMember(roomId, ['host', 'presenter']);
 
-  await touchMemberPresence(roomId, member.id);
+  // 在席時刻は表示補助。すでに新しければ書き直さない。
+  await touchMemberPresence(roomId, member.id, member.lastSeenAt);
 
   // 投影の先読みのため次問題まで解決する（司会・投影のみ）。
   const parts = await loadSnapshotParts(room, { includeNext: true });
@@ -328,9 +334,13 @@ export async function getStaffSnapshot(
   const reveal =
     revealsAnswer(phase) && resolvedQuestion ? buildRevealInfo(resolvedQuestion) : null;
 
+  // 得点が動かないフェーズなので、インスタンス内で作った順位を使い回す。
   const leaderboard =
     phase === 'scoreboard' || phase === 'finished'
-      ? topRanking(await getParticipantScores(roomId), snapshot.settings.leaderboardSize)
+      ? (await getRankedParticipants(roomId, room.stateVersion)).slice(
+          0,
+          Math.max(0, snapshot.settings.leaderboardSize),
+        )
       : null;
 
   // 投影画面は会場の全員が見るため、参加者と同じ制限を掛ける。
@@ -389,7 +399,9 @@ export async function getStaffSnapshot(
 
 export async function getParticipantSnapshot(roomId: string): Promise<ParticipantSnapshot> {
   const { member, room } = await requireParticipant(roomId);
-  await touchMemberPresence(roomId, member.id);
+  // 在席時刻は「オンライン人数」の表示にしか使わない。
+  // 全員が同時に画面を更新する場面で人数ぶん書かないよう、新しいうちは書き直さない。
+  await touchMemberPresence(roomId, member.id, member.lastSeenAt);
 
   const phase: RoomPhase = room.phase;
   const revealed = revealsAnswer(phase);
@@ -422,8 +434,9 @@ export async function getParticipantSnapshot(roomId: string): Promise<Participan
   let leaderboard: RankedParticipant[] | null = null;
 
   if (revealed) {
-    const scores = await getParticipantScores(roomId);
-    const ranked = rankParticipants(scores);
+    // 正解発表では全員が同時に取りに来る。順位はこのフェーズの間は変わらないので、
+    // インスタンス内で一度だけ作って使い回す（人数の二乗の読み取りを避ける）。
+    const ranked = await getRankedParticipants(roomId, room.stateVersion);
     const mine = ranked.find((entry) => entry.participantId === member.id) ?? null;
 
     if (resolvedQuestion) {

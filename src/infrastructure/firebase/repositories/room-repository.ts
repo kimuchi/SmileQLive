@@ -13,6 +13,7 @@ import 'server-only';
  * - 状態遷移は transactions.ts（runTransaction + stateVersion 検証）が担当する。
  */
 
+import type { Timestamp } from 'firebase-admin/firestore';
 import { getDb } from '@/infrastructure/firebase/admin';
 import {
   answersCollection,
@@ -293,12 +294,33 @@ export async function upsertStaffMember(
 }
 
 /**
+ * 在席とみなす間隔。これより新しければ書き直さない。
+ *
+ * オンライン人数の表示にしか使わないので、秒単位の精度は要らない。
+ * 一方この書き込みは Snapshot を取るたびに走るため、
+ * 500 人が同時に画面を更新すると 500 件の書き込みが一気に発生する。
+ * さらに lastSeenAt は複合インデックスの並び替えキーなので、
+ * 同じ向きに増える値を一斉に書くとインデックス側が詰まる。
+ */
+const PRESENCE_MIN_INTERVAL_MS = 30_000;
+
+/**
  * 在席時刻の更新。表示補助のための情報なので、失敗しても進行を妨げない。
  * 呼び出し側が await しないことがあるため、この関数は決して throw しない。
  *
+ * `lastSeenAt` が新しいうちは何もしない。すでに読み込み済みの値を渡すこと
+ * （渡さなければ毎回書く。人数が多い場面では必ず渡す）。
+ *
  * ※ Supabase 版と違いメンバーはルーム配下にあるため roomId が必要。
  */
-export async function touchMemberPresence(roomId: string, memberId: string): Promise<void> {
+export async function touchMemberPresence(
+  roomId: string,
+  memberId: string,
+  lastSeenAt?: Timestamp | null,
+): Promise<void> {
+  if (lastSeenAt && Date.now() - lastSeenAt.toMillis() < PRESENCE_MIN_INTERVAL_MS) {
+    return;
+  }
   try {
     await memberRef(roomId, memberId).update({ lastSeenAt: nowTimestamp(), isActive: true });
   } catch {

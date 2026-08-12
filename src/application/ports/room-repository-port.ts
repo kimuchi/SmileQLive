@@ -14,6 +14,7 @@
  * （同モジュールは個別の関数として export する。サービス層は必要な関数だけを名前付きで import する）
  */
 
+import type { Timestamp } from 'firebase-admin/firestore';
 import type { QuizSnapshot } from '@/domain/quiz/quiz-snapshot';
 import type { RoomListItem } from '@/types/api';
 import type {
@@ -58,8 +59,15 @@ export type RoomRepository = {
     authUserId: string,
     role: Extract<RoomMemberRole, 'host' | 'presenter'>,
   ): Promise<RoomMemberDoc>;
-  /** メンバーはルーム配下にあるため roomId が要る。失敗しても進行を妨げない。 */
-  touchMemberPresence(roomId: string, memberId: string): Promise<void>;
+  /**
+   * メンバーはルーム配下にあるため roomId が要る。失敗しても進行を妨げない。
+   * `lastSeenAt` を渡すと、新しいうちは書き直さない（人数が多い場面では必ず渡す）。
+   */
+  touchMemberPresence(
+    roomId: string,
+    memberId: string,
+    lastSeenAt?: Timestamp | null,
+  ): Promise<void>;
   countParticipants(roomId: string): Promise<number>;
   countActiveParticipants(roomId: string): Promise<number>;
   countAnswers(roomId: string, questionId: string): Promise<number>;

@@ -17,16 +17,16 @@ import 'server-only';
 import { NumberNormalizationError, normalizeNumberAnswer } from '@/domain/answer/number-normalizer';
 import type { AnswerBreakdown } from '@/domain/answer/answer-dto';
 import { findSnapshotQuestion } from '@/domain/quiz/quiz-snapshot';
-import { rankParticipants, topRanking, type RankedParticipant } from '@/domain/room/scoring';
+import type { RankedParticipant } from '@/domain/room/scoring';
 import { acceptsAnswers, revealsAnswer, showsBreakdown } from '@/domain/room/state-machine';
 import { parseQuizSnapshot } from '@/application/services/quiz-snapshot-codec';
 import { toMyAnswerDto } from '@/application/services/answer-mapper';
 import {
   getBreakdown as getAnswerBreakdown,
-  getLeaderboard as getParticipantScores,
   getMyAnswer,
   getMyTotals,
 } from '@/infrastructure/firebase/repositories/answer-repository';
+import { getRankedParticipants } from '@/application/services/ranking-cache';
 import { countParticipants } from '@/infrastructure/firebase/repositories/room-repository';
 import { submitAnswer as submitAnswerTx } from '@/infrastructure/firebase/transactions';
 import { logger } from '@/infrastructure/logging/logger';
@@ -122,7 +122,9 @@ export async function submitAnswer(
     accepted: true,
     answeredAt: stored.answeredAt,
     // 進捗（回答数）は司会・投影向け。参加者画面では表示しない。
-    answeredCount: stored.answeredCount,
+    // 500 人ぶん数え直すと大半が捨てられるため、間引いた回は数えていない。
+    // 数えていない回は「0 人」ではなく「入っていない」として返す。
+    ...(stored.answeredCount !== null ? { answeredCount: stored.answeredCount } : {}),
   };
 }
 
@@ -141,9 +143,9 @@ export async function getMyResult(roomId: string): Promise<MyResultResponse> {
 
   let rank: number | null = null;
   if (revealed) {
-    const scores = await getParticipantScores(roomId);
-    rank =
-      rankParticipants(scores).find((entry) => entry.participantId === member.id)?.rank ?? null;
+    // 得点が動かないフェーズなので、インスタンス内で作った順位を使い回す。
+    const ranked = await getRankedParticipants(roomId, room.stateVersion);
+    rank = ranked.find((entry) => entry.participantId === member.id)?.rank ?? null;
   }
 
   return {
@@ -195,6 +197,6 @@ export async function getLeaderboard(roomId: string, limit?: number): Promise<Ra
     return [];
   }
 
-  const scores = await getParticipantScores(roomId);
-  return topRanking(scores, limit ?? snapshot.settings.leaderboardSize);
+  const ranked = await getRankedParticipants(roomId, room.stateVersion);
+  return ranked.slice(0, Math.max(0, limit ?? snapshot.settings.leaderboardSize));
 }

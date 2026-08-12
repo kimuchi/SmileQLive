@@ -28,7 +28,7 @@ import type { CreateRoomResponse, QuizListItem, QuizListResponse } from '@/types
 
 const MAX_PARTICIPANTS_MIN = 2;
 const MAX_PARTICIPANTS_MAX = 1000;
-const MAX_PARTICIPANTS_DEFAULT = '200';
+const MAX_PARTICIPANTS_DEFAULT = '500';
 
 export type RoomCreatePanelProps = {
   /** クイズ一覧から遷移してきたときの初期選択。 */
