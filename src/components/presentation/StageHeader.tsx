@@ -16,6 +16,7 @@ export function StageHeader({
   phase,
   questionPosition,
   totalQuestions,
+  showTotalQuestions,
   participantCount,
   status,
   stale,
@@ -24,6 +25,8 @@ export function StageHeader({
   phase: RoomPhase;
   questionPosition: number | null;
   totalQuestions: number;
+  /** 「/ 全n問」を出すか。 */
+  showTotalQuestions: boolean;
   participantCount: number;
   status: RoomChannelStatus;
   /** 最新状態の取得に失敗している（表示は直前の状態のまま）。 */
@@ -40,7 +43,9 @@ export function StageHeader({
         <span className="truncate font-bold text-white/90">{quizTitle}</span>
         {questionPosition !== null ? (
           <span className="shrink-0 whitespace-nowrap">
-            {formatQuestionProgress(questionPosition, totalQuestions)}
+            {formatQuestionProgress(questionPosition, totalQuestions, {
+              showTotal: showTotalQuestions,
+            })}
           </span>
         ) : null}
       </div>

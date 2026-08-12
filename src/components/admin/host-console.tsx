@@ -20,6 +20,7 @@ import {
   EXTEND_SECONDS_PRESETS,
   ROOM_ACTION_LABELS,
   ROOM_PHASE_LABELS,
+  nextStep,
   type RoomAction,
 } from '@/domain/room/state-machine';
 import { useCountdown } from '@/hooks/use-countdown';
@@ -121,6 +122,23 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
     const currentPosition = snapshot?.currentQuestionPosition ?? 0;
     return outline.find((question) => question.position === currentPosition + 1) ?? null;
   }, [outline, snapshot?.currentQuestionPosition]);
+
+  /**
+   * ふつうの進行で次に押す操作。
+   *
+   * 司会は本番中に会場を見ながら操作する。毎回ボタンを選ぶのではなく、
+   * この 1 つを押し続けるだけで最後まで進めるようにしている。
+   */
+  const step = useMemo(
+    () =>
+      snapshot
+        ? nextStep({
+            phase: snapshot.phase,
+            nextQuestionPosition: nextQuestion?.position ?? null,
+          })
+        : null,
+    [nextQuestion?.position, snapshot],
+  );
 
   /**
    * 「進行操作」へ並べる操作。
@@ -353,16 +371,54 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
       ) : null}
 
       {/* 進行操作 */}
-      <Card title="進行操作" description="いまの状態で実行できる操作だけを表示します。">
-        <div className="flex flex-wrap gap-2">
-          {inlineActions.length === 0 ? (
-            <p className="text-sm text-slate-600">
-              {snapshot.phase === 'finished'
-                ? 'クイズは終了しています。下の「クイズを再開」から続きを再開できます。'
-                : '実行できる操作はありません。'}
+      <Card
+        title="進行操作"
+        description="ふつうはこの大きなボタンを押していくだけで進みます。"
+      >
+        {step !== null ? (
+          <div className="flex flex-col gap-2">
+            <Button
+              size="lg"
+              variant={step.action === 'finish_room' ? 'danger' : 'primary'}
+              className="min-h-16 w-full text-xl"
+              loading={busy === step.action}
+              disabled={actionsBusy && busy !== step.action}
+              onClick={() => {
+                if (step.action === 'finish_room') {
+                  setConfirmFinish(true);
+                  return;
+                }
+                void runAction(
+                  step.action,
+                  step.action === 'show_question' && nextQuestion !== null
+                    ? { questionId: nextQuestion.id }
+                    : {},
+                );
+              }}
+            >
+              {step.label}
+            </Button>
+            <p className="text-xs text-slate-600">
+              いまは「{ROOM_PHASE_LABELS[snapshot.phase]}」です。
             </p>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-600">
+            {snapshot.phase === 'finished'
+              ? 'クイズは終了しています。下の「クイズを再開」から続きを再開できます。'
+              : '進められる操作がありません。クイズに問題が登録されているか確認してください。'}
+          </p>
+        )}
+
+        <details className="mt-4">
+          <summary className="cursor-pointer text-sm font-bold text-slate-700">
+            そのほかの操作
+          </summary>
+          <div className="mt-3 flex flex-wrap gap-2">
+          {inlineActions.length === 0 ? (
+            <p className="text-sm text-slate-600">個別に選べる操作はありません。</p>
           ) : null}
-          {inlineActions.map((action, index) => {
+          {inlineActions.map((action) => {
             if (action === 'show_question') {
               if (nextQuestion === null) {
                 return null;
@@ -370,8 +426,8 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
               return (
                 <Button
                   key={action}
-                  size="lg"
-                  variant="primary"
+                  size="md"
+                  variant="secondary"
                   loading={busy === action}
                   disabled={actionsBusy && busy !== action}
                   onClick={() => void runAction('show_question', { questionId: nextQuestion.id })}
@@ -384,7 +440,7 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
               return (
                 <Button
                   key={action}
-                  size="lg"
+                  size="md"
                   variant="danger"
                   disabled={actionsBusy}
                   onClick={() => {
@@ -398,8 +454,8 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
             return (
               <Button
                 key={action}
-                size="lg"
-                variant={index === 0 ? 'primary' : 'secondary'}
+                size="md"
+                variant="secondary"
                 loading={busy === action}
                 disabled={actionsBusy && busy !== action}
                 onClick={() => void runAction(action)}
@@ -408,7 +464,8 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
               </Button>
             );
           })}
-        </div>
+          </div>
+        </details>
 
         {snapshot.phase === 'question_open' ? (
           <div className="mt-4 flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">

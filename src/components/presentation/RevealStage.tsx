@@ -22,12 +22,15 @@ export function RevealStage({
   breakdown,
   questionPosition,
   totalQuestions,
+  showTotalQuestions,
 }: {
   question: PublicQuestion;
   reveal: RevealInfo;
   breakdown: AnswerBreakdown | null;
   questionPosition: number | null;
   totalQuestions: number;
+  /** 「/ 全n問」を出すか。 */
+  showTotalQuestions: boolean;
 }) {
   const matched = breakdown && breakdown.questionId === question.id ? breakdown : null;
   const hasSidePanel =
@@ -52,7 +55,9 @@ export function RevealStage({
             className="font-bold text-white/60"
             style={{ fontSize: stageSize(STAGE_FONT.small) }}
           >
-            {formatQuestionProgress(questionPosition, totalQuestions)}
+            {formatQuestionProgress(questionPosition, totalQuestions, {
+              showTotal: showTotalQuestions,
+            })}
           </span>
         ) : null}
         {question.text !== null && question.text.length > 0 ? (

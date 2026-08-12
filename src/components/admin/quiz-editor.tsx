@@ -58,6 +58,8 @@ type SettingsDraft = {
   title: string;
   description: string;
   showLeaderboard: boolean;
+  showTotalQuestions: boolean;
+  showQuestionBeforeOpen: boolean;
 };
 
 type PendingDialog = { kind: 'delete-question'; questionId: string; position: number } | null;
@@ -93,6 +95,8 @@ export function QuizEditor({ quizId }: QuizEditorProps) {
             title: response.quiz.title,
             description: response.quiz.description ?? '',
             showLeaderboard: response.quiz.showLeaderboard,
+            showTotalQuestions: response.quiz.showTotalQuestions,
+            showQuestionBeforeOpen: response.quiz.showQuestionBeforeOpen,
           },
       );
       setLoadError(null);
@@ -123,6 +127,8 @@ export function QuizEditor({ quizId }: QuizEditorProps) {
       title,
       description: settings.description.trim().length > 0 ? settings.description : null,
       showLeaderboard: settings.showLeaderboard,
+      showTotalQuestions: settings.showTotalQuestions,
+      showQuestionBeforeOpen: settings.showQuestionBeforeOpen,
     });
     setQuiz((previous) =>
       previous
@@ -459,6 +465,24 @@ export function QuizEditor({ quizId }: QuizEditorProps) {
             hint="オフにすると、参加者・投影画面へ順位表を出しません。"
             onChange={(event) => {
               patchSettings({ showLeaderboard: event.currentTarget.checked });
+            }}
+          />
+
+          <Checkbox
+            label="全問数を表示する"
+            checked={settings.showTotalQuestions}
+            hint="オンで「第3問 / 全6問」、オフで「第3問」とだけ表示します。"
+            onChange={(event) => {
+              patchSettings({ showTotalQuestions: event.currentTarget.checked });
+            }}
+          />
+
+          <Checkbox
+            label="回答受付を始める前に問題を見せる"
+            checked={settings.showQuestionBeforeOpen}
+            hint="オフ（既定）だと「まもなく出題」だけを出し、受付開始と同時に問題を表示します。"
+            onChange={(event) => {
+              patchSettings({ showQuestionBeforeOpen: event.currentTarget.checked });
             }}
           />
         </div>

@@ -118,6 +118,8 @@ export function toDomainQuestion(question: AdminQuestion): Question {
 export function buildQuizSnapshot(detail: AdminQuizDetail): QuizSnapshot {
   const settings: QuizSnapshotSettings = {
     showLeaderboard: detail.showLeaderboard,
+    showTotalQuestions: detail.showTotalQuestions,
+    showQuestionBeforeOpen: detail.showQuestionBeforeOpen,
     soundTheme: detail.soundTheme,
     leaderboardSize: DEFAULT_LEADERBOARD_SIZE,
   };

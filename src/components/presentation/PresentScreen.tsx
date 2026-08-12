@@ -7,6 +7,7 @@ import { QuestionStage } from '@/components/presentation/QuestionStage';
 import { RankingStage } from '@/components/presentation/RankingStage';
 import { RevealStage } from '@/components/presentation/RevealStage';
 import { StageFrame } from '@/components/presentation/StageFrame';
+import { UpcomingStage } from '@/components/presentation/UpcomingStage';
 import { StageHeader } from '@/components/presentation/StageHeader';
 import { StageNotice } from '@/components/presentation/StageNotice';
 import { WaitingStage } from '@/components/presentation/WaitingStage';
@@ -181,6 +182,16 @@ export function PresentScreen({ roomId }: { roomId: string }) {
         finished={phase === 'finished'}
       />
     );
+  } else if (phase === 'question_ready' && !question) {
+    // 「受付開始前は見せない」設定。問題そのものがサーバーから送られてこないので、
+    // ここで隠しているのではなく、そもそも持っていない。
+    body = (
+      <UpcomingStage
+        questionPosition={snapshot.currentQuestionPosition}
+        totalQuestions={snapshot.totalQuestions}
+        showTotalQuestions={snapshot.showTotalQuestions}
+      />
+    );
   } else if (!question) {
     body = <StageNotice title="次の問題を準備しています" description="そのままお待ちください" />;
   } else if (phase === 'answer_revealed') {
@@ -191,6 +202,7 @@ export function PresentScreen({ roomId }: { roomId: string }) {
         breakdown={snapshot.breakdown}
         questionPosition={snapshot.currentQuestionPosition}
         totalQuestions={snapshot.totalQuestions}
+        showTotalQuestions={snapshot.showTotalQuestions}
       />
     ) : (
       <StageNotice title="正解を表示しています" />
@@ -202,6 +214,7 @@ export function PresentScreen({ roomId }: { roomId: string }) {
         phase={phase}
         questionPosition={snapshot.currentQuestionPosition}
         totalQuestions={snapshot.totalQuestions}
+        showTotalQuestions={snapshot.showTotalQuestions}
         remainingSeconds={countdown.remainingSeconds}
         remainingMs={countdown.remainingMs}
         answeredCount={snapshot.answeredCount}
@@ -219,6 +232,7 @@ export function PresentScreen({ roomId }: { roomId: string }) {
             phase={phase}
             questionPosition={snapshot.currentQuestionPosition}
             totalQuestions={snapshot.totalQuestions}
+            showTotalQuestions={snapshot.showTotalQuestions}
             participantCount={snapshot.participantCount}
             status={status}
             stale={error !== null}

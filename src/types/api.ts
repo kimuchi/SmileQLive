@@ -86,6 +86,10 @@ export type AdminQuizDetail = {
   description: string | null;
   status: 'draft' | 'published' | 'archived';
   showLeaderboard: boolean;
+  /** 「/ 全n問」を出すか。 */
+  showTotalQuestions: boolean;
+  /** 回答受付を開始する前に問題を見せるか。 */
+  showQuestionBeforeOpen: boolean;
   soundTheme: string;
   updatedAt: string;
   questions: AdminQuestion[];

@@ -10,6 +10,7 @@ import {
   isRoomAction,
   isRoomPhase,
   nextPhase,
+  nextStep,
   requiresQuestionId,
   revealsAnswer,
   showsBreakdown,
@@ -183,7 +184,15 @@ describe('フェーズ別の公開可否', () => {
     expect(showsBreakdown('question_locked')).toBe(false);
   });
 
-  it('showsQuestion は問題提示中のフェーズだけ', () => {
+  it('showsQuestion は既定では question_ready を含めない', () => {
+    // 会場では「第3問！」で一度ためてから出す。既定では受付開始と同時に見せる。
+    const allowed: RoomPhase[] = ['question_open', 'question_locked', 'answer_revealed'];
+    for (const phase of ROOM_PHASES) {
+      expect(showsQuestion(phase)).toBe(allowed.includes(phase));
+    }
+  });
+
+  it('「受付前に見せる」設定なら question_ready でも出す', () => {
     const allowed: RoomPhase[] = [
       'question_ready',
       'question_open',
@@ -191,7 +200,16 @@ describe('フェーズ別の公開可否', () => {
       'answer_revealed',
     ];
     for (const phase of ROOM_PHASES) {
-      expect(showsQuestion(phase)).toBe(allowed.includes(phase));
+      expect(showsQuestion(phase, { beforeOpen: true })).toBe(allowed.includes(phase));
+    }
+  });
+
+  it('設定は question_ready 以外に影響しない', () => {
+    for (const phase of ROOM_PHASES) {
+      if (phase === 'question_ready') {
+        continue;
+      }
+      expect(showsQuestion(phase, { beforeOpen: true })).toBe(showsQuestion(phase));
     }
   });
 });
@@ -211,5 +229,75 @@ describe('型ガードと表示ラベル', () => {
     for (const action of ROOM_ACTIONS) {
       expect(ROOM_ACTION_LABELS[action].length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('nextStep（司会の「次へ」）', () => {
+  it('ふつうの進行を 1 ボタンで最後までたどれる', () => {
+    // 6 問中 1 問目から始めて、順に押していくだけで終了まで行けること。
+    const total = 2;
+    let phase: RoomPhase = 'lobby';
+    let done = 0;
+    const trail: string[] = [];
+
+    for (let guard = 0; guard < 20; guard += 1) {
+      const step = nextStep({ phase, nextQuestionPosition: done < total ? done + 1 : null });
+      if (step === null) {
+        break;
+      }
+      trail.push(step.action);
+      if (step.action === 'show_question') {
+        done += 1;
+      }
+      phase = nextPhase(phase, step.action);
+    }
+
+    expect(phase).toBe('finished');
+    expect(trail).toEqual([
+      'show_question',
+      'open_question',
+      'lock_question',
+      'reveal_answer',
+      'show_question',
+      'open_question',
+      'lock_question',
+      'reveal_answer',
+      'show_scoreboard',
+      'finish_room',
+    ]);
+  });
+
+  it('返すのは、その時点で実行できる操作だけ', () => {
+    for (const phase of ROOM_PHASES) {
+      for (const position of [null, 3]) {
+        const step = nextStep({ phase, nextQuestionPosition: position });
+        if (step === null) {
+          continue;
+        }
+        expect(canTransition(phase, step.action)).toBe(true);
+      }
+    }
+  });
+
+  it('問題番号をボタンの文言へ入れる', () => {
+    expect(nextStep({ phase: 'lobby', nextQuestionPosition: 1 })?.label).toBe('第1問へ');
+    expect(nextStep({ phase: 'answer_revealed', nextQuestionPosition: 4 })?.label).toBe('第4問へ');
+  });
+
+  it('最後の問題を発表したらランキングへ、そのあと終了へ', () => {
+    expect(nextStep({ phase: 'answer_revealed', nextQuestionPosition: null })?.action).toBe(
+      'show_scoreboard',
+    );
+    expect(nextStep({ phase: 'scoreboard', nextQuestionPosition: null })?.action).toBe(
+      'finish_room',
+    );
+  });
+
+  it('終了後は「次へ」を出さない（再開は専用の導線）', () => {
+    expect(nextStep({ phase: 'finished', nextQuestionPosition: 1 })).toBeNull();
+  });
+
+  it('問題が 1 問も無ければ待機中では進めない', () => {
+    expect(nextStep({ phase: 'lobby', nextQuestionPosition: null })).toBeNull();
   });
 });

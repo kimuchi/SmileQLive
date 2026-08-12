@@ -23,6 +23,7 @@ export function QuestionStage({
   phase,
   questionPosition,
   totalQuestions,
+  showTotalQuestions,
   remainingSeconds,
   remainingMs,
   answeredCount,
@@ -32,6 +33,8 @@ export function QuestionStage({
   phase: RoomPhase;
   questionPosition: number | null;
   totalQuestions: number;
+  /** 「/ 全n問」を出すか。 */
+  showTotalQuestions: boolean;
   remainingSeconds: number;
   remainingMs: number;
   answeredCount: number;
@@ -53,7 +56,9 @@ export function QuestionStage({
             }}
           >
             {questionPosition !== null
-              ? formatQuestionProgress(questionPosition, totalQuestions)
+              ? formatQuestionProgress(questionPosition, totalQuestions, {
+                  showTotal: showTotalQuestions,
+                })
               : '問題'}
           </span>
 
@@ -87,11 +92,16 @@ export function QuestionStage({
 
       {/*
         高さが足りないときに何を削るかを決めておく。
-        問題文と選択肢は会場から読めないと成立しないので縮めない（shrink-0）。
-        余りを吸収するのは画像で、入りきらなければ画像が小さくなる。
-        これが無いと中身が枠を越えて、上の残り秒数や下の回答済み表示へ重なる。
+
+        文字（問題文・選択肢の文言）は会場から読めないと成立しないので縮めない。
+        縮むのは**画像**だけ。問題の画像と選択肢の画像が、余った高さを分け合う。
+        overflow-hidden は最後の砦で、それでも入りきらないときに枠の外へ
+        はみ出して見出しや回答済み表示へ重なるのを止める。
       */}
-      <div className="flex min-h-0 flex-1 flex-col justify-center" style={{ gap: stageSize(24) }}>
+      <div
+        className="flex min-h-0 flex-1 flex-col justify-center overflow-hidden"
+        style={{ gap: stageSize(24) }}
+      >
         {question.text !== null && question.text.length > 0 ? (
           <h1
             className="shrink-0 font-bold break-words text-white"
@@ -107,14 +117,17 @@ export function QuestionStage({
           </div>
         ) : null}
 
-        <div className="shrink-0">
-          {question.type === 'choice' ? (
-            // 受付中は results を渡さない = 選択肢別の人数を出さない。
-            <ChoiceGrid choices={question.choices} />
-          ) : (
+        {question.type === 'choice' ? (
+          // 受付中は results を渡さない = 選択肢別の人数を出さない。
+          // fillHeight: 選択肢に画像があるとき、余った高さに合わせて縮める。
+          <div className="flex min-h-0 flex-[2] flex-col justify-center">
+            <ChoiceGrid choices={question.choices} fillHeight />
+          </div>
+        ) : (
+          <div className="shrink-0">
             <NumberQuestionPanel question={question} />
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       <div className="shrink-0">

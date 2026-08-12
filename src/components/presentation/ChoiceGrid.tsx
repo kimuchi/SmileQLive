@@ -27,9 +27,22 @@ export type ChoiceGridProps = {
   results?: ChoiceBreakdown['choices'] | null;
   /** 正解発表後のみ。発表前は null。 */
   correctChoiceId?: string | null;
+  /**
+   * 与えられた高さいっぱいに広げ、**入りきらないときは画像を縮める**。
+   *
+   * 選択肢が画像を持つと、4 択・5 択では縦が足りなくなる。
+   * これが無いと枠からはみ出し、上の問題文や下の回答済み表示へ重なる。
+   * 親を `flex min-h-0 flex-1` にしたうえで渡すこと。
+   */
+  fillHeight?: boolean;
 };
 
-export function ChoiceGrid({ choices, results = null, correctChoiceId = null }: ChoiceGridProps) {
+export function ChoiceGrid({
+  choices,
+  results = null,
+  correctChoiceId = null,
+  fillHeight = false,
+}: ChoiceGridProps) {
   const count = choices.length;
   const resultById = new Map(results?.map((entry) => [entry.choiceId, entry]) ?? []);
   const revealing = correctChoiceId !== null;
@@ -39,8 +52,16 @@ export function ChoiceGrid({ choices, results = null, correctChoiceId = null }: 
       // stage-stagger: 選択肢を少しずつ遅らせて出す（出現順で視線を誘導する）。
       // key に count と revealing を含め、問題が変わったときと発表時に再生し直す。
       key={`${count}-${revealing}`}
-      className={cn('stage-stagger grid w-full list-none', choiceGridClassName(count))}
-      style={{ gap: stageSize(24) }}
+      className={cn(
+        'stage-stagger grid w-full list-none',
+        choiceGridClassName(count),
+        fillHeight ? 'h-full min-h-0' : null,
+      )}
+      style={{
+        gap: stageSize(24),
+        // 各行が等分に縮めるようにする（minmax の 0 が「内容より小さくてよい」の指定）。
+        ...(fillHeight ? { gridAutoRows: 'minmax(0, 1fr)' } : {}),
+      }}
     >
       {choices.map((choice, index) => {
         const result = resultById.get(choice.id) ?? null;
@@ -51,6 +72,7 @@ export function ChoiceGrid({ choices, results = null, correctChoiceId = null }: 
             key={choice.id}
             className={cn(
               'flex flex-col border-4 transition-colors',
+              fillHeight ? 'min-h-0 overflow-hidden' : null,
               choiceCellClassName(count, index),
               isCorrect
                 ? // 正解は一度だけ弾ませ、発表の瞬間を見逃さないようにする。
@@ -66,7 +88,7 @@ export function ChoiceGrid({ choices, results = null, correctChoiceId = null }: 
               gap: stageSize(14),
             }}
           >
-            <div className="flex items-center" style={{ gap: stageSize(18) }}>
+            <div className="flex shrink-0 items-center" style={{ gap: stageSize(18) }}>
               <span
                 aria-hidden="true"
                 className={cn(
@@ -112,7 +134,7 @@ export function ChoiceGrid({ choices, results = null, correctChoiceId = null }: 
 
             {choice.text !== null && choice.text.length > 0 ? (
               <p
-                className="font-bold break-words"
+                className="shrink-0 font-bold break-words"
                 style={{ fontSize: stageSize(STAGE_FONT.choice), lineHeight: 1.3 }}
               >
                 {choice.text}
@@ -120,11 +142,18 @@ export function ChoiceGrid({ choices, results = null, correctChoiceId = null }: 
             ) : null}
 
             {choice.image ? (
-              <StageImage image={choice.image} maxHeightRatio={0.18} className="mx-0" />
+              fillHeight ? (
+                // 余った高さを画像が引き受ける。文字は縮めない。
+                <div className="flex min-h-0 flex-1 items-center justify-center">
+                  <StageImage image={choice.image} maxHeightRatio={0.18} fill />
+                </div>
+              ) : (
+                <StageImage image={choice.image} maxHeightRatio={0.18} className="mx-0" />
+              )
             ) : null}
 
             {result ? (
-              <div className="mt-auto flex flex-col" style={{ gap: stageSize(8) }}>
+              <div className="mt-auto flex shrink-0 flex-col" style={{ gap: stageSize(8) }}>
                 <div className="flex items-baseline" style={{ gap: stageSize(12) }}>
                   <span
                     className="font-bold tabular-nums"

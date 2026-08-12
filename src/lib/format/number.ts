@@ -92,8 +92,16 @@ export function formatPoints(points: number | null | undefined, fallback = '—'
 export function formatQuestionProgress(
   position: number | null | undefined,
   total: number | null | undefined,
+  /** 全問数を出すか。クイズ設定で切り替えられる（既定は出す）。 */
+  options: { showTotal?: boolean } = {},
 ): string {
-  if (!isFiniteNumber(position) || !isFiniteNumber(total)) {
+  if (!isFiniteNumber(position)) {
+    return '—';
+  }
+  if (options.showTotal === false) {
+    return `第${formatInteger(position)}問`;
+  }
+  if (!isFiniteNumber(total)) {
     return '—';
   }
   return `第${formatInteger(position)}問 / 全${formatInteger(total)}問`;

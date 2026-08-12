@@ -10,6 +10,10 @@ import type { Question } from '@/domain/quiz/question';
 
 export type QuizSnapshotSettings = {
   showLeaderboard: boolean;
+  /** 「/ 全n問」を出すか。 */
+  showTotalQuestions: boolean;
+  /** 回答受付を開始する前に問題を見せるか。 */
+  showQuestionBeforeOpen: boolean;
   soundTheme: string;
   leaderboardSize: number;
 };

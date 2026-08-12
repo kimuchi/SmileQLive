@@ -84,6 +84,18 @@ export type QuizDoc = {
   description: string | null;
   status: QuizStatus;
   showLeaderboard: boolean;
+  /**
+   * 投影・参加者画面へ「/ 全n問」を出すか。
+   * 未設定（古いドキュメント）は出す扱い。
+   */
+  showTotalQuestions?: boolean;
+  /**
+   * 回答受付を開始する前に問題を見せるか。
+   *
+   * 既定は false（受付開始と同時に出す）。会場では「第3問！」で一度ためてから
+   * 出すほうが盛り上がるため。true にすると、先に問題を読ませてから受け付けられる。
+   */
+  showQuestionBeforeOpen?: boolean;
   soundTheme: string;
   questionCount: number;
   choiceQuestionCount: number;

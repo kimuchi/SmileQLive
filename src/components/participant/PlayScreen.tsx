@@ -408,6 +408,7 @@ export function PlayScreen({ roomId }: { roomId: string }) {
         phase={phase}
         questionPosition={snapshot.currentQuestionPosition}
         totalQuestions={snapshot.totalQuestions}
+        showTotalQuestions={snapshot.showTotalQuestions}
         status={status}
       />
 

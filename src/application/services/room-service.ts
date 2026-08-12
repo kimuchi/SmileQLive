@@ -333,15 +333,25 @@ export async function getStaffSnapshot(
       ? topRanking(await getParticipantScores(roomId), snapshot.settings.leaderboardSize)
       : null;
 
+  // 投影画面は会場の全員が見るため、参加者と同じ制限を掛ける。
+  // 「受付開始前は見せない」設定なら question_ready で問題を送らない。
+  // 司会画面は読み上げのために必要なので、そこだけは常に渡す。
+  const stageQuestion =
+    audience === 'host' ||
+    showsQuestion(phase, { beforeOpen: snapshot.settings.showQuestionBeforeOpen })
+      ? publicQuestion
+      : null;
+
   const base: StaffSnapshot = {
     roomId,
     quizTitle: snapshot.title,
     phase,
     stateVersion: room.stateVersion,
     serverTime: serverNow(),
-    currentQuestion: publicQuestion,
+    currentQuestion: stageQuestion,
     currentQuestionPosition: room.currentQuestionPosition,
     totalQuestions: snapshot.questions.length,
+    showTotalQuestions: snapshot.settings.showTotalQuestions,
     answerDeadlineAt: toIso(room.answerDeadlineAt),
     showLeaderboard: snapshot.settings.showLeaderboard,
     audience,
@@ -394,7 +404,13 @@ export async function getParticipantSnapshot(roomId: string): Promise<Participan
   const participantCount = room.participantCount;
 
   // 問題を出してよいフェーズでなければ問題そのものを返さない。
-  const currentQuestion = showsQuestion(phase) ? publicQuestion : null;
+  // 「受付開始前は見せない」設定のときは、question_ready でも返さない
+  // （画面側で隠すのではなく、そもそも送らない）。
+  const currentQuestion = showsQuestion(phase, {
+    beforeOpen: snapshot.settings.showQuestionBeforeOpen,
+  })
+    ? publicQuestion
+    : null;
 
   const storedAnswer = resolvedQuestion
     ? await getMyAnswer(roomId, resolvedQuestion.id, member.id)
@@ -434,6 +450,7 @@ export async function getParticipantSnapshot(roomId: string): Promise<Participan
     currentQuestion,
     currentQuestionPosition: room.currentQuestionPosition,
     totalQuestions: snapshot.questions.length,
+    showTotalQuestions: snapshot.settings.showTotalQuestions,
     answerDeadlineAt: toIso(room.answerDeadlineAt),
     showLeaderboard: snapshot.settings.showLeaderboard,
     audience: 'participant',

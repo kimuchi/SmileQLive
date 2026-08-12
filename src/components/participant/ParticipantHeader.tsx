@@ -16,6 +16,7 @@ export function ParticipantHeader({
   phase,
   questionPosition,
   totalQuestions,
+  showTotalQuestions,
   status,
 }: {
   quizTitle: string;
@@ -23,9 +24,12 @@ export function ParticipantHeader({
   phase: RoomPhase;
   questionPosition: number | null;
   totalQuestions: number;
+  /** 「/ 全n問」を出すか。 */
+  showTotalQuestions: boolean;
   status: RoomChannelStatus;
 }) {
-  const showProgress = questionPosition !== null && totalQuestions > 0;
+  const showProgress =
+    questionPosition !== null && (showTotalQuestions ? totalQuestions > 0 : true);
 
   return (
     <header className="flex flex-col gap-2">
@@ -34,7 +38,9 @@ export function ParticipantHeader({
           <p className="truncate text-sm font-bold text-slate-600">{quizTitle}</p>
           {showProgress ? (
             <p className="mt-0.5 text-lg font-bold text-slate-900">
-              {formatQuestionProgress(questionPosition, totalQuestions)}
+              {formatQuestionProgress(questionPosition, totalQuestions, {
+                showTotal: showTotalQuestions,
+              })}
             </p>
           ) : null}
         </div>

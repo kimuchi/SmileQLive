@@ -137,14 +137,81 @@ export function showsBreakdown(phase: RoomPhase): boolean {
   return phase === 'answer_revealed' || phase === 'scoreboard' || phase === 'finished';
 }
 
-/** 参加者へ問題本文を出してよいフェーズか。 */
-export function showsQuestion(phase: RoomPhase): boolean {
-  return (
-    phase === 'question_ready' ||
-    phase === 'question_open' ||
-    phase === 'question_locked' ||
-    phase === 'answer_revealed'
-  );
+/**
+ * 参加者へ問題本文を出してよいフェーズか。
+ *
+ * `beforeOpen` は「回答受付を開始する前に問題を見せるか」の設定。
+ * false（既定）なら question_ready では問題を出さない。
+ * 会場では「第3問！」で一度ためてから出すほうが盛り上がるため。
+ */
+export function showsQuestion(
+  phase: RoomPhase,
+  options: { beforeOpen?: boolean } = {},
+): boolean {
+  if (phase === 'question_ready') {
+    return options.beforeOpen === true;
+  }
+  return phase === 'question_open' || phase === 'question_locked' || phase === 'answer_revealed';
+}
+
+/**
+ * 「次へ」で進む先。
+ *
+ * 司会は本番中、会場を見ながら片手で操作する。
+ * 毎回ボタンを選ばせるのではなく、**ふつうの進行なら 1 つのボタンを押すだけ**で
+ * 最後まで進めるようにする。細かい操作（ランキングを挟む・途中で終了する）は別に残す。
+ */
+export type NextStep = {
+  action: RoomAction;
+  /** ボタンに出す文言。問題番号を含めたいので呼び出し側では組み立てない。 */
+  label: string;
+  /** show_question のとき、対象の問題番号（表示用）。 */
+  questionPosition: number | null;
+};
+
+export function nextStep(input: {
+  phase: RoomPhase;
+  /** 次に出せる問題の番号。無ければ null。 */
+  nextQuestionPosition: number | null;
+}): NextStep | null {
+  const { phase, nextQuestionPosition } = input;
+
+  const showNextQuestion = (): NextStep | null =>
+    nextQuestionPosition === null
+      ? null
+      : {
+          action: 'show_question',
+          label: `第${nextQuestionPosition}問へ`,
+          questionPosition: nextQuestionPosition,
+        };
+
+  switch (phase) {
+    case 'lobby':
+      return showNextQuestion();
+    case 'question_ready':
+      return { action: 'open_question', label: '回答受付を開始', questionPosition: null };
+    case 'question_open':
+      return { action: 'lock_question', label: '回答を締め切る', questionPosition: null };
+    case 'question_locked':
+      return { action: 'reveal_answer', label: '正解を発表', questionPosition: null };
+    case 'answer_revealed':
+      // 次の問題があれば進み、無ければ最終ランキングへ。
+      return (
+        showNextQuestion() ?? {
+          action: 'show_scoreboard',
+          label: 'ランキングを表示',
+          questionPosition: null,
+        }
+      );
+    case 'scoreboard':
+      // ランキングを見せたあと。次があれば続け、無ければ終了。
+      return showNextQuestion() ?? { action: 'finish_room', label: 'クイズを終了', questionPosition: null };
+    case 'finished':
+      // 終了後は「次」ではなく再開。誤操作にならないよう専用の導線に任せる。
+      return null;
+    default:
+      return null;
+  }
 }
 
 export const ROOM_PHASE_LABELS: Record<RoomPhase, string> = {

@@ -20,6 +20,8 @@ export type SnapshotBase = {
   totalQuestions: number;
   answerDeadlineAt: string | null;
   showLeaderboard: boolean;
+  /** 「/ 全n問」を出すか。false なら問題番号だけを出す。 */
+  showTotalQuestions: boolean;
 };
 
 /** 参加者向け Snapshot。正解情報は phase が answer_revealed 以降のときだけ含まれる。 */

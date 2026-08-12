@@ -287,6 +287,9 @@ async function buildQuizDetail(
     description: quiz.description,
     status: quiz.status,
     showLeaderboard: quiz.showLeaderboard,
+    // 古いクイズには無い項目。既定へ寄せる（未設定＝全問数は出す／先出しはしない）。
+    showTotalQuestions: quiz.showTotalQuestions !== false,
+    showQuestionBeforeOpen: quiz.showQuestionBeforeOpen === true,
     soundTheme: quiz.soundTheme,
     updatedAt: toIsoOr(quiz.updatedAt),
     questions: questions
@@ -340,6 +343,9 @@ export async function createQuiz(
     description: input.description ?? null,
     status: 'draft',
     showLeaderboard: true,
+    showTotalQuestions: true,
+    // 既定は「受付開始と同時に問題を出す」。
+    showQuestionBeforeOpen: false,
     soundTheme: 'default',
     // 既定は共有なし。array-contains のクエリ対象になるため空配列で作る。
     sharedWith: [],
@@ -364,6 +370,12 @@ export async function updateQuiz(quizId: string, input: UpdateQuizInput): Promis
   }
   if (input.showLeaderboard !== undefined) {
     patch.showLeaderboard = input.showLeaderboard;
+  }
+  if (input.showTotalQuestions !== undefined) {
+    patch.showTotalQuestions = input.showTotalQuestions;
+  }
+  if (input.showQuestionBeforeOpen !== undefined) {
+    patch.showQuestionBeforeOpen = input.showQuestionBeforeOpen;
   }
   if (input.soundTheme !== undefined) {
     patch.soundTheme = input.soundTheme;
@@ -418,6 +430,8 @@ export async function duplicateQuiz(quizId: string, ownerId: string): Promise<Ad
     description: source.description,
     status: 'draft',
     showLeaderboard: source.showLeaderboard,
+    showTotalQuestions: source.showTotalQuestions !== false,
+    showQuestionBeforeOpen: source.showQuestionBeforeOpen === true,
     soundTheme: source.soundTheme,
     // 共有設定は引き継がない。複製の所有者が改めて決める。
     sharedWith: [],

@@ -498,6 +498,9 @@ function parseQuestion(value: unknown): Question | null {
 export function parseQuizSnapshot(value: unknown): QuizSnapshot {
   const fallbackSettings: QuizSnapshotSettings = {
     showLeaderboard: true,
+    showTotalQuestions: true,
+    // 既定は「受付開始と同時に出す」。
+    showQuestionBeforeOpen: false,
     soundTheme: 'default',
     leaderboardSize: 10,
   };
@@ -513,6 +516,8 @@ export function parseQuizSnapshot(value: unknown): QuizSnapshot {
     title: readString(value, 'title') ?? '無題のクイズ',
     settings: {
       showLeaderboard: readBoolean(settingsValue, 'showLeaderboard', true),
+      showTotalQuestions: readBoolean(settingsValue, 'showTotalQuestions', true),
+      showQuestionBeforeOpen: readBoolean(settingsValue, 'showQuestionBeforeOpen', false),
       soundTheme: readString(settingsValue, 'soundTheme') ?? 'default',
       leaderboardSize: readInt(settingsValue, 'leaderboardSize', 10),
     },

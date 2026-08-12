@@ -54,6 +54,8 @@ export const updateQuizSchema = z.object({
   title: z.string().trim().min(1).max(100).optional(),
   description: z.string().max(2000).nullable().optional(),
   showLeaderboard: z.boolean().optional(),
+  showTotalQuestions: z.boolean().optional(),
+  showQuestionBeforeOpen: z.boolean().optional(),
   soundTheme: z.string().max(50).optional(),
 });
 
