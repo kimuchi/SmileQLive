@@ -13,7 +13,18 @@ import {
  *   （読み込み中の約束を残したままにすると、その音は二度と読み込まれなくなる）
  * - 何が鳴らせて何が鳴らせないかを呼び出し側へ返すこと。黙って無音にしない。
  * - 動作確認の音は、読み込みが遅くても打ち切らずに鳴らすこと。
+ *
+ * なお、このテストは**何も出力してはいけない**。
+ * `npm run deploy` は途中で検証を回すため、ここでの警告は
+ * 運用者の画面に「本物の警告」として混ざってしまう。
+ * 警告は onWarning で受け取り、内容を検査する。
  */
+
+/** 警告を console へ流さず、内容を確かめられるように受け取る。 */
+function collectWarnings() {
+  const messages: string[] = [];
+  return { messages, onWarning: (message: string) => messages.push(message) };
+}
 
 const MANIFEST = {
   'question-start': 'question-start.wav',
@@ -88,12 +99,16 @@ function notFound(): Response {
 
 describe('投影画面の効果音', () => {
   let audio: { started: () => number };
+  let consoleWarn: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     audio = installFakeAudioContext();
+    consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
   afterEach(() => {
+    // 警告は onWarning へ渡っているはず。console へ漏らさない。
+    expect(consoleWarn).not.toHaveBeenCalled();
     vi.restoreAllMocks();
     window.sessionStorage.clear();
   });
@@ -103,13 +118,19 @@ describe('投影画面の効果音', () => {
       Promise.resolve(String(input).endsWith('manifest.json') ? manifestResponse() : audioResponse()),
     );
 
-    const manager = createProjectorAudioManager({ dedupeNamespace: 'room-1' });
+    const warnings = collectWarnings();
+    const manager = createProjectorAudioManager({
+      dedupeNamespace: 'room-1',
+      onWarning: warnings.onWarning,
+    });
     await manager.unlock();
     const readiness = await manager.preload();
 
     expect(readiness.manifestOk).toBe(true);
     expect(readiness.ready).toHaveLength(SOUND_NAMES.length);
     expect(readiness.failed).toHaveLength(0);
+    // すべて揃っているときは何も言わない。
+    expect(warnings.messages).toEqual([]);
     manager.dispose();
   });
 
@@ -121,12 +142,20 @@ describe('投影画面の効果音', () => {
       return Promise.resolve(audioResponse());
     });
 
-    const manager = createProjectorAudioManager({ dedupeNamespace: 'room-2' });
+    const warnings = collectWarnings();
+    const manager = createProjectorAudioManager({
+      dedupeNamespace: 'room-2',
+      onWarning: warnings.onWarning,
+    });
     await manager.unlock();
     const readiness = await manager.preload();
 
     expect(readiness.ready).toHaveLength(SOUND_NAMES.length - 1);
     expect(readiness.failed).toEqual([{ name: 'finish', reason: 'not-found' }]);
+    // 会場の操作者へ届く文言。どのファイルが無いのかまで伝わること。
+    expect(warnings.messages).toHaveLength(1);
+    expect(warnings.messages[0]).toContain('finish');
+    expect(warnings.messages[0]).toContain('見つかりません');
     manager.dispose();
   });
 
@@ -142,7 +171,11 @@ describe('投影画面の効果音', () => {
       return Promise.resolve(audioResponse());
     });
 
-    const manager = createProjectorAudioManager({ dedupeNamespace: 'room-3' });
+    const warnings = collectWarnings();
+    const manager = createProjectorAudioManager({
+      dedupeNamespace: 'room-3',
+      onWarning: warnings.onWarning,
+    });
     await manager.unlock();
 
     const first = await manager.preload();
@@ -165,7 +198,11 @@ describe('投影画面の効果音', () => {
       Promise.resolve(String(input).endsWith('manifest.json') ? manifestResponse() : audioResponse()),
     );
 
-    const manager = createProjectorAudioManager({ dedupeNamespace: 'room-4' });
+    const warnings = collectWarnings();
+    const manager = createProjectorAudioManager({
+      dedupeNamespace: 'room-4',
+      onWarning: warnings.onWarning,
+    });
 
     // まだクリックしていない = AudioContext が無い。ここでの先読みは失敗扱いにしない。
     const before = await manager.preload();
@@ -186,7 +223,11 @@ describe('投影画面の効果音', () => {
       return new Promise((resolve) => setTimeout(() => resolve(audioResponse()), 1_800));
     });
 
-    const manager = createProjectorAudioManager({ dedupeNamespace: 'room-5' });
+    const warnings = collectWarnings();
+    const manager = createProjectorAudioManager({
+      dedupeNamespace: 'room-5',
+      onWarning: warnings.onWarning,
+    });
     await manager.unlock();
 
     const before = audio.started();
@@ -201,7 +242,11 @@ describe('投影画面の効果音', () => {
       Promise.resolve(String(input).endsWith('manifest.json') ? manifestResponse() : notFound()),
     );
 
-    const manager = createProjectorAudioManager({ dedupeNamespace: 'room-6' });
+    const warnings = collectWarnings();
+    const manager = createProjectorAudioManager({
+      dedupeNamespace: 'room-6',
+      onWarning: warnings.onWarning,
+    });
     await manager.unlock();
 
     const result = await manager.playTest('question-start');
@@ -215,7 +260,11 @@ describe('投影画面の効果音', () => {
       Promise.resolve(String(input).endsWith('manifest.json') ? manifestResponse() : audioResponse()),
     );
 
-    const manager = createProjectorAudioManager({ dedupeNamespace: 'room-7' });
+    const warnings = collectWarnings();
+    const manager = createProjectorAudioManager({
+      dedupeNamespace: 'room-7',
+      onWarning: warnings.onWarning,
+    });
     await manager.unlock();
     await manager.preload();
 
