@@ -55,7 +55,7 @@ export function PresentScreen({ roomId }: { roomId: string }) {
   });
 
   const audio = useProjectorAudio(roomId);
-  const { enable, play, playTest, durationOf, setMuted, setVolume } = audio;
+  const { enable, play, playTest, startLoop, stopLoop, durationOf, setMuted, setVolume } = audio;
   const fullscreen = useFullscreen();
   const { joinUrl, setJoinUrl } = useJoinUrl(roomId);
 
@@ -69,10 +69,10 @@ export function PresentScreen({ roomId }: { roomId: string }) {
 
   useStageSoundCues({
     play,
+    startLoop,
+    stopLoop,
     phase: snapshot?.phase ?? null,
     stateVersion: snapshot?.stateVersion ?? null,
-    remainingSeconds: countdown.remainingSeconds,
-    hasDeadline: Boolean(snapshot?.answerDeadlineAt),
   });
 
   const handleLocked = useCallback(() => {

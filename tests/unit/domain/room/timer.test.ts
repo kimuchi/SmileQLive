@@ -1,12 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  TICK_SECONDS,
+  URGENT_SECONDS,
   computeServerOffsetMs,
   correctedNow,
   elapsedRatio,
   remainingMs,
   remainingSeconds,
-  shouldPlayTick,
 } from '@/domain/room/timer';
 import type { ServerClock } from '@/domain/room/timer';
 
@@ -95,56 +94,11 @@ describe('remainingMs / remainingSeconds', () => {
   });
 });
 
-describe('shouldPlayTick', () => {
-  it('5 → 4 → 3 と減るたびに鳴る', () => {
-    expect(shouldPlayTick(6, 5)).toBe(true);
-    expect(shouldPlayTick(5, 4)).toBe(true);
-    expect(shouldPlayTick(4, 3)).toBe(true);
-    expect(shouldPlayTick(3, 2)).toBe(true);
-    expect(shouldPlayTick(2, 1)).toBe(true);
-  });
-
-  it('同じ秒では鳴らない（毎フレームの再描画で連打しない）', () => {
-    expect(shouldPlayTick(5, 5)).toBe(false);
-    expect(shouldPlayTick(3, 3)).toBe(false);
-    expect(shouldPlayTick(1, 1)).toBe(false);
-  });
-
-  it('巻き戻ったときは鳴らない（タブ復帰・時刻補正）', () => {
-    expect(shouldPlayTick(3, 4)).toBe(false);
-    expect(shouldPlayTick(1, 5)).toBe(false);
-    expect(shouldPlayTick(2, 3)).toBe(false);
-  });
-
-  it('6 秒以上では鳴らない', () => {
-    expect(shouldPlayTick(7, 6)).toBe(false);
-    expect(shouldPlayTick(null, 6)).toBe(false);
-    expect(shouldPlayTick(20, 10)).toBe(false);
-  });
-
-  it('0 秒でも鳴る（時間切れの瞬間を音で伝える）', () => {
-    // 締切の遷移音は通信を挟むぶん遅れて鳴る。0 秒ちょうどの合図は別に要る。
-    expect(shouldPlayTick(1, 0)).toBe(true);
-  });
-
-  it('初回（previous が null）でも 5〜0 秒なら鳴る', () => {
-    for (const second of TICK_SECONDS) {
-      expect(shouldPlayTick(null, second)).toBe(true);
-    }
-  });
-
-  it('5 → 4 → 3 → 2 → 1 → 0 の一連で 6 回だけ鳴る', () => {
-    const observed: number[] = [];
-    let previous: number | null = null;
-
-    for (const current of [8, 7, 6, 5, 5, 4, 4, 3, 2, 1, 0]) {
-      if (shouldPlayTick(previous, current)) {
-        observed.push(current);
-      }
-      previous = current;
-    }
-
-    expect(observed).toEqual([5, 4, 3, 2, 1, 0]);
+describe('URGENT_SECONDS', () => {
+  it('表示だけの基準として残り 5 秒を持つ', () => {
+    // 効果音は残り秒数で出し分けない（受付中はずっと鳴らす）。
+    // ここは投影のカウントダウン表示を赤くする閾値としてだけ使う。
+    expect(URGENT_SECONDS).toBe(5);
   });
 });
 

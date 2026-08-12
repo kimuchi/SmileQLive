@@ -74,6 +74,13 @@ export interface ProjectorAudioManager {
   /** 効果音を鳴らす。dedupeKey を渡すと同じキーでは二度鳴らさない。 */
   play(name: SoundName, dedupeKey?: string): void;
   /**
+   * 鳴らし続ける（繰り返し再生）。回答時間中のタイマー音に使う。
+   * すでに同じ音を鳴らし続けていれば何もしない（呼び直しても鳴り直さない）。
+   */
+  startLoop(name: SoundName): void;
+  /** 鳴らし続けているのを止める。 */
+  stopLoop(name: SoundName): void;
+  /**
    * 動作確認用に 1 音鳴らし、鳴らせたかどうかを返す。
    * 進行中の合図と違って**時間に追われないため、読み込みを最後まで待つ**。
    */
@@ -220,6 +227,8 @@ export function createProjectorAudioManager(
   const activeSources = new Set<AudioBufferSourceNode>();
   /** いま鳴っている音（種類ごとに 1 つ）。次が来たら止めて重ねない。 */
   const playing = new Map<SoundName, AudioBufferSourceNode>();
+  /** 鳴らし続けている音。回答時間中のタイマーなど。 */
+  const looping = new Set<SoundName>();
 
   let manifest: Map<SoundName, string> | null = null;
   let manifestPromise: Promise<Map<SoundName, string>> | null = null;
@@ -394,7 +403,7 @@ export function createProjectorAudioManager(
     }
   };
 
-  const startSource = (name: SoundName, buffer: AudioBuffer): void => {
+  const startSource = (name: SoundName, buffer: AudioBuffer, loop = false): void => {
     if (!context || !gain || disposed) {
       return;
     }
@@ -404,6 +413,8 @@ export function createProjectorAudioManager(
     try {
       const source = context.createBufferSource();
       source.buffer = buffer;
+      // 素材が短くても、回答時間の長さに合わせて鳴り続ける。
+      source.loop = loop;
       source.connect(gain);
       source.onended = () => {
         activeSources.delete(source);
@@ -561,6 +572,40 @@ export function createProjectorAudioManager(
       });
     },
 
+    startLoop(name: SoundName): void {
+      if (disposed || muted || looping.has(name)) {
+        return;
+      }
+      if (!unlocked || !context || !gain) {
+        warn('not-unlocked', '効果音はまだ有効になっていません（投影開始の操作が必要です）。');
+        return;
+      }
+      looping.add(name);
+      void resumeIfNeeded();
+
+      const ready = decoded.get(name);
+      if (ready) {
+        startSource(name, ready, true);
+        return;
+      }
+      // 読み込みが間に合わなくても、回答時間はまだ続いている。
+      // 進行中の合図と違って打ち切らず、読めた時点から鳴らし始める。
+      void ensureDecoded(name).then((buffer) => {
+        if (!buffer || disposed || muted || !looping.has(name)) {
+          return;
+        }
+        startSource(name, buffer, true);
+      });
+    },
+
+    stopLoop(name: SoundName): void {
+      if (!looping.has(name)) {
+        return;
+      }
+      looping.delete(name);
+      stopPlaying(name);
+    },
+
     async playTest(name: SoundName): Promise<{ ok: boolean; reason: string | null }> {
       if (disposed) {
         return { ok: false, reason: '画面を離れました' };
@@ -591,6 +636,14 @@ export function createProjectorAudioManager(
 
     setMuted(nextMuted: boolean): void {
       muted = nextMuted;
+      if (nextMuted) {
+        // 鳴らし続けている音は、音量を絞るだけでなく止める
+        // （消音を解除したときに途中から鳴り出すのを避ける）。
+        for (const name of [...looping]) {
+          looping.delete(name);
+          stopPlaying(name);
+        }
+      }
       applyGain();
     },
 
@@ -619,6 +672,7 @@ export function createProjectorAudioManager(
       }
       activeSources.clear();
       playing.clear();
+      looping.clear();
       decoded.clear();
       encoded.clear();
       loading.clear();

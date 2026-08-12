@@ -47,23 +47,13 @@ export function remainingSeconds(
 }
 
 /**
- * 残り 5,4,3,2,1,0 秒で 1 回だけ tick 音を鳴らすための判定。
+ * 「残りわずか」と見せ始める秒数。
  *
- * 0 秒も鳴らす。会場では「時間切れ」の瞬間が音で分かるほうが分かりやすく、
- * 締切の遷移（answer-lock）は通信を挟むぶん少し遅れて鳴るため。
+ * 表示だけの基準。効果音は受付が開いている間ずっと鳴らし続けるので、
+ * 残り秒数から音を出し分けることはしない（鳴らす・鳴らさないが切り替わると、
+ * 会場では「音が途切れた」としか聞こえない）。
  */
-export const TICK_SECONDS = [5, 4, 3, 2, 1, 0] as const;
-
-export function shouldPlayTick(previousSeconds: number | null, currentSeconds: number): boolean {
-  if (previousSeconds === currentSeconds) {
-    return false;
-  }
-  if (previousSeconds !== null && currentSeconds > previousSeconds) {
-    // タブ復帰などで巻き戻った場合は鳴らさない。
-    return false;
-  }
-  return (TICK_SECONDS as readonly number[]).includes(currentSeconds);
-}
+export const URGENT_SECONDS = 5;
 
 /** 進捗バー用の割合 (0-1)。 */
 export function elapsedRatio(

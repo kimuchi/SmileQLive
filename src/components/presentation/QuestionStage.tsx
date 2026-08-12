@@ -94,7 +94,7 @@ export function QuestionStage({
         高さが足りないときに何を削るかを決めておく。
 
         文字（問題文・選択肢の文言）は会場から読めないと成立しないので縮めない。
-        縮むのは**画像**だけ。問題の画像と選択肢の画像が、余った高さを分け合う。
+        縮むのは**画像**だけ。
         overflow-hidden は最後の砦で、それでも入りきらないときに枠の外へ
         はみ出して見出しや回答済み表示へ重なるのを止める。
       */}
@@ -112,20 +112,33 @@ export function QuestionStage({
         ) : null}
 
         {question.image ? (
-          <div className="flex min-h-0 flex-1 items-center justify-center">
-            <StageImage image={question.image} maxHeightRatio={0.4} fill />
-          </div>
-        ) : null}
+          /*
+            写真がある問題は、写真と回答欄を**左右**に並べる。
 
-        {question.type === 'choice' ? (
-          // 受付中は results を渡さない = 選択肢別の人数を出さない。
-          // fillHeight: 選択肢に画像があるとき、余った高さに合わせて縮める。
-          <div className="flex min-h-0 flex-[2] flex-col justify-center">
-            <ChoiceGrid choices={question.choices} fillHeight />
+            16:9 の投影で縦に積むと、見出し・選択肢・残り時間と高さを取り合って
+            写真が画面高の 15% ほどにしかならず、写真を見て答えるクイズが成立しない。
+            横に並べれば同じ余白で 3 倍以上の大きさで出せる。
+            写真の高さは行の高さそのもの。幅は縦横比なりに決まる（縦長でも歪めない）。
+          */
+          <div className="flex min-h-0 flex-1 flex-row items-stretch" style={{ gap: stageSize(40) }}>
+            {/*
+              写真の高さは行いっぱい。幅は縦横比なりに決まるので、
+              横長なら広く、縦長なら狭く場所を取る（余白を作らない）。
+              ただし行の 60% は超えさせない。超えると選択肢の文字が読めなくなる。
+            */}
+            <div
+              className="flex min-h-0 min-w-0 shrink items-center justify-center"
+              style={{ maxWidth: '60%' }}
+            >
+              <StageImage image={question.image} maxHeightRatio={0.62} fill />
+            </div>
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col justify-center">
+              <AnswerArea question={question} />
+            </div>
           </div>
         ) : (
-          <div className="shrink-0">
-            <NumberQuestionPanel question={question} />
+          <div className="flex min-h-0 flex-1 flex-col justify-center">
+            <AnswerArea question={question} />
           </div>
         )}
       </div>
@@ -135,6 +148,20 @@ export function QuestionStage({
       </div>
     </div>
   );
+}
+
+/**
+ * 回答欄。選択肢の一覧か、数値入力の案内。
+ *
+ * 写真の有無で置き場所（縦積み・左右）が変わるだけで、中身は同じにする。
+ */
+function AnswerArea({ question }: { question: PublicQuestion }) {
+  if (question.type === 'choice') {
+    // 受付中は results を渡さない = 選択肢別の人数を出さない。
+    // fillHeight: 与えられた高さに合わせ、入りきらないときは選択肢の画像を縮める。
+    return <ChoiceGrid choices={question.choices} fillHeight />;
+  }
+  return <NumberQuestionPanel question={question} />;
 }
 
 /**

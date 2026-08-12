@@ -9,7 +9,6 @@ import {
   type SoundName,
 } from '@/lib/audio/projector-audio-manager';
 import type { RoomPhase } from '@/domain/room/state-machine';
-import { shouldPlayTick } from '@/domain/room/timer';
 
 /**
  * 投影画面の効果音を React から扱うためのフック。
@@ -111,6 +110,9 @@ export type ProjectorAudio = {
   /** 動作確認用に 1 音鳴らす（二重再生防止の対象外）。結果は testResult に入る。 */
   playTest: () => Promise<void>;
   play: (name: SoundName, dedupeKey?: string) => void;
+  /** 鳴らし続ける（回答時間中のタイマー音）。 */
+  startLoop: (name: SoundName) => void;
+  stopLoop: (name: SoundName) => void;
   /** 読み込み済みの音の長さ（秒）。素材に合わせて次の演出を出すために使う。 */
   durationOf: (name: SoundName) => number | null;
   setMuted: (muted: boolean) => void;
@@ -203,6 +205,14 @@ export function useProjectorAudio(roomId: string): ProjectorAudio {
     managerRef.current?.play(name, dedupeKey);
   }, []);
 
+  const startLoop = useCallback((name: SoundName): void => {
+    managerRef.current?.startLoop(name);
+  }, []);
+
+  const stopLoop = useCallback((name: SoundName): void => {
+    managerRef.current?.stopLoop(name);
+  }, []);
+
   const durationOf = useCallback(
     (name: SoundName): number | null => managerRef.current?.durationOf(name) ?? null,
     [],
@@ -249,6 +259,8 @@ export function useProjectorAudio(roomId: string): ProjectorAudio {
     enable,
     playTest,
     play,
+    startLoop,
+    stopLoop,
     durationOf,
     setMuted,
     setVolume,
@@ -271,27 +283,26 @@ const PHASE_SOUND: Partial<Record<RoomPhase, SoundName>> = {
 };
 
 /**
- * ルームの状態変化と残り時間から効果音を鳴らす。
+ * ルームの状態変化から効果音を鳴らす。
  *
  * - 画面を開いた直後に見えた状態では鳴らさない（進行中のルームへ後から繋いだとき、
  *   いきなり正解音や終了音が鳴らないようにする）。
- * - 残り 5..1 秒の tick は `shouldPlayTick()` で判定する。
- *   タブ復帰で秒が飛んだ場合も、飛ばした分をまとめて鳴らさない。
+ * - タイマー音は残り秒数を見ない。受付が開いている間ずっと鳴らし、締まったら止める。
  * - すべての再生要求に `${stateVersion}:...` のキーを添えるため、
  *   Snapshot を取り直しても、画面を再読込しても同じ音は二度鳴らない。
  */
 export function useStageSoundCues({
   play,
+  startLoop,
+  stopLoop,
   phase,
   stateVersion,
-  remainingSeconds,
-  hasDeadline,
 }: {
   play: (name: SoundName, dedupeKey?: string) => void;
+  startLoop: (name: SoundName) => void;
+  stopLoop: (name: SoundName) => void;
   phase: RoomPhase | null;
   stateVersion: number | null;
-  remainingSeconds: number;
-  hasDeadline: boolean;
 }): void {
   /**
    * 直前に観測したフェーズ。null なら未観測。
@@ -300,8 +311,6 @@ export function useStageSoundCues({
    * フェーズは question_open のままなので、番号で見ていると出題音が鳴り直してしまう。
    */
   const lastPhaseRef = useRef<RoomPhase | null>(null);
-  /** 直前の残り秒。タブ復帰で巻き戻ったときの判定に使う。 */
-  const lastSecondsRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (phase === null || stateVersion === null) {
@@ -323,15 +332,21 @@ export function useStageSoundCues({
     }
   }, [phase, play, stateVersion]);
 
+  /**
+   * 回答時間のタイマー音。
+   *
+   * 受付が開いている間ずっと鳴らす。残りわずかのときだけ鳴らす作りだと、
+   * 「あと何秒か」が音から分からず、残り時間の緊張も伝わらない。
+   * 素材が短くても繰り返して最後まで鳴らす。
+   */
   useEffect(() => {
-    if (phase !== 'question_open' || !hasDeadline || stateVersion === null) {
-      lastSecondsRef.current = null;
+    if (phase !== 'question_open') {
+      stopLoop('tick');
       return;
     }
-    const previous = lastSecondsRef.current;
-    lastSecondsRef.current = remainingSeconds;
-    if (shouldPlayTick(previous, remainingSeconds)) {
-      play('tick', `${stateVersion}:tick:${remainingSeconds}`);
-    }
-  }, [hasDeadline, phase, play, remainingSeconds, stateVersion]);
+    startLoop('tick');
+    return () => {
+      stopLoop('tick');
+    };
+  }, [phase, startLoop, stopLoop]);
 }

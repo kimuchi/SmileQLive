@@ -2,7 +2,7 @@
 
 import { STAGE_FONT, stageSize } from '@/components/presentation/stage-theme';
 import { cn } from '@/lib/client/cn';
-import { TICK_SECONDS } from '@/domain/room/timer';
+import { URGENT_SECONDS } from '@/domain/room/timer';
 
 /**
  * 残り時間の表示。
@@ -11,9 +11,6 @@ import { TICK_SECONDS } from '@/domain/room/timer';
  * - 残り 5 秒からは数字を大きく・赤くし、同時に「まもなく締切」と文字でも伝える
  *   （色だけに頼らない）。
  */
-
-/** 残りが少ないと判断する秒数（効果音 tick と同じ基準）。 */
-const URGENT_SECONDS = Math.max(...TICK_SECONDS);
 
 /** 円の中へ収まる字の大きさ。桁が増えるほど小さくする。 */
 function numberFontSize(seconds: number): number {

@@ -17,16 +17,18 @@ type Args = Parameters<typeof useStageSoundCues>[0];
 
 function setup(initial: Partial<Args> = {}) {
   const play = vi.fn();
+  const startLoop = vi.fn();
+  const stopLoop = vi.fn();
   const base: Args = {
     play,
+    startLoop,
+    stopLoop,
     phase: 'lobby',
     stateVersion: 1,
-    remainingSeconds: 0,
-    hasDeadline: false,
     ...initial,
   };
   const view = renderHook((props: Args) => useStageSoundCues(props), { initialProps: base });
-  return { play, view, base };
+  return { play, startLoop, stopLoop, view, base };
 }
 
 /** 鳴った音の名前だけを取り出す。 */
@@ -90,24 +92,27 @@ describe('投影画面の効果音を鳴らす場面', () => {
     ]);
   });
 
-  it('残り 5〜0 秒で 1 回ずつ鳴る', () => {
-    const { play, view, base } = setup({
-      phase: 'question_open',
-      stateVersion: 4,
-      hasDeadline: true,
-      remainingSeconds: 8,
-    });
+  it('回答受付の間ずっとタイマー音を鳴らす', () => {
+    // 残りわずかのときだけ鳴らす作りだと、「あと何秒か」が音から分からない。
+    const { startLoop, stopLoop, view, base } = setup({ phase: 'question_ready', stateVersion: 3 });
+    expect(startLoop).not.toHaveBeenCalled();
 
-    for (const remainingSeconds of [7, 6, 5, 5, 4, 4, 3, 2, 1, 0]) {
-      view.rerender({
-        ...base,
-        phase: 'question_open',
-        stateVersion: 4,
-        hasDeadline: true,
-        remainingSeconds,
-      });
-    }
+    view.rerender({ ...base, phase: 'question_open', stateVersion: 4 });
+    expect(startLoop).toHaveBeenCalledWith('tick');
 
-    expect(playedSounds(play)).toEqual(['tick', 'tick', 'tick', 'tick', 'tick', 'tick']);
+    stopLoop.mockClear();
+    view.rerender({ ...base, phase: 'question_locked', stateVersion: 5 });
+    expect(stopLoop).toHaveBeenCalledWith('tick');
+  });
+
+  it('延長してもタイマー音を鳴らし直さない', () => {
+    const { startLoop, view, base } = setup({ phase: 'question_ready', stateVersion: 3 });
+    view.rerender({ ...base, phase: 'question_open', stateVersion: 4 });
+    startLoop.mockClear();
+
+    // 延長（状態番号だけ増える）。鳴らし続けているものを止めたり鳴らし直したりしない。
+    view.rerender({ ...base, phase: 'question_open', stateVersion: 5 });
+
+    expect(startLoop).not.toHaveBeenCalled();
   });
 });
