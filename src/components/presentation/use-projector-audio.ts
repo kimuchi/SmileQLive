@@ -295,12 +295,15 @@ export function useStageSoundCues({
   play,
   startLoop,
   stopLoop,
+  isUnlocked,
   phase,
   stateVersion,
 }: {
   play: (name: SoundName, dedupeKey?: string) => void;
   startLoop: (name: SoundName) => void;
   stopLoop: (name: SoundName) => void;
+  /** 効果音を鳴らせる状態か（投影開始の操作が済んでいるか）。 */
+  isUnlocked: boolean;
   phase: RoomPhase | null;
   stateVersion: number | null;
 }): void {
@@ -338,9 +341,13 @@ export function useStageSoundCues({
    * 受付が開いている間ずっと鳴らす。残りわずかのときだけ鳴らす作りだと、
    * 「あと何秒か」が音から分からず、残り時間の緊張も伝わらない。
    * 素材が短くても繰り返して最後まで鳴らす。
+   *
+   * `isUnlocked` も見る。**出題中に投影画面を開き直した場合**、
+   * 「投影を開始」を押す前にこの効果が走る。そこで諦めてしまうと、
+   * 押したあとも鳴り始めず、その問題は最後まで無音になる。
    */
   useEffect(() => {
-    if (phase !== 'question_open') {
+    if (!isUnlocked || phase !== 'question_open') {
       stopLoop('tick');
       return;
     }
@@ -348,5 +355,5 @@ export function useStageSoundCues({
     return () => {
       stopLoop('tick');
     };
-  }, [phase, startLoop, stopLoop]);
+  }, [isUnlocked, phase, startLoop, stopLoop]);
 }

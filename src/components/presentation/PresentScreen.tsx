@@ -71,6 +71,9 @@ export function PresentScreen({ roomId }: { roomId: string }) {
     play,
     startLoop,
     stopLoop,
+    // 「投影を開始」を押す前に受付中のルームへ繋いだ場合でも、
+    // 押した時点からタイマー音を鳴らし始められるようにする。
+    isUnlocked: audio.isUnlocked,
     phase: snapshot?.phase ?? null,
     stateVersion: snapshot?.stateVersion ?? null,
   });

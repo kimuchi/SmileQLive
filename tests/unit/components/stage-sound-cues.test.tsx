@@ -10,7 +10,7 @@ import type { RoomPhase } from '@/domain/room/state-machine';
  * 会場では鳴らしすぎるほうが事故になる。ここでは次を固定する。
  * - 画面を開いた直後は鳴らさない（進行中の部屋へ後から繋いでも、いきなり正解音を出さない）
  * - **フェーズが変わったときだけ**鳴らす。回答時間を延長しても出題音は鳴らさない
- * - 残り 5〜0 秒の合図は 1 秒に 1 回だけ
+ * - タイマー音は回答受付の間ずっと鳴らす（残り秒数で出し分けない）
  */
 
 type Args = Parameters<typeof useStageSoundCues>[0];
@@ -23,6 +23,8 @@ function setup(initial: Partial<Args> = {}) {
     play,
     startLoop,
     stopLoop,
+    // 既定では「投影を開始」を押し済みとして扱う。
+    isUnlocked: true,
     phase: 'lobby',
     stateVersion: 1,
     ...initial,
@@ -103,6 +105,21 @@ describe('投影画面の効果音を鳴らす場面', () => {
     stopLoop.mockClear();
     view.rerender({ ...base, phase: 'question_locked', stateVersion: 5 });
     expect(stopLoop).toHaveBeenCalledWith('tick');
+  });
+
+  it('出題中に投影画面を開いた場合、開始操作のあとからタイマー音を鳴らす', () => {
+    // 「投影を開始」を押す前は音を鳴らせない。そこで諦めると、押したあとも
+    // 鳴り始めず、その問題は最後まで無音になる。実際にその作りになっていた。
+    const { startLoop, view, base } = setup({
+      isUnlocked: false,
+      phase: 'question_open',
+      stateVersion: 4,
+    });
+    expect(startLoop).not.toHaveBeenCalled();
+
+    view.rerender({ ...base, isUnlocked: true, phase: 'question_open', stateVersion: 4 });
+
+    expect(startLoop).toHaveBeenCalledWith('tick');
   });
 
   it('延長してもタイマー音を鳴らし直さない', () => {
