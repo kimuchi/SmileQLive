@@ -32,12 +32,21 @@ const MANIFEST = {
   'answer-lock': 'answer-lock.wav',
   'answer-reveal': 'answer-reveal.wav',
   ranking: 'ranking.wav',
+  fanfare: 'fanfare.wav',
   finish: 'finish.wav',
 };
 
 /** 鳴った回数を数えるための最小限の AudioContext。 */
-function installFakeAudioContext(): { started: () => number } {
+function installFakeAudioContext(): {
+  started: () => number;
+  startTimes: () => number[];
+  stopped: () => number;
+  currentTime: () => number;
+} {
   let started = 0;
+  let stopped = 0;
+  const startTimes: number[] = [];
+  const CURRENT_TIME = 12.5;
 
   class FakeGainNode {
     gain = {
@@ -52,29 +61,45 @@ function installFakeAudioContext(): { started: () => number } {
     buffer: unknown = null;
     onended: (() => void) | null = null;
     connect = vi.fn();
-    start = vi.fn(() => {
+    start = vi.fn((when?: number) => {
+      // 解除用の無音（1 サンプル）は数えない。
+      const length = (this.buffer as { length?: number } | null)?.length ?? 0;
+      if (length <= 1) {
+        return;
+      }
       started += 1;
+      startTimes.push(when ?? 0);
     });
-    stop = vi.fn();
+    stop = vi.fn(() => {
+      stopped += 1;
+    });
   }
 
   class FakeAudioContext {
     state = 'running';
-    currentTime = 0;
+    currentTime = CURRENT_TIME;
     sampleRate = 44_100;
     destination = {};
     createGain = () => new FakeGainNode();
     createBufferSource = () => new FakeSourceNode();
     createBuffer = () => ({ length: 1 });
     decodeAudioData = (buffer: ArrayBuffer) =>
-      Promise.resolve({ length: buffer.byteLength } as unknown as AudioBuffer);
+      Promise.resolve({
+        length: buffer.byteLength,
+        duration: buffer.byteLength / 44_100,
+      } as unknown as AudioBuffer);
     resume = () => Promise.resolve();
     close = () => Promise.resolve();
   }
 
   // 実装は window.AudioContext を見る。
   (window as unknown as { AudioContext: unknown }).AudioContext = FakeAudioContext;
-  return { started: () => started };
+  return {
+    started: () => started,
+    startTimes: () => [...startTimes],
+    stopped: () => stopped,
+    currentTime: () => CURRENT_TIME,
+  };
 }
 
 function audioResponse(): Response {
@@ -98,7 +123,7 @@ function notFound(): Response {
 }
 
 describe('投影画面の効果音', () => {
-  let audio: { started: () => number };
+  let audio: ReturnType<typeof installFakeAudioContext>;
   let consoleWarn: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -272,6 +297,92 @@ describe('投影画面の効果音', () => {
     manager.play('answer-reveal', '5:answer-reveal');
     manager.play('answer-reveal', '5:answer-reveal');
     expect(audio.started()).toBe(before + 1);
+    manager.dispose();
+  });
+});
+
+describe('鳴らし方', () => {
+  let audio: ReturnType<typeof installFakeAudioContext>;
+
+  beforeEach(() => {
+    audio = installFakeAudioContext();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) =>
+      Promise.resolve(String(input).endsWith('manifest.json') ? manifestResponse() : audioResponse()),
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    window.sessionStorage.clear();
+  });
+
+  it('頭が欠けないよう、少し先の時刻から鳴らす', async () => {
+    // currentTime ちょうどで start すると先頭が数十ミリ秒切れることがある。
+    const warnings = collectWarnings();
+    const manager = createProjectorAudioManager({
+      dedupeNamespace: 'lead',
+      onWarning: warnings.onWarning,
+    });
+    await manager.unlock();
+    await manager.preload();
+
+    manager.play('question-start');
+
+    const [when] = audio.startTimes();
+    expect(when).toBeGreaterThan(audio.currentTime());
+    // 会場で気づかれない程度（0.2 秒以内）に収めること。
+    expect(when).toBeLessThanOrEqual(audio.currentTime() + 0.2);
+    manager.dispose();
+  });
+
+  it('同じ音が続けて鳴るとき、前の音を止めて重ねない', async () => {
+    // 残り 5,4,3,2,1,0 秒の合図。素材が長くても重ならないこと。
+    const warnings = collectWarnings();
+    const manager = createProjectorAudioManager({
+      dedupeNamespace: 'tick',
+      onWarning: warnings.onWarning,
+    });
+    await manager.unlock();
+    await manager.preload();
+
+    for (const second of [5, 4, 3, 2, 1, 0]) {
+      manager.play('tick', `1:tick:${second}`);
+    }
+
+    expect(audio.started()).toBe(6);
+    // 2 回目以降は、前の音を止めてから鳴らす。
+    expect(audio.stopped()).toBe(5);
+    manager.dispose();
+  });
+
+  it('種類が違えば止めない（締切音と正解音は重なってよい）', async () => {
+    const warnings = collectWarnings();
+    const manager = createProjectorAudioManager({
+      dedupeNamespace: 'mixed',
+      onWarning: warnings.onWarning,
+    });
+    await manager.unlock();
+    await manager.preload();
+
+    manager.play('ranking');
+    manager.play('fanfare');
+
+    expect(audio.started()).toBe(2);
+    expect(audio.stopped()).toBe(0);
+    manager.dispose();
+  });
+
+  it('音の長さを返す（ためる時間を素材に合わせるため）', async () => {
+    const warnings = collectWarnings();
+    const manager = createProjectorAudioManager({
+      dedupeNamespace: 'duration',
+      onWarning: warnings.onWarning,
+    });
+    await manager.unlock();
+    await manager.preload();
+
+    expect(manager.durationOf('ranking')).toBeGreaterThan(0);
     manager.dispose();
   });
 });

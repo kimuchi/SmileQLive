@@ -12,6 +12,7 @@
 | answer-lock | `default/answer-lock.wav` | 自家生成（同上） | 同上 | 可 | 不要 |
 | answer-reveal | `default/answer-reveal.wav` | 自家生成（同上） | 同上 | 可 | 不要 |
 | ranking | `default/ranking.wav` | 自家生成（同上） | 同上 | 可 | 不要 |
+| fanfare | `default/fanfare.wav` | 自家生成（同上） | 同上 | 可 | 不要 |
 | finish | `default/finish.wav` | 自家生成（同上） | 同上 | 可 | 不要 |
 
 ## 外部の音源へ差し替えた場合
@@ -28,6 +29,7 @@
 | answer-lock | 未使用 | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
 | answer-reveal | 未使用 | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
 | ranking | 未使用 | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
+| fanfare | 未使用 | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
 | finish | 未使用 | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
 
 ## 確認する項目

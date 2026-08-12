@@ -30,7 +30,7 @@ const EXPECTED_ACTIONS: Record<RoomPhase, RoomAction[]> = {
   lobby: ['show_question', 'finish_room'],
   question_ready: ['open_question'],
   question_open: ['lock_question', 'extend_deadline'],
-  question_locked: ['reveal_answer', 'finish_room'],
+  question_locked: ['reopen_question', 'reveal_answer', 'finish_room'],
   answer_revealed: ['show_question', 'show_scoreboard', 'finish_room'],
   scoreboard: ['show_question', 'finish_room'],
   finished: ['reopen_room'],
@@ -42,6 +42,7 @@ const EXPECTED_NEXT_PHASE: Record<RoomAction, RoomPhase> = {
   open_question: 'question_open',
   lock_question: 'question_locked',
   extend_deadline: 'question_open',
+  reopen_question: 'question_open',
   reveal_answer: 'answer_revealed',
   show_scoreboard: 'scoreboard',
   finish_room: 'finished',
@@ -68,6 +69,13 @@ describe('canTransition（全フェーズ × 全アクション）', () => {
   it('延長できるのは回答受付中だけ（締切後に延ばさない）', () => {
     for (const phase of ROOM_PHASES) {
       expect(canTransition(phase, 'extend_deadline')).toBe(phase === 'question_open');
+    }
+  });
+
+  it('受付を戻せるのは締切直後だけ（正解を出したあとは戻せない）', () => {
+    // 正解を見てから回答できてしまうため、answer_revealed からは戻せない。
+    for (const phase of ROOM_PHASES) {
+      expect(canTransition(phase, 'reopen_question')).toBe(phase === 'question_locked');
     }
   });
 

@@ -23,13 +23,25 @@ export function RankingStage({
   showLeaderboard,
   participantCount,
   finished,
+  revealed = true,
 }: {
   leaderboard: readonly RankedParticipant[] | null;
   showLeaderboard: boolean;
   participantCount: number;
   /** クイズ終了フェーズかどうか。 */
   finished: boolean;
+  /**
+   * 順位を出してよいか。
+   *
+   * false の間は「まもなく発表」だけを出す。
+   * ドラムロールと同時に順位が見えてしまうと、ためる意味が無くなるため。
+   */
+  revealed?: boolean;
 }) {
+  if (!revealed) {
+    return <RankingBuildUp participantCount={participantCount} />;
+  }
+
   const entries = (leaderboard ?? []).slice(0, MAX_VISIBLE);
   // 得点帯の基準。1 位の得点を 100% とする（0 点しかいない場合は帯を出さない）。
   const topPoints = entries.reduce((max, entry) => Math.max(max, entry.totalPoints), 0);
@@ -138,6 +150,32 @@ export function RankingStage({
           ご参加ありがとうございました
         </p>
       ) : null}
+    </div>
+  );
+}
+
+/** 発表前のためる画面。ドラムロールが鳴っている間だけ出る。 */
+function RankingBuildUp({ participantCount }: { participantCount: number }) {
+  return (
+    <div className="flex h-full w-full flex-col items-center justify-center text-center">
+      <p
+        className="font-bold text-white/70"
+        style={{ fontSize: stageSize(STAGE_FONT.heading) }}
+      >
+        結果発表
+      </p>
+      <p
+        className="stage-pop font-bold text-white"
+        style={{ marginTop: stageSize(32), fontSize: stageSize(STAGE_FONT.hero), lineHeight: 1.1 }}
+      >
+        まもなく発表します
+      </p>
+      <p
+        className="text-white/50"
+        style={{ marginTop: stageSize(32), fontSize: stageSize(STAGE_FONT.body) }}
+      >
+        参加 {formatCount(participantCount)}
+      </p>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert } from '@/components/shared/Alert';
 import { Badge } from '@/components/shared/Badge';
 import { Button } from '@/components/shared/Button';
@@ -24,6 +24,7 @@ import {
   type RoomAction,
 } from '@/domain/room/state-machine';
 import { useCountdown } from '@/hooks/use-countdown';
+import { useExpiryLock } from '@/hooks/use-expiry-lock';
 import { useRoomSnapshot } from '@/hooks/use-room-snapshot';
 import { apiPost, isApiClientError } from '@/lib/client/api-client';
 import { toUserErrorMessage } from '@/lib/client/error-text';
@@ -96,27 +97,20 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
   const stateVersion = snapshot?.stateVersion ?? null;
 
   // 締切時刻を過ぎたら締切へ進める（冪等。DB 側がサーバー時刻で判定する）。
-  const autoLockedVersionRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (phase !== 'question_open' || stateVersion === null) {
-      return;
-    }
-    if (countdown.remainingMs > 0) {
-      return;
-    }
-    if (autoLockedVersionRef.current === stateVersion) {
-      return;
-    }
-    autoLockedVersionRef.current = stateVersion;
-    void (async () => {
-      try {
-        await apiPost(`/api/rooms/${roomId}/lock-if-expired`);
-      } catch {
-        // 失敗しても「回答を締め切る」から手動で進められる。
-      }
-      await refresh();
-    })();
-  }, [countdown.remainingMs, phase, refresh, roomId, stateVersion]);
+  // 投影画面と同じ仕組みを使う。司会画面だけを開いていても自動で締め切られる。
+  const handleLocked = useCallback(() => {
+    void refresh();
+  }, [refresh]);
+
+  useExpiryLock({
+    roomId,
+    phase: phase ?? '',
+    stateVersion,
+    // 締切時刻が届いてから 0 になったときだけ。未取得のうちは false。
+    // 締切時刻に対して計算済みのときだけ「時間切れ」と見なす。
+    expired: countdown.ready && countdown.remainingMs <= 0,
+    onLocked: handleLocked,
+  });
 
   const nextQuestion = useMemo(() => {
     const currentPosition = snapshot?.currentQuestionPosition ?? 0;
@@ -143,13 +137,17 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
   /**
    * 「進行操作」へ並べる操作。
    *
-   * 延長と再開はここへ出さず、それぞれ専用の欄へ出す。
-   * 延長は秒数を選ばせる必要があり、再開は「得点が残る」ことを添えないと押しづらいため。
+   * 延長・受付再開・クイズ再開はここへ出さず、それぞれ専用の欄へ出す。
+   * 延長と受付再開は秒数を選ばせる必要があり、
+   * クイズ再開は「得点が残る」ことを添えないと押しづらいため。
    */
   const inlineActions = useMemo(
     () =>
       (snapshot?.availableActions ?? []).filter(
-        (action) => action !== 'extend_deadline' && action !== 'reopen_room',
+        (action) =>
+          action !== 'extend_deadline' &&
+          action !== 'reopen_room' &&
+          action !== 'reopen_question',
       ),
     [snapshot?.availableActions],
   );
@@ -510,12 +508,40 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
         ) : null}
 
         {snapshot.phase === 'question_locked' ? (
-          <p className="mt-4 text-sm font-bold text-slate-700">
-            回答済み {formatRatioCount(snapshot.answeredCount, snapshot.participantCount)}
-            <span className="ml-2 font-normal text-slate-600">
-              — 「正解を発表」で集計と正解を表示します。
-            </span>
-          </p>
+          <div className="mt-4 flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <p className="text-sm font-bold text-slate-700">
+              回答済み {formatRatioCount(snapshot.answeredCount, snapshot.participantCount)}
+              <span className="ml-2 font-normal text-slate-600">
+                — 「正解を発表」で集計と正解を表示します。
+              </span>
+            </p>
+
+            {snapshot.availableActions.includes('reopen_question') ? (
+              <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
+                <span className="text-sm font-bold text-slate-700">回答受付を再開</span>
+                {EXTEND_SECONDS_PRESETS.map((seconds) => (
+                  <Button
+                    key={seconds}
+                    size="sm"
+                    variant="secondary"
+                    loading={busy === `extend-${seconds}`}
+                    disabled={actionsBusy && busy !== `extend-${seconds}`}
+                    onClick={() =>
+                      void runAction('reopen_question', {
+                        extendSeconds: seconds,
+                        busyKey: `extend-${seconds}`,
+                      })
+                    }
+                  >
+                    {seconds}秒
+                  </Button>
+                ))}
+                <span className="text-xs text-slate-600">
+                  締め切ってしまった直後に戻せます。正解を発表したあとは戻せません。
+                </span>
+              </div>
+            ) : null}
+          </div>
         ) : null}
       </Card>
 

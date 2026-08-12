@@ -248,25 +248,78 @@ const SOUNDS = {
   },
 
   /** ランキング: 期待感のある上昇アルペジオ。 */
+  /**
+   * ランキング発表前の「ためる」音。
+   *
+   * ドラムロールのように、細かい打点を少しずつ速く・大きくして緊張を作る。
+   * この音の**あとに** fanfare で発表する（同時だと発表の瞬間が埋もれる）。
+   */
   ranking: () => {
-    const samples = createSamples(1.8);
-    const steps = [NOTES.C5, NOTES.E5, NOTES.G5, NOTES.C6, NOTES.E6];
-    steps.forEach((frequency, index) => {
+    const seconds = 2.2;
+    const samples = createSamples(seconds);
+
+    // 打点の間隔を詰めていく（0.075 秒 → 0.035 秒）。
+    // 音の高さは打点ごとにわずかに散らす。乱数は使わない
+    // （同じコマンドから同じファイルができるほうが、差分を追いやすい）。
+    let at = 0;
+    let beat = 0;
+    while (at < seconds - 0.1) {
+      const progress = at / seconds;
+      const wobble = 0.98 + ((beat * 7) % 5) * 0.01;
       addTone(samples, {
-        startSec: index * 0.14,
-        durationSec: 0.9,
+        startSec: at,
+        durationSec: 0.05,
+        frequency: NOTES.C4 * wobble,
+        gain: 0.25 + progress * 0.45,
+        attackSec: 0.001,
+        decay: 26,
+        overtone: 0.5,
+      });
+      at += 0.075 - progress * 0.04;
+      beat += 1;
+    }
+    // 末尾を少し持ち上げて、次に何か来ることを予感させる。
+    addTone(samples, {
+      startSec: seconds - 0.35,
+      durationSec: 0.34,
+      frequency: NOTES.C4,
+      endFrequency: NOTES.G4,
+      gain: 0.5,
+      decay: 3,
+      overtone: 0.4,
+    });
+    return samples;
+  },
+
+  /** ランキングが出た瞬間のファンファーレ。上へ駆け上がって和音で止める。 */
+  fanfare: () => {
+    const samples = createSamples(2.0);
+    const run = [NOTES.C5, NOTES.E5, NOTES.G5, NOTES.C6];
+    run.forEach((frequency, index) => {
+      addTone(samples, {
+        startSec: index * 0.11,
+        durationSec: 0.3,
         frequency,
-        gain: 0.75,
-        decay: 3.4,
+        gain: 0.8,
+        decay: 5,
       });
     });
-    addTone(samples, {
-      startSec: 0.7,
-      durationSec: 1.05,
-      frequency: NOTES.G6,
-      gain: 0.5,
-      decay: 2.8,
-    });
+    // 到達点の和音。ここが「発表の瞬間」。
+    for (const [frequency, gain] of [
+      [NOTES.C5, 0.7],
+      [NOTES.E5, 0.65],
+      [NOTES.G5, 0.65],
+      [NOTES.C6, 0.55],
+      [NOTES.E6, 0.4],
+    ]) {
+      addTone(samples, {
+        startSec: 0.46,
+        durationSec: 1.5,
+        frequency,
+        gain,
+        decay: 1.8,
+      });
+    }
     return samples;
   },
 

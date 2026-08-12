@@ -230,6 +230,22 @@ async function applyTransition(
       answerDeadlineAt = timestampFromMillis(base + seconds * 1000);
       break;
     }
+    case 'reopen_question': {
+      // 締め切ったあとに受付へ戻す。時間切れの直後や、締切ボタンの誤操作からの復帰。
+      // 締切時刻は**今から**数え直す（残っていた時間は戻さない）。
+      const question = currentQuestionOf(room, snapshot);
+      if (!question) {
+        throw new AppError('QUESTION_NOT_FOUND');
+      }
+      const seconds = options.extendSeconds ?? question.timeLimitSeconds;
+      if (!Number.isInteger(seconds) || seconds < EXTEND_SECONDS_MIN || seconds > EXTEND_SECONDS_MAX) {
+        throw new AppError('VALIDATION_FAILED', {
+          details: { reason: 'extend_seconds_out_of_range' },
+        });
+      }
+      answerDeadlineAt = timestampFromMillis(now.toMillis() + seconds * 1000);
+      break;
+    }
     case 'lock_question':
     case 'reveal_answer': {
       answerDeadlineAt = null;

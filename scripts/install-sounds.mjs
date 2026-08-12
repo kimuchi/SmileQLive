@@ -30,7 +30,7 @@ const SOURCE_NAME = '効果音ラボ';
 const SOURCE_URL = 'https://soundeffect-lab.info/';
 
 /**
- * SmileQ Live が鳴らす 6 音と、その用途に合う効果音ラボの素材。
+ * SmileQ Live が鳴らす 7 音と、その用途に合う効果音ラボの素材。
  *
  * `file` は配布元でのファイル名。利用者がダウンロードした際の名前と一致する。
  */
@@ -65,9 +65,16 @@ const RECOMMENDED = [
   },
   {
     name: 'ranking',
-    purpose: 'ランキング発表',
+    purpose: 'ランキング発表前のため',
     label: 'ドラムロール',
     file: 'drum-roll1.mp3',
+    page: 'https://soundeffect-lab.info/sound/anime/',
+  },
+  {
+    name: 'fanfare',
+    purpose: 'ランキングが出た瞬間',
+    label: 'ファンファーレ',
+    file: 'fanfare1.mp3',
     page: 'https://soundeffect-lab.info/sound/anime/',
   },
   {
@@ -117,7 +124,7 @@ const fromDir = typeof flags.get('from') === 'string' ? resolve(flags.get('from'
 if (!fromDir) {
   heading('効果音の入手手順');
 
-  info(`${SOURCE_NAME}（${SOURCE_URL}）から次の 6 つをダウンロードしてください。`);
+  info(`${SOURCE_NAME}（${SOURCE_URL}）から次の ${RECOMMENDED.length} つをダウンロードしてください。`);
   console.log('');
   console.log(`  ${'用途'.padEnd(14)} ${'素材名'.padEnd(28)} ファイル名`);
   console.log(`  ${'-'.repeat(14)} ${'-'.repeat(28)} ${'-'.repeat(20)}`);

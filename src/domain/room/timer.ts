@@ -46,8 +46,13 @@ export function remainingSeconds(
   return Math.ceil(remainingMs(deadlineAtIso, clock, localNowMs) / 1000);
 }
 
-/** 残り 5,4,3,2,1 秒で 1 回だけ tick 音を鳴らすための判定。 */
-export const TICK_SECONDS = [5, 4, 3, 2, 1] as const;
+/**
+ * 残り 5,4,3,2,1,0 秒で 1 回だけ tick 音を鳴らすための判定。
+ *
+ * 0 秒も鳴らす。会場では「時間切れ」の瞬間が音で分かるほうが分かりやすく、
+ * 締切の遷移（answer-lock）は通信を挟むぶん少し遅れて鳴るため。
+ */
+export const TICK_SECONDS = [5, 4, 3, 2, 1, 0] as const;
 
 export function shouldPlayTick(previousSeconds: number | null, currentSeconds: number): boolean {
   if (previousSeconds === currentSeconds) {

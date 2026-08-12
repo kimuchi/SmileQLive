@@ -25,6 +25,7 @@ export const ROOM_ACTIONS = [
   'open_question',
   'lock_question',
   'extend_deadline',
+  'reopen_question',
   'reveal_answer',
   'show_scoreboard',
   'finish_room',
@@ -41,6 +42,9 @@ const ALLOWED_FROM: Record<RoomAction, readonly RoomPhase[]> = {
   // 延長は「受付中」の間だけ。締め切ったあとに延ばせると、
   // 締切を見て回答をやめた人が不利になる。
   extend_deadline: ['question_open'],
+  // 締め切ったあとに受付へ戻す（時間切れの直後や、締切ボタンの誤操作から戻すため）。
+  // 正解を出したあとには戻せない。答えを見てから回答できてしまう。
+  reopen_question: ['question_locked'],
   reveal_answer: ['question_locked'],
   show_scoreboard: ['answer_revealed'],
   finish_room: ['lobby', 'answer_revealed', 'scoreboard', 'question_locked'],
@@ -55,6 +59,7 @@ const RESULT_PHASE: Record<RoomAction, RoomPhase> = {
   lock_question: 'question_locked',
   // 延長してもフェーズは変わらない（締切時刻だけが伸びる）。
   extend_deadline: 'question_open',
+  reopen_question: 'question_open',
   reveal_answer: 'answer_revealed',
   show_scoreboard: 'scoreboard',
   finish_room: 'finished',
@@ -68,6 +73,7 @@ const REQUIRES_QUESTION_ID: Record<RoomAction, boolean> = {
   open_question: false,
   lock_question: false,
   extend_deadline: false,
+  reopen_question: false,
   reveal_answer: false,
   show_scoreboard: false,
   finish_room: false,
@@ -229,6 +235,7 @@ export const ROOM_ACTION_LABELS: Record<RoomAction, string> = {
   open_question: '回答受付を開始',
   lock_question: '回答を締め切る',
   extend_deadline: '回答時間を延長',
+  reopen_question: '回答受付を再開',
   reveal_answer: '正解を発表',
   show_scoreboard: 'ランキングを表示',
   finish_room: 'クイズを終了',

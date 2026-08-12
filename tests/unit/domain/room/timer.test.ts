@@ -122,17 +122,18 @@ describe('shouldPlayTick', () => {
     expect(shouldPlayTick(20, 10)).toBe(false);
   });
 
-  it('0 秒では鳴らない（締切音は別に鳴らす）', () => {
-    expect(shouldPlayTick(1, 0)).toBe(false);
+  it('0 秒でも鳴る（時間切れの瞬間を音で伝える）', () => {
+    // 締切の遷移音は通信を挟むぶん遅れて鳴る。0 秒ちょうどの合図は別に要る。
+    expect(shouldPlayTick(1, 0)).toBe(true);
   });
 
-  it('初回（previous が null）でも 5〜1 秒なら鳴る', () => {
+  it('初回（previous が null）でも 5〜0 秒なら鳴る', () => {
     for (const second of TICK_SECONDS) {
       expect(shouldPlayTick(null, second)).toBe(true);
     }
   });
 
-  it('5 → 4 → 3 → 2 → 1 の一連で 5 回だけ鳴る', () => {
+  it('5 → 4 → 3 → 2 → 1 → 0 の一連で 6 回だけ鳴る', () => {
     const observed: number[] = [];
     let previous: number | null = null;
 
@@ -143,7 +144,7 @@ describe('shouldPlayTick', () => {
       previous = current;
     }
 
-    expect(observed).toEqual([5, 4, 3, 2, 1]);
+    expect(observed).toEqual([5, 4, 3, 2, 1, 0]);
   });
 });
 

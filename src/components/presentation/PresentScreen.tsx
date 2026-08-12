@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { AudioControls } from '@/components/presentation/AudioControls';
 import { PresentSetupOverlay } from '@/components/presentation/PresentSetupOverlay';
 import { QuestionStage } from '@/components/presentation/QuestionStage';
@@ -11,7 +11,6 @@ import { UpcomingStage } from '@/components/presentation/UpcomingStage';
 import { StageHeader } from '@/components/presentation/StageHeader';
 import { StageNotice } from '@/components/presentation/StageNotice';
 import { WaitingStage } from '@/components/presentation/WaitingStage';
-import { useExpiryLock } from '@/components/presentation/use-expiry-lock';
 import { useFullscreen } from '@/components/presentation/use-fullscreen';
 import { useJoinUrl } from '@/components/presentation/use-join-url';
 import {
@@ -24,6 +23,7 @@ import { FullScreenMessage } from '@/components/shared/FullScreenMessage';
 import type { StaffSnapshot } from '@/domain/room/snapshot';
 import { useAnonymousSessionReady } from '@/hooks/use-anonymous-session';
 import { useCountdown } from '@/hooks/use-countdown';
+import { useExpiryLock } from '@/hooks/use-expiry-lock';
 import { useRoomSnapshot } from '@/hooks/use-room-snapshot';
 
 /**
@@ -39,6 +39,10 @@ import { useRoomSnapshot } from '@/hooks/use-room-snapshot';
  * - 投影担当にログインは求めない。匿名認証（＝ /present/token/... で presenter として
  *   登録済みの端末）が整うまで取得も購読も始めない。
  */
+/** ランキング発表をためる時間の下限・上限（素材の長さがこの範囲に丸められる）。 */
+const RANKING_BUILD_UP_MIN_MS = 1_500;
+const RANKING_BUILD_UP_MAX_MS = 6_000;
+
 export function PresentScreen({ roomId }: { roomId: string }) {
   // 再読込でセッションクッキーが切れていても、同じ匿名ユーザーで張り直せるようにする。
   const sessionReady = useAnonymousSessionReady();
@@ -51,7 +55,7 @@ export function PresentScreen({ roomId }: { roomId: string }) {
   });
 
   const audio = useProjectorAudio(roomId);
-  const { enable, play, playTest, setMuted, setVolume } = audio;
+  const { enable, play, playTest, durationOf, setMuted, setVolume } = audio;
   const fullscreen = useFullscreen();
   const { joinUrl, setJoinUrl } = useJoinUrl(roomId);
 
@@ -79,9 +83,50 @@ export function PresentScreen({ roomId }: { roomId: string }) {
     roomId,
     phase: snapshot?.phase ?? '',
     stateVersion: snapshot?.stateVersion ?? null,
-    expired: Boolean(snapshot?.answerDeadlineAt) && countdown.remainingMs <= 0,
+    // 締切時刻に対して計算済みのときだけ「時間切れ」と見なす。
+    expired: countdown.ready && countdown.remainingMs <= 0,
     onLocked: handleLocked,
   });
+
+  /**
+   * ランキングは二段構えで出す。
+   *
+   * ドラムロールと同時に順位が見えると、ためる意味が無くなる。
+   * scoreboard へ入ったら、まず「まもなく発表します」を出してドラムロールを鳴らし、
+   * **その音が鳴り終わったところで**順位を出してファンファーレを鳴らす。
+   */
+  /** 発表済みの状態番号。ここへ届いたら順位を出す。 */
+  const [revealedVersion, setRevealedVersion] = useState<number | null>(null);
+  /** ためる処理を始めた状態番号。同じ番号で二度ためない。 */
+  const buildUpStartedRef = useRef<number | null>(null);
+
+  const scoreboardVersion = snapshot?.phase === 'scoreboard' ? snapshot.stateVersion : null;
+
+  useEffect(() => {
+    if (scoreboardVersion === null || buildUpStartedRef.current === scoreboardVersion) {
+      return;
+    }
+    buildUpStartedRef.current = scoreboardVersion;
+
+    // 待ち時間は素材の実際の長さに合わせる（差し替えても間延びしない）。
+    const seconds = durationOf('ranking');
+    const waitMs = Math.min(
+      RANKING_BUILD_UP_MAX_MS,
+      Math.max(RANKING_BUILD_UP_MIN_MS, (seconds ?? 2.5) * 1000),
+    );
+
+    const timerId = setTimeout(() => {
+      setRevealedVersion(scoreboardVersion);
+      play('fanfare', `${scoreboardVersion}:fanfare`);
+    }, waitMs);
+
+    return () => {
+      clearTimeout(timerId);
+    };
+  }, [durationOf, play, scoreboardVersion]);
+
+  /** ランキングを出してよいか。ためている間だけ false。 */
+  const rankingRevealed = scoreboardVersion === null || revealedVersion === scoreboardVersion;
 
   /**
    * 音の有効化はクリックイベントの中で始める必要がある。
@@ -180,6 +225,7 @@ export function PresentScreen({ roomId }: { roomId: string }) {
         showLeaderboard={snapshot.showLeaderboard}
         participantCount={snapshot.participantCount}
         finished={phase === 'finished'}
+        revealed={phase === 'finished' ? true : rankingRevealed}
       />
     );
   } else if (phase === 'question_ready' && !question) {

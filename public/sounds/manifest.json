@@ -4,5 +4,6 @@
   "answer-lock": "default/answer-lock.wav",
   "answer-reveal": "default/answer-reveal.wav",
   "ranking": "default/ranking.wav",
+  "fanfare": "default/fanfare.wav",
   "finish": "default/finish.wav"
 }

@@ -17,7 +17,15 @@
 import { createSoundDedupeStore, type SoundDedupeStore } from '@/lib/audio/sound-dedupe-store';
 
 export type SoundName =
-  'question-start' | 'tick' | 'answer-lock' | 'answer-reveal' | 'ranking' | 'finish';
+  | 'question-start'
+  | 'tick'
+  | 'answer-lock'
+  | 'answer-reveal'
+  /** ランキング発表前のためる音（ドラムロール）。 */
+  | 'ranking'
+  /** ランキングが出た瞬間の音（ファンファーレ）。 */
+  | 'fanfare'
+  | 'finish';
 
 export const SOUND_NAMES = [
   'question-start',
@@ -25,6 +33,7 @@ export const SOUND_NAMES = [
   'answer-lock',
   'answer-reveal',
   'ranking',
+  'fanfare',
   'finish',
 ] as const satisfies readonly SoundName[];
 
@@ -69,6 +78,11 @@ export interface ProjectorAudioManager {
    * 進行中の合図と違って**時間に追われないため、読み込みを最後まで待つ**。
    */
   playTest(name: SoundName): Promise<{ ok: boolean; reason: string | null }>;
+  /**
+   * 読み込み済みの音の長さ（秒）。未読み込みなら null。
+   * ドラムロールが鳴り終わったところで発表したいので、素材の実際の長さに合わせる。
+   */
+  durationOf(name: SoundName): number | null;
   setMuted(muted: boolean): void;
   /** 0.0〜1.0。範囲外は丸める。 */
   setVolume(volume: number): void;
@@ -101,6 +115,16 @@ const LATE_PLAY_WINDOW_MS = 1_500;
 
 /** 音量の立ち上がり・立ち下がりを少しだけなだらかにして、クリックノイズを避ける。 */
 const GAIN_RAMP_SECONDS = 0.02;
+
+/**
+ * 再生を始めるまでの余裕（秒）。
+ *
+ * `currentTime` ちょうどで start() すると、音声スレッドが今まさに書き出している
+ * 区間へ割り込む形になり、**先頭が数十ミリ秒欠ける**ことがある。
+ * 「デデン」のような立ち上がりの速い音ほど目立つ。
+ * 会場では気づかれない程度の遅れを足して、頭から鳴らす。
+ */
+const START_LEAD_SECONDS = 0.06;
 
 type AudioContextConstructor = new (options?: AudioContextOptions) => AudioContext;
 
@@ -194,6 +218,8 @@ export function createProjectorAudioManager(
   const decoded = new Map<SoundName, AudioBuffer>();
   const loading = new Map<SoundName, Promise<AudioBuffer | null>>();
   const activeSources = new Set<AudioBufferSourceNode>();
+  /** いま鳴っている音（種類ごとに 1 つ）。次が来たら止めて重ねない。 */
+  const playing = new Map<SoundName, AudioBufferSourceNode>();
 
   let manifest: Map<SoundName, string> | null = null;
   let manifestPromise: Promise<Map<SoundName, string>> | null = null;
@@ -354,19 +380,41 @@ export function createProjectorAudioManager(
     return task;
   };
 
-  const startSource = (buffer: AudioBuffer): void => {
+  /** 同じ種類の音が鳴っていれば止める。残り 5,4,3,2,1,0 秒の合図が重ならないようにする。 */
+  const stopPlaying = (name: SoundName): void => {
+    const previous = playing.get(name);
+    if (!previous) {
+      return;
+    }
+    playing.delete(name);
+    try {
+      previous.stop();
+    } catch {
+      // すでに終わっている場合は何もしない。
+    }
+  };
+
+  const startSource = (name: SoundName, buffer: AudioBuffer): void => {
     if (!context || !gain || disposed) {
       return;
     }
+    // 長い音源を使うと、次の合図が来ても前の音が鳴り続けて重なる。
+    // 素材の長さに関係なく重ならないよう、同じ種類は必ず 1 つだけにする。
+    stopPlaying(name);
     try {
       const source = context.createBufferSource();
       source.buffer = buffer;
       source.connect(gain);
       source.onended = () => {
         activeSources.delete(source);
+        if (playing.get(name) === source) {
+          playing.delete(name);
+        }
       };
       activeSources.add(source);
-      source.start();
+      playing.set(name, source);
+      // 先頭が欠けないよう、わずかに先の時刻を指定する。
+      source.start(context.currentTime + START_LEAD_SECONDS);
     } catch {
       warn('start', '効果音を再生できませんでした。');
     }
@@ -496,7 +544,7 @@ export function createProjectorAudioManager(
 
       const ready = decoded.get(name);
       if (ready) {
-        startSource(ready);
+        startSource(name, ready);
         return;
       }
 
@@ -509,7 +557,7 @@ export function createProjectorAudioManager(
         if (Date.now() - requestedAt > LATE_PLAY_WINDOW_MS) {
           return;
         }
-        startSource(buffer);
+        startSource(name, buffer);
       });
     },
 
@@ -533,8 +581,12 @@ export function createProjectorAudioManager(
         const reason = failures.get(name);
         return { ok: false, reason: describeFailure(name, reason) };
       }
-      startSource(buffer);
+      startSource(name, buffer);
       return { ok: true, reason: null };
+    },
+
+    durationOf(name: SoundName): number | null {
+      return decoded.get(name)?.duration ?? null;
     },
 
     setMuted(nextMuted: boolean): void {
@@ -566,6 +618,7 @@ export function createProjectorAudioManager(
         }
       }
       activeSources.clear();
+      playing.clear();
       decoded.clear();
       encoded.clear();
       loading.clear();

@@ -111,6 +111,8 @@ export type ProjectorAudio = {
   /** 動作確認用に 1 音鳴らす（二重再生防止の対象外）。結果は testResult に入る。 */
   playTest: () => Promise<void>;
   play: (name: SoundName, dedupeKey?: string) => void;
+  /** 読み込み済みの音の長さ（秒）。素材に合わせて次の演出を出すために使う。 */
+  durationOf: (name: SoundName) => number | null;
   setMuted: (muted: boolean) => void;
   setVolume: (volume: number) => void;
 };
@@ -201,6 +203,11 @@ export function useProjectorAudio(roomId: string): ProjectorAudio {
     managerRef.current?.play(name, dedupeKey);
   }, []);
 
+  const durationOf = useCallback(
+    (name: SoundName): number | null => managerRef.current?.durationOf(name) ?? null,
+    [],
+  );
+
   const playTest = useCallback(async (): Promise<void> => {
     const manager = managerRef.current;
     if (!manager) {
@@ -242,12 +249,19 @@ export function useProjectorAudio(roomId: string): ProjectorAudio {
     enable,
     playTest,
     play,
+    durationOf,
     setMuted,
     setVolume,
   };
 }
 
-/** フェーズごとに鳴らす音。ここに無いフェーズでは鳴らさない。 */
+/**
+ * フェーズごとに鳴らす音。ここに無いフェーズでは鳴らさない。
+ *
+ * scoreboard で鳴らすのは「ためる音」。
+ * ランキングそのものの発表音（fanfare）は、ためる音が鳴り終わってから
+ * RankingStage の表示に合わせて鳴らす（PresentScreen 側）。
+ */
 const PHASE_SOUND: Partial<Record<RoomPhase, SoundName>> = {
   question_open: 'question-start',
   question_locked: 'answer-lock',
@@ -279,8 +293,13 @@ export function useStageSoundCues({
   remainingSeconds: number;
   hasDeadline: boolean;
 }): void {
-  /** 直前に処理した「状態番号:フェーズ」。null なら未観測。 */
-  const lastPhaseKeyRef = useRef<string | null>(null);
+  /**
+   * 直前に観測したフェーズ。null なら未観測。
+   *
+   * **状態番号ではなくフェーズで見る。** 回答時間を延長すると状態番号だけが増えて
+   * フェーズは question_open のままなので、番号で見ていると出題音が鳴り直してしまう。
+   */
+  const lastPhaseRef = useRef<RoomPhase | null>(null);
   /** 直前の残り秒。タブ復帰で巻き戻ったときの判定に使う。 */
   const lastSecondsRef = useRef<number | null>(null);
 
@@ -288,12 +307,12 @@ export function useStageSoundCues({
     if (phase === null || stateVersion === null) {
       return;
     }
-    const key = `${stateVersion}:${phase}`;
-    if (lastPhaseKeyRef.current === key) {
+    if (lastPhaseRef.current === phase) {
+      // 同じフェーズのまま状態番号だけが変わった（回答時間の延長など）。鳴らさない。
       return;
     }
-    const isFirstObservation = lastPhaseKeyRef.current === null;
-    lastPhaseKeyRef.current = key;
+    const isFirstObservation = lastPhaseRef.current === null;
+    lastPhaseRef.current = phase;
     if (isFirstObservation) {
       // 接続直後の状態は「変化」ではないため鳴らさない。
       return;

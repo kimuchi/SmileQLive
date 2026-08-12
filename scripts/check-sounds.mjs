@@ -35,6 +35,7 @@ const SOUND_NAMES = [
   'answer-lock',
   'answer-reveal',
   'ranking',
+  'fanfare',
   'finish',
 ];
 

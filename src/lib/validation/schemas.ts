@@ -158,7 +158,7 @@ export const roomActionSchema = z
   .object({
     action: z.enum(ROOM_ACTIONS),
     questionId: uuidSchema.nullable().optional(),
-    /** extend_deadline で足す秒数。 */
+    /** extend_deadline で足す秒数。reopen_question では省略すると問題の制限時間を使う。 */
     extendSeconds: z.int().min(EXTEND_SECONDS_MIN).max(EXTEND_SECONDS_MAX).nullable().optional(),
     expectedVersion: z.int().min(0),
   })

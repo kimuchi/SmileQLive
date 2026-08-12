@@ -80,8 +80,9 @@ lobby
 question_ready
   ↓ open_question
 question_open        ← extend_deadline（回答時間の延長。フェーズは変わらない）
-  ↓ lock_question（手動 or 時間切れ）
+  ↓ lock_question（手動 or 時間切れの自動処理）
 question_locked
+  ↑ reopen_question（締め切った直後に受付へ戻す。正解発表後は戻せない）
   ↓ reveal_answer
 answer_revealed
   ↓ show_scoreboard（任意）
@@ -96,6 +97,13 @@ finished
 伸ばす起点は**サーバー時刻**で、まだ残っていれば残り時間へ足し、
 すでに過ぎていれば操作した時点から数え直します（締切直後の救済に使えます）。
 締め切ったあとは延長できません（締切を見て回答をやめた人が不利になるため）。
+締め切ってしまった直後に戻したいときは `reopen_question` を使います。
+こちらは締切時刻を**今から**数え直します。正解を出したあとは戻せません
+（答えを見てから回答できてしまうため）。
+
+時間切れの自動処理は司会画面・投影画面のどちらか一方が開いていれば動きます
+（`useExpiryLock`）。Cloud Run は状態を持たないため、サーバー側の常駐タイマーは置きません。
+判定そのものはサーバー時刻で行うので、クライアントが早めに知らせても締切は早まりません。
 
 `reopen_room` は `finished` から出られる唯一の遷移です。
 `finished_at` を消し、終了時に閉じた `join_open` を戻します。
