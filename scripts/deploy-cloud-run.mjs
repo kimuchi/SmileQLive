@@ -39,7 +39,7 @@ import {
 import { checkDependencies, installHint } from './lib/deps.mjs';
 import { color, fatal, heading, info, step, success, warn } from './lib/log.mjs';
 import { run, runPackageScript } from './lib/proc.mjs';
-import { confirmExact, isInteractive } from './lib/prompt.mjs';
+import { confirmYesNo, isInteractive } from './lib/prompt.mjs';
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 process.chdir(repoRoot);
@@ -81,25 +81,65 @@ success(`プロジェクトへアクセスできます: ${config.projectId}`);
 
 // ---------------------------------------------------------------------------
 step('Git の状態を確認');
+
+/**
+ * ここで**止めない**。
+ *
+ * 配信されるのは作業ツリーそのもの（gcloud run deploy --source .）なので、
+ * 未コミットの変更があること自体は誤りではない。
+ * むしろ `npm run sounds:install` で取り込んだ音源のように、
+ * 「コミットできないが配信したいファイル」が正しく存在する場面がある。
+ * 止めるとその手順が踏めなくなるため、何が配信されるかを見せて先へ進む。
+ *
+ * 取り違えを本当に止めたい場合だけ、設定へ "strictGitChecks": true を入れる。
+ */
 const git = gitInfo();
 if (git) {
   info(`ブランチ: ${git.branch} / コミット: ${git.commit.slice(0, 8)}`);
-  if (environment === 'production') {
-    if (config.requireCleanTree && git.dirty) {
+
+  if (config.legacyRequireCleanTree && !config.strictGitChecks) {
+    info(
+      color.dim(
+        '設定の "requireCleanTree" は廃止しました（注意表示のみになります）。' +
+          '止めたい場合は "strictGitChecks": true を設定してください。',
+      ),
+    );
+  }
+
+  const branchMismatch =
+    config.allowedBranches.length > 0 && !config.allowedBranches.includes(git.branch);
+
+  if (config.strictGitChecks) {
+    if (git.dirty) {
       fatal(
         '作業ツリーに未コミットの変更があります。',
-        '本番デプロイ前にコミットまたは stash してください。\n' +
-          '（この確認を無効にするには設定へ "requireCleanTree": false を追加）',
+        'コミットまたは stash してください。\n' +
+          '（設定の "strictGitChecks": false でこの停止をやめられます）',
       );
     }
-    if (config.allowedBranches.length > 0 && !config.allowedBranches.includes(git.branch)) {
+    if (branchMismatch) {
       fatal(
-        `本番デプロイが許可されていないブランチです: ${git.branch}`,
+        `許可されていないブランチです: ${git.branch}`,
         `許可ブランチ: ${config.allowedBranches.join(', ')}\n` +
-          '（設定の "allowedBranches" で変更できます）',
+          '（設定の "allowedBranches" / "strictGitChecks" で変更できます）',
       );
     }
-    success('本番デプロイの Git 条件を満たしています');
+    success('Git の条件を満たしています');
+  } else {
+    if (git.dirty) {
+      warn(`未コミットの変更が ${git.changes.length} 件あります。この内容がそのまま配信されます。`);
+      for (const line of git.changes.slice(0, 10)) {
+        console.log(`      ${line}`);
+      }
+      if (git.changes.length > 10) {
+        console.log(`      … 他 ${git.changes.length - 10} 件`);
+      }
+    } else {
+      success('作業ツリーはコミット済みです');
+    }
+    if (branchMismatch) {
+      warn(`ふだんと違うブランチです: ${git.branch}（想定: ${config.allowedBranches.join(', ')}）`);
+    }
   }
 } else {
   warn('Git リポジトリではないため、ブランチ・作業ツリーの確認を省略しました。');
@@ -163,22 +203,27 @@ if (existingUrl) {
   info('新規サービスを作成します。');
 }
 
+// 確認は 1 回だけ。Enter で進める。
+// ここへ来るまでに対象を明示して実行し、lint / typecheck / test / build も通っている。
+// 語句を打ち直させるのは、それらを終えた人への手間としては重すぎる。
+// 完全に省くには --yes を付ける。
 if (environment === 'production' && !skipConfirm) {
   if (!isInteractive()) {
+    // CI など、応答できない環境で黙って進めない。
     fatal(
-      '本番デプロイには確認が必要です。',
-      '非対話環境（CI など）から実行する場合は --yes を付けてください:\n' +
+      '本番デプロイの確認ができません（対話できない環境です）。',
+      '確認を省いて実行する場合は --yes を付けてください:\n' +
         '  npm run deploy -- production --yes',
     );
   }
-  const confirmed = await confirmExact(
-    `\n  本番環境 (${config.projectId} / ${config.serviceName}) へデプロイします。`,
-    'production',
+  console.log('');
+  const confirmed = await confirmYesNo(
+    `  本番環境 (${config.projectId} / ${config.serviceName}) へデプロイします。続けますか？`,
+    true,
   );
   if (!confirmed) {
-    fatal('確認できなかったため中止しました。');
+    fatal('中止しました。');
   }
-  success('確認しました');
 }
 
 // ---------------------------------------------------------------------------
@@ -374,7 +419,8 @@ function gitInfo() {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
-    return { branch, commit, dirty: status.length > 0 };
+    const changes = status.length > 0 ? status.split('\n').map((line) => line.trim()) : [];
+    return { branch, commit, dirty: changes.length > 0, changes };
   } catch {
     return null;
   }

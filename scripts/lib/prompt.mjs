@@ -19,31 +19,6 @@ export async function ask(question) {
   }
 }
 
-/**
- * 指定の語句を正確に入力させる確認（本番デプロイ用）。
- *
- * `[production]` のような角括弧は「Enter で既定値」と読めてしまうため使わない。
- * また、ここへ来るまでに lint / typecheck / test / build を通っており
- * 数分かかっている。打ち間違いで全部やり直しにならないよう、数回まで受け付ける。
- * 空入力は明示的な中止として扱う。
- */
-export async function confirmExact(question, expected, attempts = 3) {
-  console.log(question);
-  for (let remaining = attempts; remaining > 0; remaining -= 1) {
-    const answer = await ask(`  続けるには ${expected} と入力してください（中止は Enter）: `);
-    if (answer === expected) {
-      return true;
-    }
-    if (answer === '') {
-      return false;
-    }
-    if (remaining > 1) {
-      console.log(`  入力が一致しません。残り ${remaining - 1} 回。`);
-    }
-  }
-  return false;
-}
-
 export async function confirmYesNo(question, defaultYes = false) {
   const suffix = defaultYes ? '[Y/n]' : '[y/N]';
   const answer = (await ask(`${question} ${suffix}: `)).toLowerCase();

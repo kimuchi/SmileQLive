@@ -55,7 +55,7 @@
   "logLevel": "info",
 
   "allowedBranches": ["main"],
-  "requireCleanTree": true,
+  "strictGitChecks": false,
   "runVerifyBeforeDeploy": true,
 
   "$comment_turnstile": [

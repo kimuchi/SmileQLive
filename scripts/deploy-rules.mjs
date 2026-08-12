@@ -338,13 +338,14 @@ if (environment === 'production' && !skipConfirm) {
         '  npm run rules:deploy -- production --yes',
     );
   }
+  // Enter で進める（デプロイ側の確認と揃える）。省くには --yes。
   const confirmed = await confirmYesNo(
-    `  本番の Firebase プロジェクト (${projectId}) へ Rules を反映します。よろしいですか？`,
+    `  本番の Firebase プロジェクト (${projectId}) へ Rules を反映します。続けますか？`,
+    true,
   );
   if (!confirmed) {
-    fatal('確認できなかったため中止しました。');
+    fatal('中止しました。');
   }
-  success('確認しました');
 }
 
 // ---------------------------------------------------------------------------

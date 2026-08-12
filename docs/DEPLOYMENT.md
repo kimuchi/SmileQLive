@@ -357,7 +357,7 @@ npm run deploy
 1. コマンドライン引数 — `npm run deploy -- staging`
 2. 環境変数 — `SMILEQ_DEPLOY_ENV=staging npm run deploy`
 3. `deploy/` にある設定ファイルが 1 つだけなら、それ
-4. 両方あるなら **production**（本番は必ず確認プロンプトが出ます）
+4. 両方あるなら **production**（本番は Enter で進める確認が 1 回だけ出ます。`--yes` で省けます）
 
 明示的に指定するコマンドも用意しています。
 
@@ -559,11 +559,22 @@ npm run rules:deploy -- <env> --only firestore:indexes
 ### `Firebase: Error (auth/unauthorized-domain)`
 **Firebase Authentication → Settings → 承認済みドメイン**に、アクセス中のドメインを追加してください。
 
-### `本番デプロイが許可されていないブランチです`
-`main` 以外から本番へ出そうとしています。意図的な場合は設定の `allowedBranches` に追加してください。
+### 未コミットの変更・ブランチについて
+どちらもデプロイを**止めません**。注意として表示するだけです。
 
-### `作業ツリーに未コミットの変更があります`
-本番デプロイでは、実際に動くコードとリポジトリの内容を一致させるためコミットを必須にしています。緊急時は設定の `requireCleanTree` を `false` にできますが、常用しないでください。
+配信されるのは作業ツリーそのもの（`gcloud run deploy --source .`）なので、
+未コミットの変更があること自体は誤りではありません。
+`npm run sounds:install` で取り込んだ音源のように、
+コミットできないが配信したいファイルもあります。
+
+チームで運用していて取り違えを止めたい場合だけ、設定へ次を入れてください。
+
+```json
+{ "strictGitChecks": true }
+```
+
+`true` にすると、未コミットの変更があるとき、また `allowedBranches` 以外のブランチのときに停止します。
+（旧 `requireCleanTree` は廃止しました。設定に残っていても停止はしません）
 
 ### Cloud Build でビルドが失敗する
 ```bash

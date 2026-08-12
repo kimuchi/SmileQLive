@@ -262,6 +262,14 @@ function toStringArray(value) {
   return [];
 }
 
+/**
+ * 設定ファイルの値を、既定値で埋めた形へ整える。
+ * テストから直接呼べるよう名前付きで公開する（loadDeployConfig はファイル読み込みを伴うため）。
+ */
+export function normalizeConfigForTest(config, environment) {
+  return normalizeConfig(config, environment);
+}
+
 function normalizeConfig(config, environment) {
   const normalized = {
     environment,
@@ -297,7 +305,20 @@ function normalizeConfig(config, environment) {
     allowedBranches: Array.isArray(config.allowedBranches)
       ? config.allowedBranches.map(String)
       : ['main'],
-    requireCleanTree: config.requireCleanTree !== false,
+    /**
+     * Git の状態（未コミットの変更・ブランチ）で**デプロイを止める**か。
+     *
+     * 既定は false（注意だけ表示して続行）。
+     * `npm run sounds:install` のように、仕組み上どうしても未コミットの変更が残る
+     * 作業があるため、ここで止めると正しい手順が踏めなくなる。
+     * `gcloud run deploy --source .` は作業ツリーをそのまま配信するので、
+     * 未コミットの変更があること自体は誤りではない。
+     *
+     * チームで運用していて取り違えを止めたい場合だけ true にする。
+     */
+    strictGitChecks: config.strictGitChecks === true,
+    /** @deprecated strictGitChecks へ統合。設定されていれば案内だけ出す。 */
+    legacyRequireCleanTree: config.requireCleanTree === true,
     runVerifyBeforeDeploy: config.runVerifyBeforeDeploy !== false,
     turnstileSiteKey: config.turnstileSiteKey ? String(config.turnstileSiteKey) : '',
     turnstileSecretName: config.turnstileSecretName ? String(config.turnstileSecretName) : '',

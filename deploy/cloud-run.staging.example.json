@@ -48,7 +48,7 @@
   "logLevel": "debug",
 
   "allowedBranches": [],
-  "requireCleanTree": false,
+  "strictGitChecks": false,
   "runVerifyBeforeDeploy": true,
 
   "turnstileSiteKey": "",
