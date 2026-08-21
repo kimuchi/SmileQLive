@@ -3,6 +3,17 @@ name: Deploy to Cloud Run
 # ローカルと同じ scripts/deploy-cloud-run.mjs を呼ぶ。
 # CI とローカルでデプロイロジックを二重に持たない。
 
+# 自動デプロイは止めてある。**手動で実行したときだけ**動く。
+#
+# 理由:
+#   * Workload Identity 連携（vars.GCP_WORKLOAD_IDENTITY_PROVIDER）が未設定で、
+#     main へ push するたびに認証で失敗し、赤いだけの実行が積み上がっていた。
+#   * 会場で使う日が決まっている道具なので、いつ本番が入れ替わるかは
+#     人が決めたい（気づかないうちに当日のビルドが変わる事故を避ける）。
+#
+# 自動デプロイへ戻すとき:
+#   1. まず Workload Identity 連携とリポジトリ変数を設定する（docs/DEPLOYMENT.md §5）
+#   2. 下の `push:` の 2 行のコメントを外す
 on:
   workflow_dispatch:
     inputs:
@@ -12,8 +23,8 @@ on:
         options: [staging, production]
         default: staging
         required: true
-  push:
-    branches: [main]
+  # push:
+  #   branches: [main]
 
 concurrency:
   group: deploy-${{ github.event.inputs.environment || 'staging' }}

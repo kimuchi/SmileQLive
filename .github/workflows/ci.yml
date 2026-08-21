@@ -82,6 +82,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # 既知の脆弱性を検出する。moderate 以上で失敗させる。
+      #
+      # 「この依存には当てはまらない」と確認できた勧告だけ、
+      # package.json の pnpm.auditConfig.ignoreGhsas へ理由つきで登録してある
+      # （一覧と外す条件は docs/DEPLOYMENT.md §5.1）。
+      # 全体を素通しにはしない。登録していない勧告が出れば、ここで止まる。
       - run: pnpm audit --audit-level moderate
 
   e2e-smoke:

@@ -474,6 +474,15 @@ npm run domain:status -- production   # 現在の状態を確認
 
 ## 5. CI からデプロイする
 
+> **いまは自動デプロイを止めています。**
+> `.github/workflows/deploy.yml` は **Actions から手動実行したときだけ**動きます
+> （GitHub の Actions → Deploy to Cloud Run → Run workflow → デプロイ先を選ぶ）。
+> `main` へ push しても本番は入れ替わりません。デプロイは手元の `npm run deploy` か、
+> この手動実行で行ってください。
+>
+> 自動へ戻すには、下の変数をすべて設定したうえで `deploy.yml` の `push:` の
+> 2 行のコメントを外します。
+
 ローカルと CI で**同じスクリプト**を使います。デプロイロジックを二重に持ちません。
 
 `.github/workflows/deploy.yml` を用意済みです。必要な設定:
@@ -498,6 +507,21 @@ Firebase 版のデプロイに秘密情報は要りません。
 ワークフローは設定 JSON を実行時に生成し、
 `node scripts/deploy-rules.mjs <env> --yes` → `node scripts/deploy-cloud-run.mjs <env> --yes` の順に呼びます。
 サービスアカウントキー（JSON 鍵）は使わず、Workload Identity 連携を推奨します。
+
+### 5.1 依存パッケージの脆弱性検査（CI の `dependency audit`）
+
+CI は `pnpm audit --audit-level moderate` を実行し、moderate 以上の勧告があれば止まります。
+
+**当てはまらないと確認できた勧告だけ**、`package.json` の
+`pnpm.auditConfig.ignoreGhsas` へ登録しています。全体を素通しにはしていないので、
+登録していない勧告が出れば CI は止まります。
+
+| 勧告 | 経路 | 登録している理由 | 外す条件 |
+|---|---|---|---|
+| [GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq)（uuid < 11.1.1） | `firebase-admin` → `@google-cloud/storage@7` → `gaxios@6` → `uuid@9` | 欠陥は **v3/v5/v6 に呼び出し側のバッファを渡したとき**の境界チェック漏れ。gaxios は `v4()` を引数なしで 1 回だけ呼び、multipart の境界文字列を作るためだけに使っている（`gaxios/build/src/gaxios.js`）。このアプリは uuid を直接使っていない | `@google-cloud/storage` が gaxios 7 系へ上がったとき（gaxios 7 は uuid に依存していない）。`firebase-admin` を上げたら、この行を消して `pnpm audit` を通してみる |
+
+登録を増やすときは、**「なぜ当てはまらないか」を確認した根拠**と**外す条件**を必ずこの表へ書いてください。
+理由の書けない勧告は、無視ではなく直してください。
 
 ---
 

@@ -94,6 +94,11 @@
       "esbuild",
       "unrs-resolver",
       "sharp"
-    ]
+    ],
+    "auditConfig": {
+      "ignoreGhsas": [
+        "GHSA-w5hq-g745-h8pq"
+      ]
+    }
   }
 }
