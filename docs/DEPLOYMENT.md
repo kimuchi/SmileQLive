@@ -542,6 +542,25 @@ Firestore をまだ作成していません。デプロイは成功しても、�
 ### `PERMISSION_DENIED` が Firestore 操作で出る
 実行サービスアカウントに `roles/datastore.user` がありません。`npm run gcp:bootstrap -- <env>` を IAM 変更権限のあるアカウントで実行し直してください。
 
+### 画像をアップロードできない
+
+管理画面のメッセージに原因が添えてあります。それでも分からないときは、
+実際に失敗した画像を通して 1 段ずつ確かめてください。
+
+```bash
+npm run media:doctor -- --file ./失敗した画像.jpg
+```
+
+判定 → 変換（sharp）→ 保存先への書き込み → 署名付き URL の発行、の順に試し、
+**どこで落ちたか**と直し方を出します。よくある原因:
+
+| 出るメッセージ | 直し方 |
+|---|---|
+| バケットが見つかりません | Firebase コンソールで Storage を有効にする。または `MEDIA_BUCKET` を実在するバケット名へ直す |
+| 書き込む権限がありません | 実行サービスアカウントへ「Storage オブジェクト管理者」を付ける |
+| 認証情報を読み込めません | 手元なら `gcloud auth application-default login` |
+| 変換できません | JPEG・PNG・WebP へ保存し直す（iPhone の HEIC は「互換性優先」で撮る） |
+
 ### 画像の表示だけが失敗する（他は正常）
 署名付き URL の発行に失敗しています。実行サービスアカウント自身への
 `roles/iam.serviceAccountTokenCreator` と `iamcredentials.googleapis.com` の有効化を確認してください。
@@ -625,6 +644,9 @@ npm run emulators                       # ローカルエミュレータを起�
 
 npm run host:list                       # 司会者の棚卸し
 npm run host:add -- you@example.com --name "あなたの名前"
+
+npm run media:doctor               # 画像アップロードが通るか診断（変換・保存先・署名）
+npm run media:doctor -- --file ./失敗した画像.jpg
 
 npm run verify                     # lint + typecheck + test + build + 成果物検査
 npm run verify:bundle              # ビルド成果物の安全性検査のみ

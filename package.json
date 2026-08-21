@@ -47,7 +47,8 @@
     "seed:demo": "node scripts/seed-demo-quiz.mjs",
     "sounds:generate": "node scripts/generate-sounds.mjs",
     "sounds:check": "node scripts/check-sounds.mjs",
-    "sounds:install": "node scripts/install-sounds.mjs"
+    "sounds:install": "node scripts/install-sounds.mjs",
+    "media:doctor": "node scripts/media-doctor.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "5.7.1",

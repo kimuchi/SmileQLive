@@ -105,8 +105,13 @@ export type ProjectorAudio = {
   testResult: string | null;
   /** 以前この端末（タブ）で音を有効にしたか。案内文の出し分けに使う。 */
   previouslyEnabled: boolean;
-  /** **クリックイベント内から呼ぶこと。** AudioContext を作り、音源の先読みを始める。 */
-  enable: () => Promise<void>;
+  /**
+   * AudioContext を作り、音源の先読みを始める。
+   *
+   * 読み込み直後と最初の操作で自動的に呼ばれるので、ふだん画面側から呼ぶ必要はない。
+   * `silent` を付けると、解除できなくても注意文を出さない（自動で試すとき用）。
+   */
+  enable: (options?: { silent?: boolean }) => Promise<void>;
   /** 動作確認用に 1 音鳴らす（二重再生防止の対象外）。結果は testResult に入る。 */
   playTest: () => Promise<void>;
   play: (name: SoundName, dedupeKey?: string) => void;
@@ -175,31 +180,83 @@ export function useProjectorAudio(roomId: string): ProjectorAudio {
     };
   }, [roomId]);
 
-  const enable = useCallback(async (): Promise<void> => {
-    const manager = managerRef.current;
-    if (!manager) {
+  const enable = useCallback(
+    async (options: { silent?: boolean } = {}): Promise<void> => {
+      const manager = managerRef.current;
+      if (!manager) {
+        return;
+      }
+      if (!options.silent) {
+        setWarning(null);
+      }
+
+      // AudioContext の生成はこの呼び出しの同期部分で行われる（クリックの有効期間を使う）。
+      await manager.unlock({ silent: options.silent ?? false });
+      setIsUnlocked(manager.isUnlocked);
+
+      if (manager.isUnlocked) {
+        writeEnabledFlag(roomId);
+        setPreviouslyEnabled(true);
+      } else if (options.silent) {
+        // 自動で試して駄目だっただけ。次の操作で解除されるので、まだ何も言わない。
+        return;
+      }
+
+      // 先読みは待たない。待つと全画面要求までにクリックの有効期間を使い切ってしまう。
+      // 結果は届き次第、画面へ出す（黙って失敗させない）。
+      setStatus({ kind: 'loading' });
+      void manager.preload().then((readiness) => {
+        if (managerRef.current === manager) {
+          setStatus(toStatus(readiness));
+        }
+      });
+    },
+    [roomId],
+  );
+
+  /**
+   * 操作なしで音を出せるようにする。
+   *
+   * 会場の投影担当に「まずこのボタンを押してください」を強いると、
+   * 押し忘れたときに画面が黙って止まったように見える。そこで:
+   *
+   *   1. 読み込み直後に一度だけ静かに試す。
+   *      ブラウザの設定でこのサイトの自動再生が許可されていれば、これで鳴るようになる。
+   *   2. 駄目なら、画面のどこかを触った**最初の一回**で解除する。
+   *      「効果音を有効にする」を押す必要はない（押しても同じことが起きる）。
+   *
+   * どちらも失敗しても画面は動き続ける。音だけが出ない。
+   */
+  useEffect(() => {
+    if (isUnlocked) {
       return;
     }
-    setWarning(null);
 
-    // AudioContext の生成はこの呼び出しの同期部分で行われる（クリックの有効期間を使う）。
-    await manager.unlock();
-    setIsUnlocked(manager.isUnlocked);
+    let cancelled = false;
+    // 解除できたかどうかはブラウザに聞くしかない（レンダー中には分からない）。
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 解除の可否はブラウザへ問い合わせないと分からないため
+    void enable({ silent: true });
 
-    if (manager.isUnlocked) {
-      writeEnabledFlag(roomId);
-      setPreviouslyEnabled(true);
-    }
-
-    // 先読みは待たない。待つと全画面要求までにクリックの有効期間を使い切ってしまう。
-    // 結果は届き次第、画面へ出す（黙って失敗させない）。
-    setStatus({ kind: 'loading' });
-    void manager.preload().then((readiness) => {
-      if (managerRef.current === manager) {
-        setStatus(toStatus(readiness));
+    const handleGesture = (): void => {
+      if (cancelled) {
+        return;
       }
-    });
-  }, [roomId]);
+      void enable({ silent: true });
+    };
+
+    // capture で拾う。画面の中の要素が止めても、ここまでは必ず届く。
+    const options = { capture: true, passive: true } as const;
+    window.addEventListener('pointerdown', handleGesture, options);
+    window.addEventListener('keydown', handleGesture, options);
+    window.addEventListener('touchend', handleGesture, options);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('pointerdown', handleGesture, options);
+      window.removeEventListener('keydown', handleGesture, options);
+      window.removeEventListener('touchend', handleGesture, options);
+    };
+  }, [enable, isUnlocked]);
 
   const play = useCallback((name: SoundName, dedupeKey?: string): void => {
     managerRef.current?.play(name, dedupeKey);
@@ -348,8 +405,8 @@ export function useStageSoundCues({
    * 素材が短くても繰り返して最後まで鳴らす。
    *
    * `isUnlocked` も見る。**出題中に投影画面を開き直した場合**、
-   * 「投影を開始」を押す前にこの効果が走る。そこで諦めてしまうと、
-   * 押したあとも鳴り始めず、その問題は最後まで無音になる。
+   * 音がまだ解除されていない状態でこの効果が走る。そこで諦めてしまうと、
+   * 解除されたあとも鳴り始めず、その問題は最後まで無音になる。
    */
   useEffect(() => {
     if (!isUnlocked || phase !== 'question_open') {

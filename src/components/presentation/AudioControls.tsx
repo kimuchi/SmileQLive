@@ -1,6 +1,8 @@
 'use client';
 
 import type { ChangeEvent } from 'react';
+import { AudioStatusLine } from '@/components/presentation/PresentAudioHint';
+import type { AudioStatus } from '@/components/presentation/use-projector-audio';
 import { cn } from '@/lib/client/cn';
 
 /**
@@ -16,6 +18,7 @@ export function AudioControls({
   muted,
   volume,
   warning,
+  status,
   isFullscreen,
   onEnable,
   onToggleMute,
@@ -26,6 +29,8 @@ export function AudioControls({
   muted: boolean;
   volume: number;
   warning: string | null;
+  /** 何件鳴らせるか。一部しか鳴らせないときだけ画面へ出す。 */
+  status: AudioStatus;
   isFullscreen: boolean;
   /** クリックイベント内で効果音を有効にする。 */
   onEnable: () => void;
@@ -46,6 +51,13 @@ export function AudioControls({
         >
           {warning}
         </p>
+      ) : null}
+
+      {/* 一部しか鳴らせないときは黙って進めない。会場で原因を切り分けられるようにする。 */}
+      {status.kind === 'partial' ? (
+        <div className="bg-stage-950/90 pointer-events-auto max-w-sm rounded-lg border border-amber-300/60 px-3 py-2 text-xs">
+          <AudioStatusLine status={status} />
+        </div>
       ) : null}
 
       <div

@@ -60,6 +60,7 @@ type SettingsDraft = {
   showLeaderboard: boolean;
   showTotalQuestions: boolean;
   showQuestionBeforeOpen: boolean;
+  alwaysShowJoinCode: boolean;
 };
 
 type PendingDialog = { kind: 'delete-question'; questionId: string; position: number } | null;
@@ -97,6 +98,7 @@ export function QuizEditor({ quizId }: QuizEditorProps) {
             showLeaderboard: response.quiz.showLeaderboard,
             showTotalQuestions: response.quiz.showTotalQuestions,
             showQuestionBeforeOpen: response.quiz.showQuestionBeforeOpen,
+            alwaysShowJoinCode: response.quiz.alwaysShowJoinCode,
           },
       );
       setLoadError(null);
@@ -129,6 +131,7 @@ export function QuizEditor({ quizId }: QuizEditorProps) {
       showLeaderboard: settings.showLeaderboard,
       showTotalQuestions: settings.showTotalQuestions,
       showQuestionBeforeOpen: settings.showQuestionBeforeOpen,
+      alwaysShowJoinCode: settings.alwaysShowJoinCode,
     });
     setQuiz((previous) =>
       previous
@@ -483,6 +486,15 @@ export function QuizEditor({ quizId }: QuizEditorProps) {
             hint="オフ（既定）だと「まもなく出題」だけを出し、受付開始と同時に問題を表示します。"
             onChange={(event) => {
               patchSettings({ showQuestionBeforeOpen: event.currentTarget.checked });
+            }}
+          />
+
+          <Checkbox
+            label="参加用の二次元コードをずっと表示する"
+            checked={settings.alwaysShowJoinCode}
+            hint="オンにすると、投影画面の隅に参加用の二次元コードを出し続けます。途中から来た人がその場で参加できます（受付を締め切っている間は出ません）。"
+            onChange={(event) => {
+              patchSettings({ alwaysShowJoinCode: event.currentTarget.checked });
             }}
           />
         </div>

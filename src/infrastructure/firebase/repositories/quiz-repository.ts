@@ -290,6 +290,7 @@ async function buildQuizDetail(
     // 古いクイズには無い項目。既定へ寄せる（未設定＝全問数は出す／先出しはしない）。
     showTotalQuestions: quiz.showTotalQuestions !== false,
     showQuestionBeforeOpen: quiz.showQuestionBeforeOpen === true,
+    alwaysShowJoinCode: quiz.alwaysShowJoinCode === true,
     soundTheme: quiz.soundTheme,
     updatedAt: toIsoOr(quiz.updatedAt),
     questions: questions
@@ -346,6 +347,8 @@ export async function createQuiz(
     showTotalQuestions: true,
     // 既定は「受付開始と同時に問題を出す」。
     showQuestionBeforeOpen: false,
+    // 既定は「開始前の待機画面にだけ大きく出す」。
+    alwaysShowJoinCode: false,
     soundTheme: 'default',
     // 既定は共有なし。array-contains のクエリ対象になるため空配列で作る。
     sharedWith: [],
@@ -376,6 +379,9 @@ export async function updateQuiz(quizId: string, input: UpdateQuizInput): Promis
   }
   if (input.showQuestionBeforeOpen !== undefined) {
     patch.showQuestionBeforeOpen = input.showQuestionBeforeOpen;
+  }
+  if (input.alwaysShowJoinCode !== undefined) {
+    patch.alwaysShowJoinCode = input.alwaysShowJoinCode;
   }
   if (input.soundTheme !== undefined) {
     patch.soundTheme = input.soundTheme;
@@ -432,6 +438,7 @@ export async function duplicateQuiz(quizId: string, ownerId: string): Promise<Ad
     showLeaderboard: source.showLeaderboard,
     showTotalQuestions: source.showTotalQuestions !== false,
     showQuestionBeforeOpen: source.showQuestionBeforeOpen === true,
+    alwaysShowJoinCode: source.alwaysShowJoinCode === true,
     soundTheme: source.soundTheme,
     // 共有設定は引き継がない。複製の所有者が改めて決める。
     sharedWith: [],

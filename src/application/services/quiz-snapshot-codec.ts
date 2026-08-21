@@ -120,6 +120,7 @@ export function buildQuizSnapshot(detail: AdminQuizDetail): QuizSnapshot {
     showLeaderboard: detail.showLeaderboard,
     showTotalQuestions: detail.showTotalQuestions,
     showQuestionBeforeOpen: detail.showQuestionBeforeOpen,
+    alwaysShowJoinCode: detail.alwaysShowJoinCode,
     soundTheme: detail.soundTheme,
     leaderboardSize: DEFAULT_LEADERBOARD_SIZE,
   };

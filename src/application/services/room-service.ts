@@ -47,7 +47,7 @@ import {
   resolveStageBackground,
 } from '@/application/services/media-service';
 import type { CreateRoomInput } from '@/lib/validation/schemas';
-import { roomModeOf, type RoomMode } from '@/domain/room/room-mode';
+import { acceptsParticipants, roomModeOf, type RoomMode } from '@/domain/room/room-mode';
 import { toMyAnswerDto } from '@/application/services/answer-mapper';
 import { parseQuizSnapshot } from '@/application/services/quiz-snapshot-codec';
 import { resolveQuestionMedia } from '@/application/services/media-service';
@@ -233,6 +233,7 @@ async function createQuizRoom(input: CreateRoomInput): Promise<CreateRoomRespons
     mode: 'quiz',
     quizId,
     joinTokenHash: tokenHash,
+    joinToken: token,
     quizSnapshot: snapshot,
     drawSnapshot: null,
     maxParticipants: input.maxParticipants ?? DEFAULT_MAX_PARTICIPANTS,
@@ -280,6 +281,7 @@ async function createDrawRoom(
     mode,
     quizId: null,
     joinTokenHash: tokenHash,
+    joinToken: null,
     quizSnapshot: {
       quizId: '',
       title: drawSnapshot.title,
@@ -287,6 +289,7 @@ async function createDrawRoom(
         showLeaderboard: false,
         showTotalQuestions: false,
         showQuestionBeforeOpen: false,
+        alwaysShowJoinCode: false,
         soundTheme: 'default',
         leaderboardSize: 0,
       },
@@ -432,6 +435,19 @@ export async function getStaffSnapshot(
   // 抽選会・ビンゴの状態。クイズのルームでは作らない。
   const draw = await buildStageDraw(room);
 
+  /**
+   * 参加 URL。
+   *
+   * 投影担当にも渡す。二次元コードを出すのは投影画面の仕事で、
+   * 渡さないと会場で URL を貼り付けてもらうことになる。
+   * 参加受付を開かないモード（抽選会・ビンゴ）と、平文を保存する前に
+   * 作られた古いルームでは null になる。
+   */
+  const joinUrl =
+    room.joinToken && acceptsParticipants(roomModeOf(room.mode))
+      ? buildJoinUrl(await currentBaseUrl(), room.joinToken)
+      : null;
+
   const base: StaffSnapshot = {
     roomId,
     mode: roomModeOf(room.mode),
@@ -456,20 +472,19 @@ export async function getStaffSnapshot(
     draw,
     availableActions: availableActions(phase, roomModeOf(room.mode)),
     preloadImageUrls: buildPreloadUrls(parts),
+    alwaysShowJoinCode: snapshot.settings.alwaysShowJoinCode,
   };
 
   if (audience !== 'host') {
-    // 投影担当には参加 URL・参加者一覧を渡さない。
-    return base;
+    // 投影担当へ渡すのは参加 URL まで。参加者一覧は渡さない。
+    return { ...base, joinUrl };
   }
 
   const members = await getRoomMembers(roomId, 'participant');
 
   return {
     ...base,
-    // 参加 URL の平文トークンは保持していないため、司会画面でも再表示しない
-    // （必要なら「参加URLを再発行」で新しいトークンを発行する）。
-    joinUrl: null,
+    joinUrl,
     participants: members.map((entry) => ({
       participantId: entry.id,
       nickname: entry.nickname ?? '参加者',
@@ -704,7 +719,7 @@ export async function rotateJoinToken(roomId: string): Promise<RotateJoinTokenRe
   await requireRoomOwner(roomId);
 
   const { token, tokenHash } = createJoinToken();
-  const { rotatedAt } = await rotateJoinTokenHash(roomId, tokenHash);
+  const { rotatedAt } = await rotateJoinTokenHash(roomId, tokenHash, token);
   const baseUrl = await currentBaseUrl();
 
   logger.info('room.join_token_rotated', { roomId });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BINGO_COLUMN_LABELS,
+  bingoColumnOf,
   bingoColumns,
   drawnEntryIdSet,
   drawnStageEntries,
@@ -164,5 +165,32 @@ describe('ビンゴのボードの列分け', () => {
     const columns = bingoColumns(makeNumberDraw(1, 3));
 
     expect(columns.every((column) => column.entries.length > 0)).toBe(true);
+  });
+});
+
+describe('bingoColumnOf', () => {
+  /**
+   * 球の色は列（B/I/N/G/O）で決まる。ビンゴの決まり事なので、
+   * 手元の紙のカードと照らし合わせるときの手がかりになる。
+   */
+  it('1〜75 では列を返す', () => {
+    const draw = makeNumberDraw(1, 75);
+    expect(bingoColumnOf(draw, 'n1')).toBe('B');
+    expect(bingoColumnOf(draw, 'n15')).toBe('B');
+    expect(bingoColumnOf(draw, 'n16')).toBe('I');
+    expect(bingoColumnOf(draw, 'n45')).toBe('N');
+    expect(bingoColumnOf(draw, 'n60')).toBe('G');
+    expect(bingoColumnOf(draw, 'n75')).toBe('O');
+  });
+
+  it('5 列に割れない範囲では列を決めない', () => {
+    // 列が決まらないなら色も付けない。中途半端に B/I/N/G/O を出すと嘘になる。
+    const draw = makeNumberDraw(1, 20);
+    expect(bingoColumnOf(draw, 'n1')).toBeNull();
+  });
+
+  it('知らない ID には列を返さない', () => {
+    const draw = makeNumberDraw(1, 75);
+    expect(bingoColumnOf(draw, 'unknown')).toBeNull();
   });
 });

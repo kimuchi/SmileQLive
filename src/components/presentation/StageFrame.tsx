@@ -15,12 +15,20 @@ import { stageSize } from '@/components/presentation/stage-theme';
 export function StageFrame({
   header,
   footer,
+  aside,
   children,
   className,
   backgroundUrl = null,
 }: {
   header?: ReactNode;
   footer?: ReactNode;
+  /**
+   * 右下へ置く小さな添え物（参加用の二次元コードなど）。
+   *
+   * **重ねずに場所を取る。** 問題文や選択肢の上へ半透明で重ねると、
+   * 会場の後方から文字が読めなくなる。その分だけ本体を狭くする。
+   */
+  aside?: ReactNode;
   children: ReactNode;
   className?: string;
   /**
@@ -59,9 +67,21 @@ export function StageFrame({
             各ステージ側で縮む要素（画像など）を用意したうえで、
             それでも収まらない場合はここで切る（重ねない）。
           */}
-          <div className="flex min-h-0 flex-1 flex-col justify-center overflow-hidden">
-            {children}
-          </div>
+          {aside ? (
+            <div
+              className="flex min-h-0 flex-1 flex-row items-stretch"
+              style={{ gap: stageSize(28) }}
+            >
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col justify-center overflow-hidden">
+                {children}
+              </div>
+              <div className="flex shrink-0 flex-col justify-end">{aside}</div>
+            </div>
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col justify-center overflow-hidden">
+              {children}
+            </div>
+          )}
           {footer ?? null}
         </div>
       </div>

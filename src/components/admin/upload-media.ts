@@ -29,11 +29,16 @@ function parseApiError(body: unknown): ApiError['error'] | null {
   if (!isRecord(body) || !isRecord(body.error)) {
     return null;
   }
-  const { code, message, requestId } = body.error;
+  const { code, message, requestId, details } = body.error;
   if (typeof code !== 'string' || typeof message !== 'string') {
     return null;
   }
-  return { code, message, requestId: typeof requestId === 'string' ? requestId : '' };
+  return {
+    code,
+    message,
+    requestId: typeof requestId === 'string' ? requestId : '',
+    ...(details !== undefined ? { details } : {}),
+  };
 }
 
 export type UploadedAsset = MediaUploadResponse['asset'];
@@ -120,6 +125,8 @@ export async function uploadAdminImage(input: {
       message: apiError?.message ?? '画像をアップロードできませんでした',
       status: response.status,
       requestId: apiError?.requestId ?? '',
+      // 失敗した理由（保存先が無い・権限が無い等）を画面へ出すために持ち帰る。
+      ...(apiError?.details !== undefined ? { details: apiError.details } : {}),
     });
   }
 

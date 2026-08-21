@@ -95,6 +95,7 @@ export type AdminQuizDetail = {
   showTotalQuestions: boolean;
   /** 回答受付を開始する前に問題を見せるか。 */
   showQuestionBeforeOpen: boolean;
+  alwaysShowJoinCode: boolean;
   soundTheme: string;
   updatedAt: string;
   questions: AdminQuestion[];

@@ -157,6 +157,286 @@ button {
   animation: stage-urgent 1s steps(2, jump-none) infinite;
 }
 
+/* ===========================================================================
+ * 会場向けの演出
+ *
+ * 会場は明るく、席は遠い。文字が変わっただけでは「変わったこと」が伝わらない。
+ * そこで「光る・弾む・降る」を重ねて、後ろの席からでも**動きで**分かるようにする。
+ *
+ * 決めごと:
+ *   - 動かすのは transform と opacity だけ（投影機は描き直しが重い）。
+ *   - 読ませたい文字の上に動くものを重ねない。周りで動かす。
+ *   - prefers-reduced-motion では、このファイルの末尾ですべて止まる。
+ * =========================================================================== */
+
+/* --- 当選の瞬間の閃光。画面全体を一度だけ白く飛ばす。 --- */
+@keyframes stage-flash {
+  0% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.stage-flash {
+  animation: stage-flash 620ms ease-out both;
+}
+
+/* --- 背後から差す光線。ゆっくり回し続ける（当選中ずっと出す）。 --- */
+@keyframes stage-rays {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.stage-rays {
+  background: repeating-conic-gradient(
+    from 0deg,
+    rgba(252, 211, 77, 0.18) 0deg 5deg,
+    transparent 5deg 16deg
+  );
+  animation: stage-rays 14s linear infinite;
+  /* 中心だけ濃く、外側はすぐ消す。盤面や問題文の上まで届くと文字が白く飛ぶ。 */
+  mask-image: radial-gradient(circle, #000 14%, transparent 58%);
+}
+
+/* --- 当選から広がる輪。3 枚を時間差で出す。 --- */
+@keyframes stage-ring {
+  0% {
+    transform: scale(0.55);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+.stage-ring {
+  animation: stage-ring 1.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.stage-ring-2 {
+  animation-delay: 220ms;
+}
+.stage-ring-3 {
+  animation-delay: 440ms;
+}
+
+/* --- 紙吹雪。位置と速さは要素側の CSS 変数で決める（乱数を使わない）。 --- */
+@keyframes stage-confetti {
+  0% {
+    transform: translate3d(0, -12%, 0) rotate(0deg);
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(var(--stage-confetti-drift, 0), 118%, 0)
+      rotate(var(--stage-confetti-spin, 540deg));
+    opacity: 0;
+  }
+}
+
+.stage-confetti {
+  animation: stage-confetti var(--stage-confetti-duration, 2.6s) linear both;
+  animation-delay: var(--stage-confetti-delay, 0ms);
+}
+
+/* --- 金色の照り返し。当選者の名前を撫でるように光が走る。 --- */
+@keyframes stage-shine {
+  to {
+    background-position: 200% center;
+  }
+}
+
+.stage-shine {
+  background-image: linear-gradient(
+    100deg,
+    #fcd34d 0%,
+    #fffbe8 42%,
+    #fff 50%,
+    #fde68a 58%,
+    #fcd34d 100%
+  );
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  /* 文字が透明なので text-shadow は効かない。輪郭の光は filter で出す。 */
+  filter: drop-shadow(0 0 0.5cqw rgba(252, 211, 77, 0.85))
+    drop-shadow(0 0 1.6cqw rgba(255, 255, 255, 0.5));
+  animation: stage-shine 2.6s linear infinite;
+}
+
+/* --- 上から落ちて弾む。ビンゴの球・当選カードの登場に使う。 --- */
+@keyframes stage-drop {
+  0% {
+    transform: translate3d(0, -130%, 0) scale(0.65);
+    opacity: 0;
+  }
+  52% {
+    transform: translate3d(0, 7%, 0) scale(1.08);
+    opacity: 1;
+  }
+  70% {
+    transform: translate3d(0, -5%, 0) scale(0.97);
+  }
+  85% {
+    transform: translate3d(0, 2%, 0) scale(1.02);
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.stage-drop {
+  animation: stage-drop 900ms cubic-bezier(0.22, 1.1, 0.36, 1) both;
+}
+
+/* --- 抽選機の中で球が揺れる。回している間ずっと。 --- */
+@keyframes stage-tumble {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(-7deg);
+  }
+  25% {
+    transform: translate3d(3%, -4%, 0) rotate(6deg);
+  }
+  50% {
+    transform: translate3d(-3%, 3%, 0) rotate(-5deg);
+  }
+  75% {
+    transform: translate3d(4%, 1%, 0) rotate(7deg);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) rotate(-7deg);
+  }
+}
+
+.stage-tumble {
+  animation: stage-tumble 620ms ease-in-out infinite;
+}
+
+/* --- 抽選機のかご。回している間だけ回す。 --- */
+@keyframes stage-cage {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.stage-cage {
+  animation: stage-cage 2.2s linear infinite;
+}
+
+/*
+ * --- リールが流れる。候補が切り替わるたびに 1 回ぶん再生する。 ---
+ *
+ * **必ず「読める状態」で終わる**ようにしてある。
+ * 流れ去るところまで動かすと、切り替えが止まった瞬間に
+ * 薄いまま・ずれたままの文字が残ってしまう（会場では事故になる）。
+ * 下から入ってきて所定の位置に収まる、だけにする。
+ */
+@keyframes stage-reel {
+  0% {
+    transform: translate3d(0, 34%, 0);
+    opacity: 0.35;
+  }
+  60% {
+    transform: none;
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.stage-reel {
+  animation: stage-reel 110ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* --- 勢いよく決まる。順位の札に使う。 --- */
+@keyframes stage-slam {
+  0% {
+    transform: scale(2.6) rotate(-9deg);
+    opacity: 0;
+  }
+  55% {
+    transform: scale(0.9) rotate(2deg);
+    opacity: 1;
+  }
+  78% {
+    transform: scale(1.05) rotate(-1deg);
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.stage-slam {
+  animation: stage-slam 640ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* --- ビンゴ盤のマス。出た瞬間にめくれて光る。 --- */
+@keyframes stage-mark {
+  0% {
+    transform: rotateX(-90deg) scale(0.8);
+  }
+  60% {
+    transform: rotateX(0deg) scale(1.16);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+.stage-mark {
+  animation: stage-mark 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* --- 呼吸するような光。次を待っている間の「READY」に使う。 --- */
+@keyframes stage-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 0.5cqw rgba(103, 232, 249, 0.7));
+  }
+  50% {
+    transform: scale(1.04);
+    filter: drop-shadow(0 0 1.6cqw rgba(103, 232, 249, 1));
+  }
+}
+
+.stage-breathe {
+  animation: stage-breathe 1.8s ease-in-out infinite;
+}
+
+/* --- 大きく弾む。正解発表など「決まった」瞬間に一度だけ。 --- */
+@keyframes stage-pop-big {
+  0% {
+    transform: scale(0.72);
+    opacity: 0;
+  }
+  55% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+  75% {
+    transform: scale(0.97);
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.stage-pop-big {
+  animation: stage-pop-big 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 /* 投影画面のフォントは 1920x1080 基準で cqw ではなく vw ベースに寄せる */
 .stage-scale {
   container-type: inline-size;

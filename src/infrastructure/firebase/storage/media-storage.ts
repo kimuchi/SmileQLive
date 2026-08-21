@@ -81,6 +81,33 @@ export function parseStorageRef(ref: string): ParsedStorageRef | null {
 // ---------------------------------------------------------------------------
 
 /**
+ * 保存に失敗した理由を、直し方が分かる日本語にする。
+ *
+ * 会場や当日の準備で見るのは管理者だけなので、原因はぼかさず具体的に出す。
+ * 「画像を処理できませんでした」とだけ出していた頃は、
+ * バケット未作成・権限不足・画像の破損の区別がつかなかった。
+ */
+function describeStorageFailure(bucket: string, error: unknown): string {
+  const status =
+    typeof (error as { code?: unknown })?.code === 'number'
+      ? (error as { code: number }).code
+      : null;
+  const message = error instanceof Error ? error.message : String(error);
+
+  // 認証を先に見る。認証が通っていないと、実在するバケットも「無い」ように見える。
+  if (status === 401 || /credential|unauthenticated|could not load the default/i.test(message)) {
+    return '保存先の認証情報を読み込めませんでした。実行サービスアカウントの設定を確認してください。';
+  }
+  if (status === 403 || /permission|forbidden|access/i.test(message)) {
+    return `バケット ${bucket} へ書き込む権限がありません。実行サービスアカウントに Storage オブジェクト管理者を付けてください。`;
+  }
+  if (status === 404 || /does not exist|Not Found/i.test(message)) {
+    return `バケット ${bucket} が見つかりません。Storage を有効にするか、MEDIA_BUCKET を確認してください。`;
+  }
+  return `バケット ${bucket} への書き込みに失敗しました: ${message}`;
+}
+
+/**
  * 変換済み (WebP) 画像を保存する。
  * 変換・検証は media-service 側で完了している前提。
  */
@@ -97,11 +124,14 @@ export async function uploadProcessedImage(
       metadata: { cacheControl: 'private, max-age=31536000, immutable' },
     });
   } catch (error) {
+    const reason = describeStorageFailure(bucket.name, error);
     logger.error('storage.upload_failed', {
       bucket: bucket.name,
+      objectPath,
       errorMessage: error instanceof Error ? error.message : String(error),
     });
-    throw new AppError('MEDIA_PROCESSING_FAILED', { cause: error });
+    // 画像の中身ではなく保存先の問題。管理画面へ理由をそのまま返す（管理者しか見ない画面）。
+    throw new AppError('MEDIA_STORAGE_FAILED', { cause: error, details: { reason } });
   }
 
   return { objectPath };

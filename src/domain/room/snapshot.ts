@@ -71,7 +71,15 @@ export type StaffSnapshot = SnapshotBase & {
   availableActions: RoomAction[];
   /** 事前読込対象の画像 URL。 */
   preloadImageUrls: string[];
-  /** 司会のみ: 参加 URL（投影担当には返さない）。 */
+  /**
+   * 参加用の二次元コードを進行中もずっと隅に出すか。
+   * 途中から来た人がその場で入れるようにするための設定。
+   */
+  alwaysShowJoinCode: boolean;
+  /**
+   * 参加 URL。二次元コードを出すのは投影画面の仕事なので、投影担当にも渡す。
+   * 参加受付を開かないモードと、平文を保存する前の古いルームでは null。
+   */
   joinUrl?: string | null;
   /** 司会のみ: 参加者一覧。 */
   participants?: Array<{

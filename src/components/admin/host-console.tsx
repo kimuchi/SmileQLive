@@ -87,7 +87,8 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
     audience: 'staff',
   });
 
-  const [joinUrl, setJoinUrl] = useState<string | null>(null);
+  /** 再発行したときの参加 URL。ふだんは Snapshot が返す値を使う。 */
+  const [rotatedJoinUrl, setRotatedJoinUrl] = useState<string | null>(null);
   const [presentation, setPresentation] = useState<PresentationLinkResponse | null>(null);
   const [busy, setBusy] = useState<BusyKey>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -95,9 +96,10 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
   const [confirmFinish, setConfirmFinish] = useState(false);
 
   useEffect(() => {
-    // 平文の参加URLはサーバーに残らない。ルーム作成時に控えた値だけを復元する。
+    // 平文を保存する前に作られた古いルームでは Snapshot が参加 URL を返さない。
+    // その場合だけ、ルーム作成時にこの端末へ控えた値を使う。
     // eslint-disable-next-line react-hooks/set-state-in-effect -- ブラウザ保管からの復元のため
-    setJoinUrl(recallJoinUrl(roomId));
+    setRotatedJoinUrl(recallJoinUrl(roomId));
   }, [roomId]);
 
   const countdown = useCountdown(snapshot?.answerDeadlineAt ?? null, clock);
@@ -233,7 +235,7 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
       );
       // 平文トークンはこの応答でしか得られない。タブ内だけに控える。
       rememberJoinUrl(roomId, response.joinUrl);
-      setJoinUrl(response.joinUrl);
+      setRotatedJoinUrl(response.joinUrl);
       setNotice('参加URLを再発行しました。会場の二次元コードを貼り替えてください。');
       await refresh();
     } catch (caught) {
@@ -617,7 +619,7 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
             description="会場のスクリーンや掲示物に提示してください。参加はこの二次元コードの読み取りだけで完了します。"
           >
             <JoinUrlPanel
-              joinUrl={joinUrl}
+              joinUrl={snapshot.joinUrl ?? rotatedJoinUrl}
               qrSize={260}
               rotating={busy === 'rotate'}
               onRotate={() => void handleRotateJoinUrl()}

@@ -1,5 +1,6 @@
 'use client';
 
+import { StageCelebration } from '@/components/presentation/StageEffects';
 import { STAGE_FONT, rankAccentClassName, stageSize } from '@/components/presentation/stage-theme';
 import type { RankedParticipant } from '@/domain/room/scoring';
 import { cn } from '@/lib/client/cn';
@@ -56,10 +57,18 @@ export function RankingStage({
       : [entries];
 
   return (
-    <div className="flex h-full w-full flex-col" style={{ gap: stageSize(28) }}>
-      <div className="flex shrink-0 items-baseline justify-between" style={{ gap: stageSize(24) }}>
+    <div className="relative flex h-full w-full flex-col" style={{ gap: stageSize(28) }}>
+      {/* 順位が出た瞬間の祝い。ここがクイズのいちばんの山場。 */}
+      {entries.length > 0 && showLeaderboard ? (
+        <StageCelebration burst={finished ? 'finished' : 'ranking'} />
+      ) : null}
+
+      <div
+        className="z-10 flex shrink-0 items-baseline justify-between"
+        style={{ gap: stageSize(24) }}
+      >
         <h1
-          className="font-bold text-white"
+          className="stage-slam font-bold text-white"
           style={{ fontSize: stageSize(STAGE_FONT.hero), lineHeight: 1.1 }}
         >
           {title}
@@ -84,7 +93,7 @@ export function RankingStage({
           まだ得点がありません
         </p>
       ) : (
-        <div className="flex min-h-0 flex-1 items-start" style={{ gap: stageSize(32) }}>
+        <div className="z-10 flex min-h-0 flex-1 items-start" style={{ gap: stageSize(32) }}>
           {columns.map((column, columnIndex) => (
             <ol
               key={columnIndex}
@@ -97,6 +106,8 @@ export function RankingStage({
                   className={cn(
                     'relative flex items-center overflow-hidden border-4 text-white',
                     rankAccentClassName(entry.rank),
+                    // 1 位だけ光らせる。順位の数字を読む前に「誰が勝ったか」が伝わる。
+                    entry.rank === 1 ? 'stage-pop-big' : '',
                   )}
                   style={{
                     borderRadius: stageSize(24),
@@ -158,10 +169,7 @@ export function RankingStage({
 function RankingBuildUp({ participantCount }: { participantCount: number }) {
   return (
     <div className="flex h-full w-full flex-col items-center justify-center text-center">
-      <p
-        className="font-bold text-white/70"
-        style={{ fontSize: stageSize(STAGE_FONT.heading) }}
-      >
+      <p className="font-bold text-white/70" style={{ fontSize: stageSize(STAGE_FONT.heading) }}>
         結果発表
       </p>
       <p

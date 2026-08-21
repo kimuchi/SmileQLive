@@ -129,3 +129,22 @@ export function bingoColumns(draw: StageDraw): BingoColumn[] {
     entries: draw.entries.slice(index * perColumn, (index + 1) * perColumn),
   })).filter((column) => column.entries.length > 0);
 }
+
+/**
+ * その球が B/I/N/G/O のどの列か。
+ *
+ * 球の色をこの列で決める（青・赤・白・緑・黄はビンゴの決まり事）。
+ * 5 列に割れない範囲では列を決めないので null を返す。
+ */
+export function bingoColumnOf(draw: StageDraw, entryId: string): string | null {
+  const columns = bingoColumns(draw);
+  if (columns.length !== BINGO_COLUMN_LABELS.length) {
+    return null;
+  }
+  for (const column of columns) {
+    if (column.entries.some((entry) => entry.id === entryId)) {
+      return column.label;
+    }
+  }
+  return null;
+}

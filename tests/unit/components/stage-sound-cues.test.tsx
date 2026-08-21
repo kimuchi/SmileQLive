@@ -23,7 +23,7 @@ function setup(initial: Partial<Args> = {}) {
     play,
     startLoop,
     stopLoop,
-    // 既定では「投影を開始」を押し済みとして扱う。
+    // 既定では音が出せる状態として扱う。
     isUnlocked: true,
     phase: 'lobby',
     stateVersion: 1,

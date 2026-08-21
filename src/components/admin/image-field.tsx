@@ -9,7 +9,7 @@ import { TextInput } from '@/components/shared/TextInput';
 import { ALT_TEXT_MAX_LENGTH } from '@/components/admin/question-draft';
 import { uploadAdminImage, type MediaScope } from '@/components/admin/upload-media';
 import type { MediaUsage } from '@/domain/media/image-policy';
-import { toUserErrorMessage } from '@/lib/client/error-text';
+import { toAdminErrorMessage } from '@/lib/client/error-text';
 import { cn } from '@/lib/client/cn';
 import type { AdminMediaRef } from '@/types/api';
 
@@ -79,7 +79,7 @@ export function ImageField({
           height: asset.height,
         });
       } catch (caught) {
-        setErrorMessage(toUserErrorMessage(caught));
+        setErrorMessage(toAdminErrorMessage(caught));
       } finally {
         setUploading(false);
         onUploadingChange?.(false);

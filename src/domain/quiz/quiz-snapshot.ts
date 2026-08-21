@@ -14,6 +14,8 @@ export type QuizSnapshotSettings = {
   showTotalQuestions: boolean;
   /** 回答受付を開始する前に問題を見せるか。 */
   showQuestionBeforeOpen: boolean;
+  /** 参加用の二次元コードを進行中もずっと投影の隅に出すか。 */
+  alwaysShowJoinCode: boolean;
   soundTheme: string;
   leaderboardSize: number;
 };

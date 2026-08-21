@@ -55,6 +55,8 @@ export type CreateRoomDbInput = {
   quizId: string | null;
   mode: RoomMode;
   joinTokenHash: string;
+  /** 参加 URL の平文トークン。抽選会・ビンゴでは参加者が来ないため null。 */
+  joinToken: string | null;
   /**
    * 抽選会・ビンゴのルームでも必ず入れる（問題 0 問のクイズとして）。
    * ここを null 許容にすると、あらゆる読み取り経路へ分岐が増えて壊しやすくなる。
@@ -104,6 +106,8 @@ export async function createRoom(input: CreateRoomDbInput): Promise<RoomDoc> {
     mode: input.mode,
     quizId: input.quizId,
     joinTokenHash: input.joinTokenHash,
+    // 参加者が来ないモードでは平文を持たない（持っても使い道が無い）。
+    ...(input.joinToken !== null ? { joinToken: input.joinToken } : {}),
     joinTokenRotatedAt: now,
     phase: 'lobby',
     quizSnapshot: input.quizSnapshot,
@@ -194,11 +198,13 @@ export async function findRoomByJoinTokenHash(tokenHash: string): Promise<RoomDo
 export async function rotateJoinToken(
   roomId: string,
   tokenHash: string,
+  token: string,
 ): Promise<{ rotatedAt: string }> {
   const now = nowTimestamp();
   try {
     await roomRef(roomId).update({
       joinTokenHash: tokenHash,
+      joinToken: token,
       joinTokenRotatedAt: now,
       updatedAt: now,
     });

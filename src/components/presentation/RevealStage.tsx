@@ -40,7 +40,8 @@ export function RevealStage({
     <div className="flex h-full w-full flex-col" style={{ gap: stageSize(24) }}>
       <div className="flex shrink-0 items-center" style={{ gap: stageSize(24) }}>
         <span
-          className="text-stage-950 inline-flex items-center rounded-full bg-emerald-400 font-bold"
+          // 発表の瞬間に勢いよく決まる。会場の視線をここへ集めてから中身を読ませる。
+          className="stage-slam text-stage-950 inline-flex items-center rounded-full bg-emerald-400 font-bold"
           style={{
             gap: stageSize(12),
             paddingInline: stageSize(32),
@@ -170,8 +171,12 @@ function NumberReveal({
   return (
     <div className="flex flex-col" style={{ gap: stageSize(28) }}>
       <div
-        className="flex flex-col rounded-3xl border-4 border-emerald-300 bg-emerald-400/20 text-white"
-        style={{ padding: stageSize(36), gap: stageSize(12) }}
+        className="stage-pop-big flex flex-col rounded-3xl border-4 border-emerald-300 bg-emerald-400/20 text-white"
+        style={{
+          padding: stageSize(36),
+          gap: stageSize(12),
+          boxShadow: '0 0 1.6cqw rgba(52,211,153,0.45)',
+        }}
       >
         <span
           className="font-bold text-emerald-100"

@@ -45,6 +45,7 @@ const VALUE_FLAGS = new Set([
   'owner', // seed:demo でクイズの所有者を指定する
   'bucket', // seed:demo で画像バケットを指定する
   'from', // sounds:install で取り込み元ディレクトリを指定する
+  'file', // media:doctor で実際に失敗した画像を指定する
 ]);
 
 export function parseArgs(argv) {

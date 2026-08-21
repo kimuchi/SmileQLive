@@ -105,6 +105,14 @@ export type QuizDoc = {
    * 出すほうが盛り上がるため。true にすると、先に問題を読ませてから受け付けられる。
    */
   showQuestionBeforeOpen?: boolean;
+  /**
+   * 参加用の二次元コードを、開始前だけでなく**ずっと**投影の隅に出すか。
+   *
+   * 途中から来た人がその場で入れるようになる。
+   * 既定は false（開始前の待機画面にだけ大きく出す）。
+   * 未設定（古いドキュメント）は false 扱い。
+   */
+  alwaysShowJoinCode?: boolean;
   soundTheme: string;
   questionCount: number;
   choiceQuestionCount: number;
@@ -201,6 +209,16 @@ export type RoomDoc = {
   /** 抽選会・ビンゴのルームでは null。 */
   quizId: string | null;
   joinTokenHash: string;
+  /**
+   * 参加 URL の平文トークン。
+   *
+   * 投影担当は司会と違う端末で画面を開くため、ここに持っていないと
+   * 会場で参加 URL を貼り付けさせることになる（当日いちばん詰まる場所）。
+   * このドキュメントは**司会本人しか読めず、すでに正解を含んでいる**ので、
+   * 同じ場所へ置いても新しく晒すものは無い。
+   * この項目が増える前に作られたルームには入っていない（読み側で null 許容）。
+   */
+  joinToken?: string;
   joinTokenRotatedAt: FirestoreTimestamp;
   phase: RoomPhase;
   quizSnapshot: QuizSnapshot;

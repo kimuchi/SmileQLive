@@ -69,7 +69,20 @@ export const APP_ERROR_DEFINITIONS = {
   // 画像
   MEDIA_TOO_LARGE: { status: 422, message: '画像は8MB以下にしてください' },
   MEDIA_UNSUPPORTED_TYPE: { status: 422, message: 'JPEG・PNG・WebP の画像を指定してください' },
-  MEDIA_PROCESSING_FAILED: { status: 422, message: '画像を処理できませんでした' },
+  MEDIA_PROCESSING_FAILED: {
+    status: 422,
+    message: '画像を変換できませんでした。別の画像で試すか、JPEG で保存し直してください',
+  },
+  /**
+   * 保存先（Cloud Storage）へ書けなかった。
+   *
+   * 画像そのものの問題と混ぜない。混ぜると、バケットが無い・権限が無いといった
+   * **設定の問題**を「変な画像だった」と誤解して、いつまでも直せなくなる。
+   */
+  MEDIA_STORAGE_FAILED: {
+    status: 502,
+    message: '画像の保存先へ書き込めませんでした。npm run media:doctor で保存先を確認してください',
+  },
   MEDIA_NOT_FOUND: { status: 404, message: '画像が見つかりません' },
   MEDIA_IN_USE: { status: 409, message: 'この画像は使用中のため削除できません' },
 

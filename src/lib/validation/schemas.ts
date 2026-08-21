@@ -70,6 +70,7 @@ export const updateQuizSchema = z.object({
   showLeaderboard: z.boolean().optional(),
   showTotalQuestions: z.boolean().optional(),
   showQuestionBeforeOpen: z.boolean().optional(),
+  alwaysShowJoinCode: z.boolean().optional(),
   soundTheme: z.string().max(50).optional(),
 });
 

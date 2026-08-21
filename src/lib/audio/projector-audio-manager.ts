@@ -71,9 +71,27 @@ export type AudioReadiness = {
   failed: SoundFailure[];
 };
 
+/** `unlock()` の呼び出し方。 */
+export type UnlockOptions = {
+  /**
+   * 自動で試しているだけか。
+   *
+   * true のとき、解除できなくても警告を出さない。
+   * 読み込み直後の自動解除は**失敗して当たり前**で、
+   * そこで警告を出すと会場に「音が出ない」と誤解される。
+   */
+  silent?: boolean;
+};
+
 export interface ProjectorAudioManager {
-  /** 操作者のクリックイベント内から呼ぶこと。AudioContext を作り、再生を許可させる。 */
-  unlock(): Promise<void>;
+  /**
+   * AudioContext を作り、再生を許可させる。
+   *
+   * ブラウザは操作なしの再生を止めるため、確実に解除したいときは
+   * 操作者のクリックイベント内から呼ぶこと。
+   * 読み込み直後に `{ silent: true }` で試すのは自由（許可済みの端末では通る）。
+   */
+  unlock(options?: UnlockOptions): Promise<void>;
   /**
    * manifest.json を読み、音源を取得・デコードする。失敗しても例外は投げない。
    * どれが鳴らせてどれが鳴らせないかを返すので、呼び出し側は必ず画面へ出すこと
@@ -350,7 +368,7 @@ export function createProjectorAudioManager(
    * 取得とデコードをまとめて行う。AudioContext が無い間はデコードできないため null を返す。
    *
    * **失敗を覚え込まないこと。** `loading` に「null を返す約束」を残したままにすると、
-   * あとで操作者が投影を開始しても、通信が戻っても、その音は二度と読み込まれない。
+   * あとで音が解除されても、通信が戻っても、その音は二度と読み込まれない。
    * そのため、どの経路を通っても最後に必ず `loading` から取り除く。
    */
   const ensureDecoded = (name: SoundName): Promise<AudioBuffer | null> => {
@@ -440,7 +458,7 @@ export function createProjectorAudioManager(
     }
   };
 
-  const resumeIfNeeded = async (): Promise<void> => {
+  const resumeIfNeeded = async (silent = false): Promise<void> => {
     if (!context || disposed) {
       return;
     }
@@ -450,8 +468,10 @@ export function createProjectorAudioManager(
     try {
       await context.resume();
     } catch {
-      // 操作なしでは resume できないことがある。次のクリックで解除される。
-      warn('resume', '効果音の再開にはもう一度画面を操作してください。');
+      // 操作なしでは resume できないことがある。次の操作で解除される。
+      if (!silent) {
+        warn('resume', '効果音の再開にはもう一度画面を操作してください。');
+      }
     }
   };
 
@@ -473,7 +493,7 @@ export function createProjectorAudioManager(
       return unlocked && context !== null && context.state === 'running';
     },
 
-    async unlock(): Promise<void> {
+    async unlock(options: UnlockOptions = {}): Promise<void> {
       if (disposed) {
         return;
       }
@@ -496,7 +516,7 @@ export function createProjectorAudioManager(
         gain.connect(context.destination);
       }
 
-      await resumeIfNeeded();
+      await resumeIfNeeded(options.silent ?? false);
 
       // iOS Safari は「無音でも一度再生する」ことで初めて解除される。
       try {
@@ -512,7 +532,7 @@ export function createProjectorAudioManager(
       unlocked = context.state === 'running';
       applyGain();
 
-      if (!unlocked) {
+      if (!unlocked && !options.silent) {
         warn('locked', '効果音がブラウザに止められています。もう一度画面を操作してください。');
       }
     },

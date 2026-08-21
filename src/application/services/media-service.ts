@@ -137,11 +137,11 @@ export async function uploadImage(input: UploadImageInput): Promise<MediaUploadR
     if (error instanceof AppError) {
       throw error;
     }
-    logger.warn('media.process_failed', {
-      scopeId,
-      errorMessage: error instanceof Error ? error.message : String(error),
-    });
-    throw new AppError('MEDIA_PROCESSING_FAILED', { cause: error });
+    const reason = error instanceof Error ? error.message : String(error);
+    logger.warn('media.process_failed', { scopeId, usage: input.usage, errorMessage: reason });
+    // 管理者しか見ない画面なので、変換ライブラリの理由をそのまま添える。
+    // これが無いと「変な画像だった」のか「設定の問題」なのか切り分けられない。
+    throw new AppError('MEDIA_PROCESSING_FAILED', { cause: error, details: { reason } });
   }
 
   if (processed.width <= 0 || processed.height <= 0 || processed.size <= 0) {

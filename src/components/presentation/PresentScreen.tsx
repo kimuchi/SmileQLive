@@ -5,8 +5,9 @@ import { AudioControls } from '@/components/presentation/AudioControls';
 import { BingoStage } from '@/components/presentation/BingoStage';
 import { DrawHistoryOverlay } from '@/components/presentation/DrawHistoryOverlay';
 import { DrawWaitingStage } from '@/components/presentation/DrawWaitingStage';
+import { JoinCodeBadge } from '@/components/presentation/JoinCodeBadge';
 import { LotteryStage } from '@/components/presentation/LotteryStage';
-import { PresentSetupOverlay } from '@/components/presentation/PresentSetupOverlay';
+import { PresentAudioHint } from '@/components/presentation/PresentAudioHint';
 import { QuestionStage } from '@/components/presentation/QuestionStage';
 import { RankingStage } from '@/components/presentation/RankingStage';
 import { RevealStage } from '@/components/presentation/RevealStage';
@@ -68,10 +69,17 @@ export function PresentScreen({ roomId }: { roomId: string }) {
   const audio = useProjectorAudio(roomId);
   const { enable, play, playTest, startLoop, stopLoop, durationOf, setMuted, setVolume } = audio;
   const fullscreen = useFullscreen();
-  const { joinUrl, setJoinUrl } = useJoinUrl(roomId);
+  // 参加 URL は Snapshot がサーバーから返す。貼り付けは古いルーム用の予備。
+  const { joinUrl: pastedJoinUrl, setJoinUrl } = useJoinUrl(roomId);
+  const joinUrl = snapshot?.joinUrl ?? pastedJoinUrl;
 
-  /** 操作者が「投影を開始」を押したか。押すまでは準備オーバーレイを出す。 */
-  const [started, setStarted] = useState(false);
+  /**
+   * 「音が出ません」の案内を消したか。
+   *
+   * 画面そのものは最初から動かす。ここで止めると、押し忘れたときに
+   * 「動いているように見えて何も起きない」画面になる。
+   */
+  const [hintDismissed, setHintDismissed] = useState(false);
 
   const countdown = useCountdown(snapshot?.answerDeadlineAt ?? null, clock);
 
@@ -82,8 +90,7 @@ export function PresentScreen({ roomId }: { roomId: string }) {
     play,
     startLoop,
     stopLoop,
-    // 「投影を開始」を押す前に受付中のルームへ繋いだ場合でも、
-    // 押した時点からタイマー音を鳴らし始められるようにする。
+    // 音が解除された時点から鳴らし始める（受付中のルームへ後から繋いだときも同じ）。
     isUnlocked: audio.isUnlocked,
     phase: snapshot?.phase ?? null,
     stateVersion: snapshot?.stateVersion ?? null,
@@ -93,7 +100,7 @@ export function PresentScreen({ roomId }: { roomId: string }) {
    * 抽選会・ビンゴの演出。
    *
    * 引いた結果はサーバーが決めて記録済み。ここは**見せるだけ**。
-   * 投影開始の操作が済むまでは回さない（音が出せないので回しても間が抜ける）。
+   * 音が出せるかどうかとは切り離す。音が鳴らない会場でも演出は回す。
    */
   const draw = snapshot?.draw ?? null;
   const roulette = useDrawRoulette({
@@ -102,7 +109,7 @@ export function PresentScreen({ roomId }: { roomId: string }) {
     candidates: draw ? remainingStageEntries(draw) : EMPTY_CANDIDATES,
     intervalMs: draw?.settings.spinIntervalMs ?? 50,
     durationMs: draw?.settings.spinDurationMs ?? 2500,
-    enabled: started && audio.isUnlocked,
+    enabled: true,
   });
 
   useDrawSoundCues({
@@ -177,15 +184,9 @@ export function PresentScreen({ roomId }: { roomId: string }) {
    * 音の有効化はクリックイベントの中で始める必要がある。
    * 全画面要求も同じクリックの有効期間で出すため、先読みの完了は待たない。
    */
-  const handleTest = useCallback(() => {
+  const handleEnableAndTest = useCallback(() => {
     void enable().then(() => playTest());
   }, [enable, playTest]);
-
-  const handleStart = useCallback(() => {
-    setStarted(true);
-    void enable().then(() => playTest());
-    fullscreen.request();
-  }, [enable, fullscreen, playTest]);
 
   const handleEnableFromControls = useCallback(() => {
     void enable();
@@ -195,31 +196,36 @@ export function PresentScreen({ roomId }: { roomId: string }) {
     setMuted(!audio.muted);
   }, [audio.muted, setMuted]);
 
-  const overlay = !started ? (
-    <PresentSetupOverlay
-      quizTitle={snapshot?.quizTitle ?? null}
-      previouslyEnabled={audio.previouslyEnabled}
-      warning={audio.warning}
-      status={audio.status}
-      testResult={audio.testResult}
-      onTest={handleTest}
-      onStart={handleStart}
-    />
-  ) : null;
+  const dismissHint = useCallback(() => {
+    setHintDismissed(true);
+  }, []);
 
-  const controls = started ? (
+  // 音が出せないときだけ案内を出す。画面は止めない。
+  const overlay =
+    !audio.isUnlocked && !hintDismissed ? (
+      <PresentAudioHint
+        status={audio.status}
+        testResult={audio.testResult}
+        onEnable={handleEnableAndTest}
+        onFullscreen={fullscreen.request}
+        onDismiss={dismissHint}
+      />
+    ) : null;
+
+  const controls = (
     <AudioControls
       isUnlocked={audio.isUnlocked}
       muted={audio.muted}
       volume={audio.volume}
       warning={audio.warning}
+      status={audio.status}
       isFullscreen={fullscreen.isFullscreen}
       onEnable={handleEnableFromControls}
       onToggleMute={handleToggleMute}
       onVolumeChange={setVolume}
       onToggleFullscreen={fullscreen.toggle}
     />
-  ) : null;
+  );
 
   if (!snapshot) {
     return (
@@ -338,11 +344,24 @@ export function PresentScreen({ roomId }: { roomId: string }) {
     );
   }
 
+  /*
+    「参加用の二次元コードをずっと表示する」設定。
+    待機画面はもともと大きな二次元コードを出しているので、そこでは重ねない。
+    受付を締め切っている間は出さない（読んでも入れないコードを出さない）。
+  */
+  const showJoinBadge =
+    snapshot.alwaysShowJoinCode &&
+    snapshot.joinOpen &&
+    joinUrl !== null &&
+    phase !== 'lobby' &&
+    !drawMode;
+
   return (
     <>
       <StageFrame
         // 抽選リストに背景画像があれば敷く（GAS 版の背景画像に相当）。
         backgroundUrl={draw?.background?.url ?? null}
+        aside={showJoinBadge && joinUrl ? <JoinCodeBadge joinUrl={joinUrl} /> : undefined}
         header={
           <StageHeader
             quizTitle={snapshot.quizTitle}
@@ -377,7 +396,7 @@ export function PresentScreen({ roomId }: { roomId: string }) {
         ) : null}
       </StageFrame>
       {controls}
-      {drawMode && draw && started ? (
+      {drawMode && draw ? (
         <button
           type="button"
           onClick={toggleHistory}

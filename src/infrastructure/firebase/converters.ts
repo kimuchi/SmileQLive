@@ -501,6 +501,8 @@ export function parseQuizSnapshot(value: unknown): QuizSnapshot {
     showTotalQuestions: true,
     // 既定は「受付開始と同時に出す」。
     showQuestionBeforeOpen: false,
+    // 既定は「開始前の待機画面にだけ大きく出す」。
+    alwaysShowJoinCode: false,
     soundTheme: 'default',
     leaderboardSize: 10,
   };
@@ -518,6 +520,7 @@ export function parseQuizSnapshot(value: unknown): QuizSnapshot {
       showLeaderboard: readBoolean(settingsValue, 'showLeaderboard', true),
       showTotalQuestions: readBoolean(settingsValue, 'showTotalQuestions', true),
       showQuestionBeforeOpen: readBoolean(settingsValue, 'showQuestionBeforeOpen', false),
+      alwaysShowJoinCode: readBoolean(settingsValue, 'alwaysShowJoinCode', false),
       soundTheme: readString(settingsValue, 'soundTheme') ?? 'default',
       leaderboardSize: readInt(settingsValue, 'leaderboardSize', 10),
     },
