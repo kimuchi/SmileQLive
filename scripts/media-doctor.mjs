@@ -11,17 +11,19 @@
  *   画像そのものが悪いのか、保存先（Cloud Storage）の設定が悪いのかが分からない。
  *   ここでは本番と同じ順序で 1 段ずつ試し、**どこで落ちたか**を名指しする。
  *
- *     1. 画像の判定（magic bytes）
- *     2. 変換（sharp: 回転補正 → 縮小 → WebP）
- *     3. 保存先バケットへの書き込み
- *     4. 配信用の署名付き URL の発行
- *     5. 後片付け（テスト用オブジェクトの削除）
+ *     1. 動いているサービスが見ている保存先（手元の設定と食い違っていないか）
+ *     2. 画像の判定（magic bytes）
+ *     3. 変換（sharp: 回転補正 → 縮小 → WebP）
+ *     4. 保存先バケットへの書き込み
+ *     5. 配信用の署名付き URL の発行
+ *     6. 後片付け（テスト用オブジェクトの削除）
  *
  * 方針:
  *   - アプリと同じ設定の読み方をする（MEDIA_BUCKET → FIREBASE_STORAGE_BUCKET → 既定）。
  *   - 何も壊さない。書くのは `__media-doctor/` 配下のテスト用オブジェクトだけで、最後に消す。
  *   - Windows / macOS / Linux で同じコマンドが動くよう、シェル機能に依存しない。
  */
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,6 +40,7 @@ if (flags.has('help')) {
   info('npm run media:doctor');
   info('npm run media:doctor -- --file ./失敗した画像.jpg');
   info('npm run media:doctor -- --env production');
+  info('npm run media:doctor -- --skip-service   （動いているサービスを見ない）');
   process.exit(0);
 }
 
@@ -51,21 +54,32 @@ if (flags.has('help')) {
  */
 function readConfigSoftly() {
   const requested = typeof flags.get('env') === 'string' ? flags.get('env') : null;
-  const candidates = requested ? [requested] : ENVIRONMENTS.filter(configExists);
+  const available = ENVIRONMENTS.filter(configExists);
+  const candidates = requested ? [requested] : available;
+
+  // 両方あるのに黙って片方だけ見ると、「設定は合っているのに直らない」に陥る。
+  if (!requested && available.length > 1) {
+    warn(
+      `設定ファイルが ${available.length} つあります（${available.join(' / ')}）。` +
+        `いまは ${available[0]} を見ています。別のほうを見るには --env ${available[1]} を付けてください。`,
+    );
+  }
+
   for (const environment of candidates) {
     if (!configExists(environment)) {
       continue;
     }
     try {
-      return JSON.parse(readFileSync(new URL(configPath(environment)), 'utf8'));
+      const parsed = JSON.parse(readFileSync(new URL(configPath(environment)), 'utf8'));
+      return { environment, config: parsed };
     } catch {
       warn(`設定ファイルを読めませんでした: deploy/cloud-run.${environment}.json`);
     }
   }
-  return null;
+  return { environment: null, config: null };
 }
 
-const config = readConfigSoftly();
+const { environment: configEnvironment, config } = readConfigSoftly();
 
 const projectId =
   process.env.FIREBASE_PROJECT_ID || config?.firebaseProjectId || config?.projectId || '';
@@ -80,15 +94,18 @@ const bucketName =
   (projectId ? `${projectId}.firebasestorage.app` : '');
 
 heading('画像アップロードの診断');
-info(`プロジェクト: ${projectId || color.yellow('（不明）')}`);
-info(`保存先      : ${bucketName || color.yellow('（不明）')}`);
+info(`プロジェクト  : ${projectId || color.yellow('（不明）')}`);
+info(`保存先        : ${bucketName || color.yellow('（不明）')}`);
 info(`設定の出どころ: ${bucketSource()}`);
+if (configEnvironment) {
+  info(`設定ファイル  : deploy/cloud-run.${configEnvironment}.json`);
+}
 
 function bucketSource() {
   if (typeof flags.get('bucket') === 'string') return '--bucket';
   if (process.env.MEDIA_BUCKET) return '環境変数 MEDIA_BUCKET';
   if (process.env.QUIZ_MEDIA_BUCKET) return '環境変数 QUIZ_MEDIA_BUCKET';
-  if (config?.mediaBucket) return 'deploy/cloud-run.*.json の mediaBucket';
+  if (config?.mediaBucket) return `deploy/cloud-run.${configEnvironment}.json の mediaBucket`;
   if (process.env.FIREBASE_STORAGE_BUCKET) return '環境変数 FIREBASE_STORAGE_BUCKET';
   return '既定値（<プロジェクトID>.firebasestorage.app）';
 }
@@ -103,7 +120,70 @@ if (!projectId) {
 const problems = [];
 
 // ---------------------------------------------------------------------------
-// 1. 画像の判定
+// 1. 動いているサービスの設定
+//
+// ここがいちばん見落としやすい。手元の設定ファイルを直しても、**デプロイし直すまで
+// 動いているサービスの環境変数は古いまま**で、「設定は合っているのに直らない」になる。
+// 実際に動いているリビジョンが何を見ているかを、先に突き合わせる。
+// ---------------------------------------------------------------------------
+if (config?.serviceName && config?.region && config?.projectId && !flags.has('skip-service')) {
+  step('動いているサービスの保存先を確認');
+  const deployed = deployedMediaBucket(config.projectId, config.region, config.serviceName);
+
+  if (deployed === null) {
+    info(
+      color.dim(
+        'サービスを読めませんでした（未デプロイ、または gcloud が使えません）。飛ばします。',
+      ),
+    );
+  } else if (deployed === '') {
+    problems.push(
+      `動いているサービス ${config.serviceName} に MEDIA_BUCKET が設定されていません。` +
+        `そのためアプリは既定値（${projectId}.firebasestorage.app）へ書こうとします。` +
+        `npm run deploy でデプロイし直すと、設定ファイルの mediaBucket が渡ります。`,
+    );
+    warn(`MEDIA_BUCKET が未設定です（既定値 ${projectId}.firebasestorage.app が使われます）`);
+  } else if (deployed !== bucketName) {
+    problems.push(
+      `設定ファイルは ${bucketName} ですが、動いているサービスは ${deployed} を見ています。` +
+        `デプロイし直すか、--env で見る設定を合わせてください。`,
+    );
+    warn(`食い違っています: 設定 ${bucketName} / 稼働中 ${deployed}`);
+  } else {
+    success(`動いているサービスも ${deployed} を見ています`);
+  }
+}
+
+/**
+ * 動いているリビジョンの MEDIA_BUCKET を読む。
+ *
+ * 返り値: 文字列（設定あり）/ 空文字（サービスはあるが未設定）/ null（読めない）
+ */
+function deployedMediaBucket(project, region, service) {
+  const result = spawnSync(
+    'gcloud',
+    [
+      'run',
+      'services',
+      'describe',
+      service,
+      '--project',
+      project,
+      '--region',
+      region,
+      '--format=value(spec.template.spec.containers[0].env.filter("name:MEDIA_BUCKET").extract("value").flatten())',
+    ],
+    { encoding: 'utf8', shell: process.platform === 'win32' },
+  );
+
+  if (result.error || result.status !== 0) {
+    return null;
+  }
+  return result.stdout.trim();
+}
+
+// ---------------------------------------------------------------------------
+// 2. 画像の判定
 // ---------------------------------------------------------------------------
 const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
@@ -154,7 +234,7 @@ if (!detected) {
 }
 
 // ---------------------------------------------------------------------------
-// 2. 変換
+// 3. 変換
 // ---------------------------------------------------------------------------
 step('変換する（回転補正 → 縮小 → WebP）');
 
@@ -194,7 +274,7 @@ try {
 }
 
 // ---------------------------------------------------------------------------
-// 3〜5. 保存先
+// 4〜6. 保存先
 // ---------------------------------------------------------------------------
 step('保存先へ書き込む');
 
@@ -240,12 +320,31 @@ if (!bucketName) {
       info(color.dim(`${url.slice(0, 80)}…`));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      problems.push(
-        '署名付き URL を発行できませんでした。実行サービスアカウントに ' +
-          '「サービス アカウント トークン作成者」が要ります。' +
-          `画像は保存できますが、画面に出ません: ${message}`,
-      );
-      warn(`署名に失敗しました: ${message}`);
+
+      /*
+        手元の gcloud auth application-default login は**利用者の資格情報**で、
+        サービスアカウントではない。利用者の資格情報には client_email が無いため、
+        署名だけは原理的にできない。手元で出る分には異常ではないので、
+        「本番も駄目」と誤解させないよう分けて出す。
+      */
+      if (/without .?client_email/i.test(message)) {
+        warn('手元の資格情報では署名できません（利用者アカウントには署名鍵がありません）。');
+        info('これは手元だけの制限です。Cloud Run 上では実行サービスアカウントが署名します。');
+        info('本番側を確かめる: npm run deploy:doctor（実行サービスアカウントの権限を見ます）');
+        info(
+          color.dim(
+            '手元で実際に試すなら: gcloud auth application-default login ' +
+              '--impersonate-service-account=<実行サービスアカウント>',
+          ),
+        );
+      } else {
+        problems.push(
+          '署名付き URL を発行できませんでした。実行サービスアカウントに ' +
+            '「サービス アカウント トークン作成者」が自分自身に対して要ります。' +
+            `画像は保存できますが、画面に出ません: ${message}`,
+        );
+        warn(`署名に失敗しました: ${message}`);
+      }
     }
 
     step('後片付け');

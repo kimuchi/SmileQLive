@@ -95,6 +95,32 @@ export function mediaBucket(): string {
   return readEnv('MEDIA_BUCKET') ?? readEnv('QUIZ_MEDIA_BUCKET') ?? firebaseStorageBucket();
 }
 
+/**
+ * バケット名をどこから決めたか。
+ *
+ * 保存に失敗したとき「その名前がどこから来たのか」まで言えないと直せない。
+ * とくに `default`（環境変数が何も無くプロジェクト ID から組み立てた）は、
+ * デプロイ設定の渡し忘れであることがほとんどで、名前だけ見ても気づけない。
+ */
+export type MediaBucketSource =
+  | 'MEDIA_BUCKET'
+  | 'QUIZ_MEDIA_BUCKET'
+  | 'FIREBASE_STORAGE_BUCKET'
+  | 'default';
+
+export function mediaBucketSource(): MediaBucketSource {
+  if (readEnv('MEDIA_BUCKET')) {
+    return 'MEDIA_BUCKET';
+  }
+  if (readEnv('QUIZ_MEDIA_BUCKET')) {
+    return 'QUIZ_MEDIA_BUCKET';
+  }
+  if (readEnv('FIREBASE_STORAGE_BUCKET')) {
+    return 'FIREBASE_STORAGE_BUCKET';
+  }
+  return 'default';
+}
+
 /** @deprecated 旧名。呼び出し側の移行が済むまで残す。`mediaBucket()` を使うこと。 */
 export function quizMediaBucket(): string {
   return mediaBucket();

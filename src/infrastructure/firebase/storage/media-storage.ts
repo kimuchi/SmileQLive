@@ -17,6 +17,7 @@ import { getAdminStorage, getMediaBucket } from '@/infrastructure/firebase/admin
 import { logger } from '@/infrastructure/logging/logger';
 import { buildObjectPath, OUTPUT_MIME_TYPE } from '@/domain/media/image-policy';
 import { AppError } from '@/lib/errors/app-error';
+import { mediaBucketSource } from '@/lib/env/server-env';
 import type {
   MediaStorage,
   UploadProcessedImageInput,
@@ -102,6 +103,16 @@ function describeStorageFailure(bucket: string, error: unknown): string {
     return `バケット ${bucket} へ書き込む権限がありません。実行サービスアカウントに Storage オブジェクト管理者を付けてください。`;
   }
   if (status === 404 || /does not exist|Not Found/i.test(message)) {
+    // 「その名前がどこから来たのか」まで言わないと直せない。
+    // 環境変数が何も無いとプロジェクト ID から組み立てた名前になり、
+    // たいていはデプロイ設定の渡し忘れなのに、名前だけ見ても気づけない。
+    if (mediaBucketSource() === 'default') {
+      return (
+        `バケット ${bucket} が見つかりません。この名前は MEDIA_BUCKET が未設定のため` +
+        'プロジェクト ID から組み立てた既定値です。デプロイ設定の mediaBucket を確認して' +
+        'デプロイし直してください（npm run media:doctor で突き合わせできます）。'
+      );
+    }
     return `バケット ${bucket} が見つかりません。Storage を有効にするか、MEDIA_BUCKET を確認してください。`;
   }
   return `バケット ${bucket} への書き込みに失敗しました: ${message}`;

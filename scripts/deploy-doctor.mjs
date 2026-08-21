@@ -18,12 +18,7 @@ import {
   parseArgs,
   resolveEnvironment,
 } from './lib/config.mjs';
-import {
-  activeAccount,
-  secretExists,
-  secretHasVersion,
-  serviceExists,
-} from './lib/gcloud.mjs';
+import { activeAccount, secretExists, secretHasVersion, serviceExists } from './lib/gcloud.mjs';
 import { checkDependencies } from './lib/deps.mjs';
 import { color, heading, info } from './lib/log.mjs';
 import { probeCommand, run } from './lib/proc.mjs';
@@ -118,7 +113,9 @@ if (available.length > 0) {
   check(
     'firebaseApiKey が公開用の識別子であること',
     apiKeyOk,
-    apiKeyOk ? '' : 'サービスアカウントの秘密鍵を JSON へ書かないでください（Cloud Run は ADC で認証）',
+    apiKeyOk
+      ? ''
+      : 'サービスアカウントの秘密鍵を JSON へ書かないでください（Cloud Run は ADC で認証）',
   );
   const authDomainOk = /^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(config.firebaseAuthDomain);
   check(
@@ -294,8 +291,68 @@ if (config && gcloudProbe.ok) {
           : `${config.firestoreDatabaseId} がありません — npm run gcp:bootstrap -- ${config.environment}`,
       );
 
+      /*
+        画像の保存先バケットが実在するか。
+
+        ここを見ていなかったため、名前を間違えたまま（あるいは設定を渡し忘れたまま）
+        デプロイでき、当日「画像だけアップロードできない」で気づく形になっていた。
+        バケットは初回デプロイでは作られないので、無ければここで言う。
+      */
+      const bucketOk = run(
+        'gcloud',
+        [
+          'storage',
+          'buckets',
+          'describe',
+          `gs://${config.mediaBucket}`,
+          '--project',
+          config.projectId,
+          '--format=value(name)',
+        ],
+        { capture: true, quiet: true, allowFailure: true },
+      ).ok;
+      check(
+        '画像の保存先バケット',
+        bucketOk,
+        bucketOk
+          ? config.mediaBucket
+          : `${config.mediaBucket} がありません — Firebase の Storage を有効にするか、設定の mediaBucket を実在する名前へ直してください`,
+      );
+
       const url = serviceExists(config.projectId, config.region, config.serviceName);
       check('Cloud Run サービス', Boolean(url), url || '未作成（初回デプロイで作成されます）');
+
+      /*
+        動いているサービスが見ている保存先。
+        設定ファイルを直してもデプロイし直すまで反映されないため、食い違いをここで見つける。
+      */
+      if (url) {
+        const deployedBucket = run(
+          'gcloud',
+          [
+            'run',
+            'services',
+            'describe',
+            config.serviceName,
+            '--project',
+            config.projectId,
+            '--region',
+            config.region,
+            '--format=value(spec.template.spec.containers[0].env.filter("name:MEDIA_BUCKET").extract("value").flatten())',
+          ],
+          { capture: true, quiet: true, allowFailure: true },
+        );
+        const deployed = deployedBucket.ok ? deployedBucket.stdout.trim() : '';
+        check(
+          '稼働中の MEDIA_BUCKET',
+          deployed === config.mediaBucket,
+          deployed === config.mediaBucket
+            ? deployed
+            : deployed.length === 0
+              ? '未設定 — デプロイし直すと設定の mediaBucket が渡ります'
+              : `設定 ${config.mediaBucket} と食い違っています（稼働中: ${deployed}）`,
+        );
+      }
     }
   }
 }
@@ -320,7 +377,9 @@ console.log('');
 if (failures === 0) {
   console.log(`  ${color.green('デプロイできる状態です。')} → npm run deploy`);
 } else {
-  console.log(`  ${color.yellow(`${failures} 件の確認事項があります。`)} 上の ▲ を解消してください。`);
+  console.log(
+    `  ${color.yellow(`${failures} 件の確認事項があります。`)} 上の ▲ を解消してください。`,
+  );
   console.log(`  ${color.dim('詳細: docs/DEPLOYMENT.md')}`);
 }
 console.log('');
