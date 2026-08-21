@@ -5,6 +5,7 @@ import type { RankedParticipant } from '@/domain/room/scoring';
 import type { QuestionType } from '@/domain/quiz/question';
 import type { RoomPhase } from '@/domain/room/state-machine';
 import type { RoomMode } from '@/domain/room/room-mode';
+import type { SoundName } from '@/domain/sound/sound-catalog';
 import type {
   AdminDrawList,
   DrawListSummary,
@@ -211,6 +212,37 @@ export type DiagnosticsResponse = {
   environment: string;
   appBaseUrl: string;
 };
+
+// ---------------------------------------------------------------------------
+// 効果音（差し替え）
+// ---------------------------------------------------------------------------
+
+/**
+ * 1 音ぶんの状態。
+ *
+ * `source` が `default` なら同梱の音、`custom` なら差し替えた音。
+ * どちらでも `url` は必ず入る（管理画面はこれをそのまま試聴に使う）。
+ */
+export type SoundSlot =
+  | { name: SoundName; source: 'default'; url: string }
+  | {
+      name: SoundName;
+      source: 'custom';
+      url: string;
+      /** 操作者が選んだファイル名。 */
+      originalName: string;
+      byteSize: number;
+      mimeType: string;
+      updatedAt: string;
+    };
+
+export type SoundSettingsResponse = {
+  /** 9 音ぶんが必ず並ぶ。差し替えていない音も `default` として入る。 */
+  sounds: SoundSlot[];
+};
+
+/** 投影画面が読む一覧。名前 -> 同一オリジンの URL。 */
+export type SoundManifestResponse = Record<string, string>;
 
 // ---------------------------------------------------------------------------
 // 抽選リスト（抽選会・ビンゴ）

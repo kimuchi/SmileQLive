@@ -347,6 +347,24 @@ async function seed(adminDb, roles) {
     createdAt: now,
   });
 
+  // 差し替えた効果音の設定。配信 ID が漏れると音を勝手に取られるので、所有者以外は読めてはいけない。
+  await adminDb.collection('soundSettings').doc(roles.host.uid).set({
+    ownerId: roles.host.uid,
+    publicId: 'public-id-rules-1',
+    sounds: {
+      fanfare: {
+        assetId: 'sound-rules-1',
+        bucket: 'emulator-bucket',
+        objectPath: `sounds/${roles.host.uid}/sound-rules-1.mp3`,
+        mimeType: 'audio/mpeg',
+        byteSize: 2048,
+        originalName: 'fanfare.mp3',
+        updatedAtMs: 1700000000000,
+      },
+    },
+    updatedAt: now,
+  });
+
   // 抽選リスト（名簿。氏名がそのまま並ぶので、所有者以外は読めてはいけない）。
   await adminDb.collection('drawLists').doc(IDS.drawList).set({
     id: IDS.drawList,

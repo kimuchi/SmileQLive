@@ -86,6 +86,19 @@ export const APP_ERROR_DEFINITIONS = {
   MEDIA_NOT_FOUND: { status: 404, message: '画像が見つかりません' },
   MEDIA_IN_USE: { status: 409, message: 'この画像は使用中のため削除できません' },
 
+  // 効果音（差し替え）
+  SOUND_TOO_LARGE: { status: 422, message: '効果音は8MB以下にしてください' },
+  SOUND_UNSUPPORTED_TYPE: {
+    status: 422,
+    message: 'MP3・WAV・OGG・M4A・AAC の音声ファイルを指定してください',
+  },
+  /** 画像と分けているのは、保存先の設定を直す先が同じでも、直し方の案内が違うため。 */
+  SOUND_STORAGE_FAILED: {
+    status: 502,
+    message: '効果音の保存先へ書き込めませんでした。npm run media:doctor で保存先を確認してください',
+  },
+  SOUND_NOT_FOUND: { status: 404, message: '効果音が見つかりません' },
+
   // 共通
   VALIDATION_FAILED: { status: 400, message: '入力内容を確認してください' },
   RATE_LIMITED: { status: 429, message: '操作が多すぎます。しばらく待ってから再度お試しください' },

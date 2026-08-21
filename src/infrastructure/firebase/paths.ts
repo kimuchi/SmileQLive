@@ -40,6 +40,7 @@ import {
   type RoomMemberDoc,
   type RoomPublicStateDoc,
   type RoomStaffProgressDoc,
+  type SoundSettingsDoc,
 } from '@/types/firestore';
 
 // ---------------------------------------------------------------------------
@@ -66,6 +67,7 @@ const profileConverter = docConverter<ProfileDoc>();
 const quizConverter = docConverter<QuizDoc>();
 const questionConverter = docConverter<QuestionDoc>();
 const mediaAssetConverter = docConverter<MediaAssetDoc>();
+const soundSettingsConverter = docConverter<SoundSettingsDoc>();
 const drawListConverter = docConverter<DrawListDoc>();
 const drawListEntryConverter = docConverter<DrawListEntryDoc>();
 const roomConverter = docConverter<RoomDoc>();
@@ -130,6 +132,19 @@ export function mediaAssetsCollection(): CollectionReference<MediaAssetDoc> {
 
 export function mediaAssetRef(assetId: string): DocumentReference<MediaAssetDoc> {
   return mediaAssetsCollection().doc(assetId);
+}
+
+// ---------------------------------------------------------------------------
+// soundSettings（差し替えた効果音。司会者ごとに 1 件）
+// ---------------------------------------------------------------------------
+
+export function soundSettingsCollection(): CollectionReference<SoundSettingsDoc> {
+  return getDb().collection(COLLECTIONS.soundSettings).withConverter(soundSettingsConverter);
+}
+
+/** ドキュメント ID は司会者の uid。1 人 1 件しか無いので索引が要らない。 */
+export function soundSettingsRef(ownerId: string): DocumentReference<SoundSettingsDoc> {
+  return soundSettingsCollection().doc(ownerId);
 }
 
 // ---------------------------------------------------------------------------

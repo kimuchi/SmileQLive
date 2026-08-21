@@ -116,6 +116,9 @@ export default async function run(report, ctx) {
   await report.denied('匿名参加者が mediaAssets を読む', () =>
     readDoc(participant, 'mediaAssets', IDS.asset)(),
   );
+  await report.denied('匿名参加者が soundSettings を読む', () =>
+    readDoc(participant, 'soundSettings', host.uid)(),
+  );
 
   // 抽選の名簿は氏名の塊。参加者にも投影担当にも読ませない
   // （投影に要る内容は Cloud Run が rooms 側の drawSnapshot から配る）。
@@ -274,6 +277,9 @@ export default async function run(report, ctx) {
   await report.allowed('司会者が自分の mediaAssets を読む', () =>
     readDoc(host, 'mediaAssets', IDS.asset)(),
   );
+  await report.allowed('司会者が自分の soundSettings を読む', () =>
+    readDoc(host, 'soundSettings', host.uid)(),
+  );
   await report.allowed('司会者が自分の drawLists を読む', () =>
     readDoc(host, 'drawLists', IDS.drawList)(),
   );
@@ -289,6 +295,9 @@ export default async function run(report, ctx) {
   );
   await report.denied('別の司会者が他人の drawLists を読む', () =>
     readDoc(otherHost, 'drawLists', IDS.drawList)(),
+  );
+  await report.denied('別の司会者が他人の soundSettings を読む', () =>
+    readDoc(otherHost, 'soundSettings', host.uid)(),
   );
   await report.denied('別の司会者が他人の drawLists の中身を読む', () =>
     readDoc(otherHost, 'drawLists', IDS.drawList, 'entries', IDS.drawEntry)(),

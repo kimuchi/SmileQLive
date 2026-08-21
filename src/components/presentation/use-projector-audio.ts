@@ -160,6 +160,13 @@ export function useProjectorAudio(roomId: string): ProjectorAudio {
     const settings = readSettings();
     const manager = createProjectorAudioManager({
       dedupeNamespace: roomId,
+      /*
+        音の一覧はルームごとに取りに行く。
+        管理画面から差し替えた音は、ここで配信経路の URL に入れ替わっている。
+        差し替えていない音は同梱の既定音の URL が返るので、
+        設定を一度も触っていなくてもそのまま鳴る。
+      */
+      manifestUrl: `/api/rooms/${roomId}/sounds`,
       volume: settings.volume,
       muted: settings.muted,
       onWarning: setWarning,

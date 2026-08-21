@@ -7,14 +7,14 @@ Supabase PostgreSQL から Firebase へ移行するにあたり、
 
 ## 1. 移行にあたっての前提と、失われるもの
 
-| 項目 | PostgreSQL 版 | Firebase 版 |
-|---|---|---|
-| 数値の正誤判定 | サーバー(`decimal.js`) と DB(`numeric`) の**二重判定** | **サーバーの `decimal.js` のみ** |
-| 回答の一意性 | `UNIQUE (room_id, question_id, participant_id)` | **決定的ドキュメントID + `create()`**（同等の保証） |
-| 状態遷移の原子性 | `SELECT ... FOR UPDATE` + トランザクション | `runTransaction`（同等） |
-| 行レベルの秘匿 | RLS ポリシー | Security Rules + **ドキュメント分割** |
-| リアルタイム | Realtime Broadcast（通知のみ） | `onSnapshot`（DB の実データを直接購読） |
-| サーバー時刻 | `now()` を DB が決定 | Cloud Run のサーバー時刻（クライアント時刻は不使用） |
+| 項目             | PostgreSQL 版                                          | Firebase 版                                          |
+| ---------------- | ------------------------------------------------------ | ---------------------------------------------------- |
+| 数値の正誤判定   | サーバー(`decimal.js`) と DB(`numeric`) の**二重判定** | **サーバーの `decimal.js` のみ**                     |
+| 回答の一意性     | `UNIQUE (room_id, question_id, participant_id)`        | **決定的ドキュメントID + `create()`**（同等の保証）  |
+| 状態遷移の原子性 | `SELECT ... FOR UPDATE` + トランザクション             | `runTransaction`（同等）                             |
+| 行レベルの秘匿   | RLS ポリシー                                           | Security Rules + **ドキュメント分割**                |
+| リアルタイム     | Realtime Broadcast（通知のみ）                         | `onSnapshot`（DB の実データを直接購読）              |
+| サーバー時刻     | `now()` を DB が決定                                   | Cloud Run のサーバー時刻（クライアント時刻は不使用） |
 
 > **重要な設計変更**
 > Firestore の数値型は倍精度浮動小数点しか持たないため、`numeric(30,10)` 相当の再判定ができません。
@@ -36,6 +36,13 @@ profiles/{uid}
 mediaAssets/{assetId}
     画像メタデータ（WebP へ変換済みのもののみ）。
 
+soundSettings/{ownerId}             ★ 作った本人だけ読める
+    差し替えた効果音。9 音ぶんを 1 ドキュメントにまとめて持つ
+    （投影が読む一覧を作るとき、1 件読むだけで済ませるため）。
+    publicId: 配信経路 /api/sounds/{publicId}/{name} に使う推測できない ID。
+    sounds: { <音の名前>: { assetId, bucket, objectPath, mimeType, ... } }
+    入っていない音は同梱の既定音が鳴る。
+
 quizzes/{quizId}
     クイズ本体。questions は配列ではなくサブコレクション。
     sharedWith: 閲覧・利用を許可した司会者の uid（所有者は 1 人のまま）。
@@ -44,14 +51,14 @@ quizzes/{quizId}
            （1 問の更新が 1 回の書き込みで原子的に済む）。
 
 drawLists/{listId}                  ★ 作った本人だけ読める（名簿は氏名の塊）
-    抽選会の名簿・ビンゴの球。kind は name / number / item。
+    抽選会の名簿・ビンゴの球・ルーレットの扇。kind は name / number / item / weighted。
     number は範囲（numberMin/numberMax）だけを保存し、読むときに展開する。
     settings: 回す速さ・文字の大きさ・背景画像・オープニング動画の URL。
     └─ entries/{entryId}
-           position / label / imageAssetId（item のみ）
+           position / label / imageAssetId（item のみ）/ weight（weighted のみ）
 
 rooms/{roomId}                      ★ 司会者のみ読める（正解を含む）
-    mode: quiz | lottery | bingo（作成時に決めて変えない）
+    mode: quiz | lottery | bingo | roulette（作成時に決めて変えない）
     quizSnapshot（正解・解説・正解画像を含む開催時点の固定コピー）
     drawSnapshot（抽選会・ビンゴのみ。開催時点の抽選リストの固定コピー）
     drawn: [{ order, entryId }]（引いた順。order がそのまま当選順位）
@@ -143,7 +150,7 @@ await firestore.runTransaction(async (tx) => {
 参加者端末の時計は一切信用しません。
 
 ```ts
-const now = Date.now();                       // Cloud Run のサーバー時刻
+const now = Date.now(); // Cloud Run のサーバー時刻
 if (now > room.answerDeadlineAt.toMillis()) throw ANSWER_DEADLINE_PASSED;
 ```
 
@@ -220,16 +227,17 @@ npm run load:test -- --participants 1000
 Admin SDK は Security Rules を迂回するため、認可はアプリケーション側で行います。
 Rules は「万一クライアントが直接叩いても何も漏れない」ための最終防壁です。
 
-| パス | 参加者 | 投影担当 | 司会者 |
-|---|---|---|---|
-| `rooms/{id}` | ✗ | ✗ | 所有者のみ読み取り |
-| `rooms/{id}/public/state` | 読み取り可 | 読み取り可 | 読み取り可 |
-| `rooms/{id}/staff/progress` | ✗ | 読み取り可 | 読み取り可 |
-| `rooms/{id}/members/{mid}` | 自分の行のみ | 自分の行のみ | 全件 |
-| `rooms/{id}/answers/{aid}` | 自分の回答のみ | ✗ | 全件 |
-| `quizzes/**` | ✗ | ✗ | 所有者と共有相手のみ |
-| `mediaAssets/**` | ✗ | ✗ | 所有者のみ |
-| すべての書き込み | ✗ | ✗ | ✗ |
+| パス                        | 参加者         | 投影担当     | 司会者               |
+| --------------------------- | -------------- | ------------ | -------------------- |
+| `rooms/{id}`                | ✗              | ✗            | 所有者のみ読み取り   |
+| `rooms/{id}/public/state`   | 読み取り可     | 読み取り可   | 読み取り可           |
+| `rooms/{id}/staff/progress` | ✗              | 読み取り可   | 読み取り可           |
+| `rooms/{id}/members/{mid}`  | 自分の行のみ   | 自分の行のみ | 全件                 |
+| `rooms/{id}/answers/{aid}`  | 自分の回答のみ | ✗            | 全件                 |
+| `quizzes/**`                | ✗              | ✗            | 所有者と共有相手のみ |
+| `mediaAssets/**`            | ✗              | ✗            | 所有者のみ           |
+| `soundSettings/{uid}`       | ✗              | ✗            | 本人のみ             |
+| すべての書き込み            | ✗              | ✗            | ✗                    |
 
 参加者が `quizzes/**` を読めないため、**正解・解説は Rules の層でも到達不能**です。
 
@@ -250,10 +258,10 @@ Rules は「万一クライアントが直接叩いても何も漏れない」�
 Cloud Run 上の Admin SDK は**サービスアカウントの ADC** を使うため、
 **秘密鍵ファイルも Secret Manager も不要**になります。
 
-| | Supabase 版 | Firebase 版 |
-|---|---|---|
-| サーバー用の秘密情報 | `SUPABASE_SECRET_KEY` を Secret Manager から注入 | **不要**（Cloud Run の実行サービスアカウントの権限で認証） |
-| クライアントへ渡す設定 | URL + Publishable Key | Firebase Web 設定（apiKey 等。公開前提） |
+|                        | Supabase 版                                      | Firebase 版                                                |
+| ---------------------- | ------------------------------------------------ | ---------------------------------------------------------- |
+| サーバー用の秘密情報   | `SUPABASE_SECRET_KEY` を Secret Manager から注入 | **不要**（Cloud Run の実行サービスアカウントの権限で認証） |
+| クライアントへ渡す設定 | URL + Publishable Key                            | Firebase Web 設定（apiKey 等。公開前提）                   |
 
 Firebase の `apiKey` は秘密情報ではありません（公開しても安全な識別子）。
 実際の保護は Security Rules と、サーバー側の認可で行います。

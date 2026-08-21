@@ -148,6 +148,70 @@ export async function uploadProcessedImage(
   return { objectPath };
 }
 
+/**
+ * 効果音を保存する。
+ *
+ * 画像と違い**中身は変換しない**（音を再エンコードすると音質が落ちる）。
+ * 受け取ったバイト列をそのまま置き、Content-Type だけ正しく付ける。
+ */
+export async function uploadSoundObject(input: {
+  objectPath: string;
+  buffer: Uint8Array;
+  contentType: string;
+}): Promise<void> {
+  const bucket = getMediaBucket();
+  try {
+    await bucket.file(input.objectPath).save(input.buffer, {
+      resumable: false,
+      contentType: input.contentType,
+      /*
+        差し替えるたびに新しいパスへ置くので、実体は一度書いたら変わらない。
+        投影画面は会のたびに読み直すため、長く持たせてよい。
+      */
+      metadata: { cacheControl: 'private, max-age=31536000, immutable' },
+    });
+  } catch (error) {
+    const reason = describeStorageFailure(bucket.name, error);
+    logger.error('storage.sound_upload_failed', {
+      bucket: bucket.name,
+      objectPath: input.objectPath,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
+    throw new AppError('SOUND_STORAGE_FAILED', { cause: error, details: { reason } });
+  }
+}
+
+/**
+ * 効果音の中身を読み出す。
+ *
+ * 署名付き URL ではなく**バイト列を返す**のは、投影画面が fetch して
+ * decodeAudioData へ渡すため。別オリジンから fetch するとバケットへ CORS の
+ * 設定が要る（設定漏れが会場で音の出ない原因になる）。
+ * 自分のドメインから配れば、その設定そのものが要らなくなる。
+ */
+export async function readSoundObject(
+  bucket: string,
+  objectPath: string,
+): Promise<ArrayBuffer | null> {
+  try {
+    const [buffer] = await bucketFor(bucket).file(objectPath).download();
+    /*
+      Node の Buffer は共有の領域を指していることがあるため、自分の領域へ写して返す。
+      そのまま返すと、応答を書き出す前に領域が使い回されて中身が変わりうる。
+    */
+    const copy = new ArrayBuffer(buffer.byteLength);
+    new Uint8Array(copy).set(buffer);
+    return copy;
+  } catch (error) {
+    logger.warn('storage.sound_read_failed', {
+      bucket,
+      objectPath,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
 /** オブジェクトを削除する。参照文字列でも objectPath でも受け付ける。 */
 export async function deleteObject(objectPath: string): Promise<void> {
   const parsed = parseStorageRef(objectPath);

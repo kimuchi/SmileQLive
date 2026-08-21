@@ -186,6 +186,50 @@ describe('投影画面の効果音', () => {
     manager.dispose();
   });
 
+  it('ルームごとの一覧から、差し替えた音の場所を読む', async () => {
+    /*
+      管理画面から差し替えた音は /api/sounds/... 経由で配る。
+      一覧そのものも /sounds/manifest.json ではなくルームの経路から来る。
+      値は絶対パスなので、一覧の場所が変わっても指す先が狂わないことを確かめる。
+    */
+    const roomManifest = {
+      ...MANIFEST,
+      // 差し替えた音。同梱の音とは別の場所を指す。
+      'draw-win': '/api/sounds/pub-1/draw-win?v=1700000000000',
+      // 差し替えていない音。同梱の場所を絶対パスで指す。
+      tick: '/sounds/default/tick.wav',
+    };
+    const requested: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      requested.push(url);
+      if (url.endsWith('/api/rooms/room-x/sounds')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(roomManifest),
+        } as unknown as Response);
+      }
+      return Promise.resolve(audioResponse());
+    });
+
+    const warnings = collectWarnings();
+    const manager = createProjectorAudioManager({
+      dedupeNamespace: 'room-x',
+      manifestUrl: '/api/rooms/room-x/sounds',
+      onWarning: warnings.onWarning,
+    });
+    await manager.unlock();
+    const readiness = await manager.preload();
+
+    expect(readiness.manifestOk).toBe(true);
+    expect(readiness.failed).toHaveLength(0);
+    expect(requested).toContain(`${window.location.origin}/api/sounds/pub-1/draw-win?v=1700000000000`);
+    expect(requested).toContain(`${window.location.origin}/sounds/default/tick.wav`);
+    expect(warnings.messages).toEqual([]);
+    manager.dispose();
+  });
+
   it('見つからない音は理由つきで返す', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);

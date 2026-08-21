@@ -4,6 +4,7 @@ import type { DrawListKind, DrawRecord, DrawSettings, DrawSnapshot } from '@/dom
 import type { RoomMode } from '@/domain/room/room-mode';
 import type { QuestionType } from '@/domain/quiz/question';
 import type { RoomPhase } from '@/domain/room/state-machine';
+import type { SoundName } from '@/domain/sound/sound-catalog';
 
 /**
  * Firestore ドキュメントの型定義。
@@ -26,6 +27,7 @@ export const COLLECTIONS = {
   quizzes: 'quizzes',
   questions: 'questions',
   mediaAssets: 'mediaAssets',
+  soundSettings: 'soundSettings',
   drawLists: 'drawLists',
   drawEntries: 'entries',
   rooms: 'rooms',
@@ -69,6 +71,43 @@ export type MediaAssetDoc = {
   width: number;
   height: number;
   createdAt: FirestoreTimestamp;
+};
+
+/**
+ * `soundSettings/{ownerId}` — 差し替えた効果音。司会者ごとに 1 つ。
+ *
+ * 9 音ぶんしか無いのでドキュメント 1 つにまとめる。
+ * 投影画面が鳴らす一覧を作るとき、この 1 件を読むだけで済ませたい
+ * （コレクションを引くと索引が要り、会場で 1 回だけ効く遅さを持ち込む）。
+ */
+export type SoundSettingsDoc = {
+  ownerId: string;
+  /**
+   * 配信経路に使う公開 ID。
+   *
+   * 音そのものは秘密ではないが、URL に uid を出すと誰の設定かが分かってしまう。
+   * 推測できない ID を 1 つ持たせ、`/api/sounds/{publicId}/{name}` で配る。
+   */
+  publicId: string;
+  /** 差し替えた音だけが入る。入っていない音は同梱の既定音が鳴る。 */
+  sounds: Partial<Record<SoundName, SoundOverrideDoc>>;
+  updatedAt: FirestoreTimestamp;
+};
+
+/** 差し替えた音 1 件。 */
+export type SoundOverrideDoc = {
+  assetId: string;
+  bucket: string;
+  objectPath: string;
+  mimeType: string;
+  byteSize: number;
+  /** 操作者が選んだファイル名。管理画面に「何を入れたか」を出すために持つ。 */
+  originalName: string;
+  /**
+   * 差し替えた時刻（ミリ秒）。
+   * 配信 URL の末尾に付けて、会の最中に差し替えても古い音がキャッシュから鳴らないようにする。
+   */
+  updatedAtMs: number;
 };
 
 export type QuizStatus = 'draft' | 'published' | 'archived';

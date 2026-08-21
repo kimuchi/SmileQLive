@@ -28,7 +28,7 @@ import { parseArgs } from './lib/config.mjs';
 
 process.chdir(fileURLToPath(new URL('..', import.meta.url)));
 
-/** 投影画面が鳴らす 9 種類。projector-audio-manager.ts の SOUND_NAMES と一致させる。 */
+/** 投影画面が鳴らす 9 種類。src/domain/sound/sound-catalog.ts の SOUND_NAMES と一致させる。 */
 const SOUND_NAMES = [
   'question-start',
   'tick',

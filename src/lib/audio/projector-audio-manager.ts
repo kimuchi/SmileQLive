@@ -7,7 +7,9 @@
  * 守っていること:
  * - AudioContext は **操作者のクリックイベント内でしか作らない / resume しない**。
  *   モジュールの読み込みや画面表示だけでは音が鳴る余地を作らない。
- * - 音源は public/sounds/manifest.json（ファイル名の一覧）を読んでから取得する。
+ * - 音源は **一覧 (manifest) を読んでから**取得する。既定は /sounds/manifest.json だが、
+ *   投影画面はルームごとの一覧 (/api/rooms/{roomId}/sounds) を渡す。
+ *   管理画面から差し替えた音は、そこで配信経路の URL に入れ替わっている。
  *   ファイルが無い（404）場合は警告を出すだけで、投影は止めない。
  * - 同じ出来事で二度鳴らさない。`${stateVersion}:${soundName}` のようなキーを
  *   sessionStorage へ記録し、再読込・再接続でも鳴り直さない。
@@ -15,40 +17,14 @@
  */
 
 import { createSoundDedupeStore, type SoundDedupeStore } from '@/lib/audio/sound-dedupe-store';
+import { SOUND_NAMES, type SoundName } from '@/domain/sound/sound-catalog';
 
-export type SoundName =
-  | 'question-start'
-  | 'tick'
-  | 'answer-lock'
-  | 'answer-reveal'
-  /** ランキング発表前のためる音（ドラムロール）。 */
-  | 'ranking'
-  /** ランキングが出た瞬間の音（ファンファーレ）。 */
-  | 'fanfare'
-  | 'finish'
-  /**
-   * 抽選のルーレットを回している間ずっと鳴らす音。
-   * startLoop で繰り返すため、素材の長さがそのまま継ぎ目の間隔になる（同梱音は 1 秒ちょうど）。
-   */
-  | 'draw-spin'
-  /** 引いたものが確定した瞬間の音。 */
-  | 'draw-win';
-
-export const SOUND_NAMES = [
-  'question-start',
-  'tick',
-  'answer-lock',
-  'answer-reveal',
-  'ranking',
-  'fanfare',
-  'finish',
-  'draw-spin',
-  'draw-win',
-] as const satisfies readonly SoundName[];
-
-export function isSoundName(value: string): value is SoundName {
-  return (SOUND_NAMES as readonly string[]).includes(value);
-}
+/*
+  音の名前と用途は domain/sound/sound-catalog.ts が持つ。
+  管理画面（差し替えの設定）からも同じ一覧を参照するため、
+  再生の仕組みと切り離してある。ここでは再輸出だけする。
+*/
+export { SOUND_NAMES, isSoundName, type SoundName } from '@/domain/sound/sound-catalog';
 
 /** 音源を用意できなかった理由。会場でそのまま読める言葉にする。 */
 export type SoundFailureReason =
