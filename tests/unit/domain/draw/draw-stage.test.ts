@@ -7,6 +7,7 @@ import {
   drawnStageEntries,
   latestStageEntry,
   remainingStageEntries,
+  visibleDuringSpin,
   type StageDraw,
   type StageDrawEntry,
 } from '@/domain/draw/draw-stage';
@@ -192,5 +193,60 @@ describe('bingoColumnOf', () => {
   it('知らない ID には列を返さない', () => {
     const draw = makeNumberDraw(1, 75);
     expect(bingoColumnOf(draw, 'unknown')).toBeNull();
+  });
+});
+
+describe('visibleDuringSpin', () => {
+  /**
+   * サーバーは引く操作を受けた瞬間に記録するが、投影は数秒かけて回してから見せる。
+   * その間に盤面や履歴へ最新の 1 件を出すと、回し終わる前に答えが分かってしまう。
+   */
+  it('回している間は最新の 1 件を伏せる', () => {
+    const draw = makeNumberDraw(1, 75, ['11', '27', '57']);
+
+    const shown = visibleDuringSpin(draw, true);
+
+    expect(shown.drawn.map((record) => record.entryId)).toEqual(['n11', 'n27']);
+    expect(shown.latestEntryId).toBe('n27');
+    expect(shown.latestOrder).toBe(2);
+  });
+
+  it('伏せたぶんは「まだ出ていない」として数える', () => {
+    // 「残り」が先に減ると、そこからも結果が読めてしまう。
+    const draw = makeNumberDraw(1, 75, ['11', '27', '57']);
+
+    expect(visibleDuringSpin(draw, true).remainingCount).toBe(draw.remainingCount + 1);
+  });
+
+  it('回し終わったら、そのまま全部見せる', () => {
+    const draw = makeNumberDraw(1, 75, ['11', '27', '57']);
+
+    expect(visibleDuringSpin(draw, false)).toBe(draw);
+  });
+
+  it('1 件目を引いている最中は、何も出ていない状態に見せる', () => {
+    const draw = makeNumberDraw(1, 75, ['11']);
+
+    const shown = visibleDuringSpin(draw, true);
+
+    expect(shown.drawn).toEqual([]);
+    expect(shown.latestEntryId).toBeNull();
+    expect(shown.latestOrder).toBeNull();
+  });
+
+  it('まだ 1 件も引いていなければ何もしない', () => {
+    const draw = makeNumberDraw(1, 75, []);
+
+    expect(visibleDuringSpin(draw, true)).toBe(draw);
+  });
+
+  it('記録そのものには触らない', () => {
+    // 伏せるのは見せ方だけ。引き直しでも取り消しでもない。
+    const draw = makeNumberDraw(1, 75, ['11', '27']);
+    const before = draw.drawn.map((record) => record.entryId);
+
+    visibleDuringSpin(draw, true);
+
+    expect(draw.drawn.map((record) => record.entryId)).toEqual(before);
   });
 });

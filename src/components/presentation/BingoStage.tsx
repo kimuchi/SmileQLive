@@ -2,7 +2,7 @@
 
 import { BingoBall, BingoCage } from '@/components/presentation/BingoBall';
 import { StageBurst, StageConfetti, StageFlash } from '@/components/presentation/StageEffects';
-import { STAGE_FONT, stageHeightRatio, stageSize } from '@/components/presentation/stage-theme';
+import { STAGE_FONT, stageSize } from '@/components/presentation/stage-theme';
 import { StageImage } from '@/components/presentation/StageImage';
 import {
   bingoColumnOf,
@@ -352,6 +352,10 @@ function BallTray({ draw }: { draw: StageDraw }) {
  *
  * 出たものだけを新しい順に並べる。
  * 全部を並べると 1 つあたりが小さくなりすぎ、会場から何も読めなくなる。
+ *
+ * **写真は出さない。** 写真は「いま出たもの」を大きく見せる左側の役目で、
+ * ここは「もう出たかどうか」を手元のカードと見比べるための一覧。
+ * 小さな写真を並べても会場からは読み取れず、名前の入る幅を奪うだけだった。
  */
 function ItemBoard({ draw }: { draw: StageDraw }) {
   const drawn = drawnStageEntries(draw).reverse();
@@ -395,20 +399,12 @@ function ItemBoard({ draw }: { draw: StageDraw }) {
             )}
             style={{ padding: stageSize(8), gap: stageSize(6) }}
           >
-            {entry.image ? (
-              <div
-                className="flex w-full items-center justify-center"
-                style={{ height: stageHeightRatio(0.13) }}
-              >
-                <StageImage image={entry.image} maxHeightRatio={0.13} fill />
-              </div>
-            ) : null}
             <span
               className={cn(
                 'w-full shrink-0 truncate text-center font-bold',
                 index === 0 ? 'text-amber-200' : 'text-white/80',
               )}
-              style={{ fontSize: stageSize(STAGE_FONT.caption) }}
+              style={{ fontSize: stageSize(STAGE_FONT.body) }}
             >
               {entry.label}
             </span>

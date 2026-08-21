@@ -64,9 +64,7 @@ export function indexEntries(entries: readonly StageDrawEntry[]): Map<string, St
 }
 
 /** 引いた順に並べたエントリ（履歴・ボードの表示に使う）。 */
-export function drawnStageEntries(
-  draw: StageDraw,
-): Array<StageDrawEntry & { order: number }> {
+export function drawnStageEntries(draw: StageDraw): Array<StageDrawEntry & { order: number }> {
   const byId = indexEntries(draw.entries);
   return [...draw.drawn]
     .sort((a, b) => a.order - b.order)
@@ -77,9 +75,7 @@ export function drawnStageEntries(
 }
 
 /** 直近に引いたもの。 */
-export function latestStageEntry(
-  draw: StageDraw,
-): (StageDrawEntry & { order: number }) | null {
+export function latestStageEntry(draw: StageDraw): (StageDrawEntry & { order: number }) | null {
   if (draw.latestEntryId === null || draw.latestOrder === null) {
     return null;
   }
@@ -147,4 +143,35 @@ export function bingoColumnOf(draw: StageDraw, entryId: string): string | null {
     }
   }
   return null;
+}
+
+/**
+ * 回している間に見せてよい状態。
+ *
+ * サーバーは引く操作を受けた**その瞬間**に結果を記録する。一方で投影は
+ * そこから 2〜3 秒かけてルーレットを回してから見せる。
+ * その間ずっと盤面や履歴へ最新の 1 件を出していると、
+ * **回し終わる前に答えが分かってしまう**（会場がいちばん白ける形）。
+ *
+ * そこで回している間だけ最新の 1 件を伏せる。
+ * 「残り」の数え方も、まだ出ていないものとして数える。
+ *
+ * 伏せるのは見せ方だけで、記録には触らない。
+ * 引き直しでも取り消しでもないので、サーバー側の状態は変わらない。
+ */
+export function visibleDuringSpin(draw: StageDraw, spinning: boolean): StageDraw {
+  if (!spinning || draw.drawn.length === 0) {
+    return draw;
+  }
+
+  const drawn = draw.drawn.slice(0, -1);
+  const previous = drawn[drawn.length - 1] ?? null;
+
+  return {
+    ...draw,
+    drawn,
+    latestEntryId: previous?.entryId ?? null,
+    latestOrder: previous?.order ?? null,
+    remainingCount: draw.remainingCount + 1,
+  };
 }

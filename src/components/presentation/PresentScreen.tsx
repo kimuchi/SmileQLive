@@ -32,7 +32,11 @@ import { useCountdown } from '@/hooks/use-countdown';
 import { useExpiryLock } from '@/hooks/use-expiry-lock';
 import { useDrawRoulette } from '@/hooks/use-draw-roulette';
 import { useRoomSnapshot } from '@/hooks/use-room-snapshot';
-import { latestStageEntry, remainingStageEntries } from '@/domain/draw/draw-stage';
+import {
+  latestStageEntry,
+  remainingStageEntries,
+  visibleDuringSpin,
+} from '@/domain/draw/draw-stage';
 import { isDrawMode } from '@/domain/room/room-mode';
 
 /**
@@ -258,16 +262,24 @@ export function PresentScreen({ roomId }: { roomId: string }) {
   const question = snapshot.currentQuestion;
   const drawMode = isDrawMode(snapshot.mode);
 
+  /*
+    盤面・履歴へ渡すのは「回し終わったぶんだけ」。
+    サーバーは引く操作を受けた瞬間に記録するので、そのまま渡すと
+    回している最中に答えが盤面へ出てしまう（会場がいちばん白ける形）。
+    ルーレットそのものは記録の側（draw）で回す。
+  */
+  const shownDraw = draw ? visibleDuringSpin(draw, roulette.spinning) : null;
+
   let body: ReactNode;
 
-  if (drawMode && draw) {
+  if (drawMode && draw && shownDraw) {
     // 抽選会・ビンゴ。参加者は来ないので、待機画面も参加 URL を出さない。
     if (phase === 'lobby') {
-      body = <DrawWaitingStage draw={draw} />;
+      body = <DrawWaitingStage draw={shownDraw} />;
     } else if (snapshot.mode === 'bingo') {
       body = (
         <BingoStage
-          draw={draw}
+          draw={shownDraw}
           display={roulette.display}
           spinning={roulette.spinning}
           revealed={phase === 'draw_revealed' || phase === 'finished'}
@@ -276,7 +288,7 @@ export function PresentScreen({ roomId }: { roomId: string }) {
     } else {
       body = (
         <LotteryStage
-          draw={draw}
+          draw={shownDraw}
           display={roulette.display}
           spinning={roulette.spinning}
           revealed={phase === 'draw_revealed' || phase === 'finished'}
@@ -387,9 +399,9 @@ export function PresentScreen({ roomId }: { roomId: string }) {
           {body}
         </div>
 
-        {drawMode && draw && historyOpen ? (
+        {drawMode && shownDraw && historyOpen ? (
           <DrawHistoryOverlay
-            draw={draw}
+            draw={shownDraw}
             ordered={snapshot.mode === 'lottery'}
             onClose={toggleHistory}
           />
