@@ -6,8 +6,8 @@ import { Alert } from '@/components/shared/Alert';
 import { Badge, type BadgeVariant } from '@/components/shared/Badge';
 import { Button } from '@/components/shared/Button';
 import { Card } from '@/components/shared/Card';
-import { Checkbox } from '@/components/shared/Checkbox';
 import { ErrorMessage } from '@/components/shared/ErrorMessage';
+import { RadioGroup } from '@/components/shared/RadioGroup';
 import { SaveStatus, type SaveState } from '@/components/shared/SaveStatus';
 import { Spinner } from '@/components/shared/Spinner';
 import { TextInput } from '@/components/shared/TextInput';
@@ -19,6 +19,9 @@ import {
   DRAW_FONT_SIZE_MAX,
   DRAW_FONT_SIZE_MIN,
   DRAW_LABEL_MAX_LENGTH,
+  DRAW_LAYOUT_HINTS,
+  DRAW_LAYOUT_LABELS,
+  DRAW_LAYOUTS,
   DRAW_LIST_KIND_LABELS,
   DRAW_NUMBER_MAX,
   DRAW_NUMBER_MIN,
@@ -26,7 +29,9 @@ import {
   SPIN_DURATION_MIN_MS,
   SPIN_INTERVAL_MAX_MS,
   SPIN_INTERVAL_MIN_MS,
+  drawLayoutOf,
   isDrawKindAllowedForMode,
+  type DrawLayout,
   type DrawListKind,
 } from '@/domain/draw/draw-list';
 import { ROOM_MODE_LABELS } from '@/domain/room/room-mode';
@@ -97,7 +102,7 @@ type SettingsDraft = {
   spinDurationMs: string;
   resultFontSize: string;
   historyFontSize: string;
-  showBoard: boolean;
+  layout: DrawLayout;
   backgroundAssetId: string | null;
   openingVideoUrl: string;
 };
@@ -122,7 +127,7 @@ type UpdateDrawListBody = {
     spinDurationMs: number;
     resultFontSize: number;
     historyFontSize: number;
-    showBoard: boolean;
+    layout: DrawLayout;
     backgroundAssetId: string | null;
     openingVideoUrl: string | null;
   };
@@ -146,7 +151,7 @@ function toSettingsDraft(list: DrawListDetail): SettingsDraft {
     spinDurationMs: String(list.settings.spinDurationMs),
     resultFontSize: String(list.settings.resultFontSize),
     historyFontSize: String(list.settings.historyFontSize),
-    showBoard: list.settings.showBoard,
+    layout: drawLayoutOf(list.settings),
     backgroundAssetId: list.settings.backgroundAssetId,
     openingVideoUrl: list.settings.openingVideoUrl ?? '',
   };
@@ -287,7 +292,7 @@ function validateSettings(
         spinDurationMs: spinDurationMs.value,
         resultFontSize: resultFontSize.value,
         historyFontSize: historyFontSize.value,
-        showBoard: draft.showBoard,
+        layout: draft.layout,
         backgroundAssetId: draft.backgroundAssetId,
         openingVideoUrl: openingVideoUrl.value,
       },
@@ -784,12 +789,17 @@ export function DrawListEditor({ listId }: DrawListEditorProps) {
             />
           </div>
 
-          <Checkbox
-            label="すでに出たものを画面に出し続ける"
-            checked={settings.showBoard}
-            hint="オンにすると、これまでに出たものを画面に並べ続けます。オフにすると、いま引いたものだけを大きく出します。"
-            onChange={(event) => {
-              patchSettings({ showBoard: event.currentTarget.checked });
+          <RadioGroup
+            name="draw-layout"
+            legend="投影の見せ方"
+            value={settings.layout}
+            options={DRAW_LAYOUTS.map((layout) => ({
+              value: layout,
+              label: DRAW_LAYOUT_LABELS[layout],
+              description: DRAW_LAYOUT_HINTS[layout],
+            }))}
+            onChange={(layout) => {
+              patchSettings({ layout });
             }}
           />
 

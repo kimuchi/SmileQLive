@@ -2,8 +2,9 @@
 
 import { BingoBall, BingoCage } from '@/components/presentation/BingoBall';
 import { StageBurst, StageConfetti, StageFlash } from '@/components/presentation/StageEffects';
-import { STAGE_FONT, stageSize } from '@/components/presentation/stage-theme';
+import { STAGE_FONT, stageHeightRatio, stageSize } from '@/components/presentation/stage-theme';
 import { StageImage } from '@/components/presentation/StageImage';
+import { drawLayoutOf } from '@/domain/draw/draw-list';
 import {
   bingoColumnOf,
   bingoColumns,
@@ -44,9 +45,16 @@ export function BingoStage({
 }) {
   const remaining = draw.remainingCount;
   const drawnCount = draw.drawn.length;
-  const showBoard = draw.settings.showBoard;
+  const layout = drawLayoutOf(draw.settings);
   const unit = drawUnit(draw.kind);
   const settled = revealed && !spinning && display !== null;
+
+  // 一覧だけを出すモード。あとから来た人が追いつけるようにするための見せ方。
+  if (layout === 'list') {
+    return <DrawnListStage draw={draw} drawnCount={drawnCount} remaining={remaining} unit={unit} />;
+  }
+
+  const showBoard = layout === 'board';
 
   return (
     <div className="relative flex h-full w-full flex-col" style={{ gap: stageSize(16) }}>
@@ -110,6 +118,118 @@ export function BingoStage({
 
       {/* 受け皿。出た順に球が並ぶ。ビンゴ機の見た目に寄せる。 */}
       {draw.kind === 'number' ? <BallTray draw={draw} /> : null}
+    </div>
+  );
+}
+
+/**
+ * 出たものの一覧だけを出す画面。
+ *
+ * 「いま出たもの」を大きく見せる場所を作らず、**全部を一覧で**並べる。
+ *   - 会場の隅のサブ画面や、休憩中の掲示に向く
+ *   - あとから来た人が、これまでに何が出たかを一目で追いつける
+ *
+ * 一覧なので、いちばん新しいものだけは色を変えて分かるようにする。
+ * 件数に応じて 1 つあたりの大きさを変え、多くても収まるようにする。
+ */
+function DrawnListStage({
+  draw,
+  drawnCount,
+  remaining,
+  unit,
+}: {
+  draw: StageDraw;
+  drawnCount: number;
+  remaining: number;
+  unit: string;
+}) {
+  const drawn = drawnStageEntries(draw).reverse();
+  const latestId = draw.latestEntryId;
+
+  /*
+    列数は件数から決め、画面いっぱいに広げる。
+    幅を固定にすると、14 件のときに上 2 行だけ使って下が真っ白になる。
+    16:9 に対しておおよそ正方形の升目になる列数を選ぶ。
+  */
+  const columns = Math.max(1, Math.min(15, Math.ceil(Math.sqrt((drawn.length * 16) / 9))));
+  const fontSize =
+    columns >= 12
+      ? STAGE_FONT.body
+      : columns >= 9
+        ? STAGE_FONT.choice
+        : columns >= 6
+          ? STAGE_FONT.heading
+          : STAGE_FONT.emphasis;
+
+  return (
+    <div className="flex h-full w-full flex-col" style={{ gap: stageSize(20) }}>
+      <div className="flex shrink-0 items-baseline justify-between" style={{ gap: stageSize(24) }}>
+        <h2
+          className="font-bold text-white"
+          style={{ fontSize: stageSize(STAGE_FONT.heading), lineHeight: 1.1 }}
+        >
+          これまでに出たもの
+        </h2>
+        <span
+          className="shrink-0 rounded-full bg-black/35 font-bold whitespace-nowrap text-white/75"
+          style={{
+            fontSize: stageSize(STAGE_FONT.small),
+            paddingInline: stageSize(20),
+            paddingBlock: stageSize(4),
+          }}
+        >
+          {formatInteger(drawnCount)}
+          {unit} / 残り {formatInteger(remaining)}
+          {unit}
+        </span>
+      </div>
+
+      {drawn.length === 0 ? (
+        <p
+          className="flex flex-1 items-center justify-center text-center font-bold text-white/50"
+          style={{ fontSize: stageSize(STAGE_FONT.heading) }}
+        >
+          まだ何も出ていません
+        </p>
+      ) : (
+        <ul
+          className="grid min-h-0 flex-1 list-none overflow-hidden"
+          style={{
+            gap: stageSize(12),
+            gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+            // 行も伸ばして高さを使い切る。会場の後ろからは大きいほど読める。
+            gridAutoRows: 'minmax(0, 1fr)',
+            // ただし 1 枚が大きくなりすぎないよう上限を付ける（下の maxHeight）。
+            // 3 件しか無いときに巨大な板が並ぶのを避ける。
+            alignItems: 'center',
+          }}
+        >
+          {drawn.map((entry) => {
+            const isLatest = entry.id === latestId;
+            return (
+              <li
+                key={entry.id}
+                className={cn(
+                  'flex items-center justify-center overflow-hidden rounded-xl border-2 font-bold',
+                  isLatest
+                    ? 'stage-mark text-stage-950 border-amber-200 bg-amber-300'
+                    : 'border-white/20 bg-white/5 text-white/85',
+                )}
+                style={{
+                  paddingInline: stageSize(10),
+                  paddingBlock: stageSize(8),
+                  fontSize: stageSize(fontSize),
+                  height: '100%',
+                  maxHeight: stageHeightRatio(0.2),
+                  ...(isLatest ? { boxShadow: '0 0 1.2cqw rgba(252,211,77,0.8)' } : {}),
+                }}
+              >
+                <span className="w-full truncate text-center tabular-nums">{entry.label}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }
@@ -180,14 +300,22 @@ function CurrentBall({
     }
 
     return (
-      <BingoBall
-        key={`ball-${display.id}`}
-        label={display.label}
-        column={bingoColumnOf(draw, display.id)}
-        size={480}
-        settled
-        spinning={false}
-      />
+      <div className="flex flex-col items-center" key={`ball-${display.id}`}>
+        <BingoBall
+          label={display.label}
+          column={bingoColumnOf(draw, display.id)}
+          size={480}
+          settled
+          spinning={false}
+          spin
+        />
+        {/* 球の下の影。これが無いと球が宙に浮いて見える。 */}
+        <span
+          aria-hidden="true"
+          className="stage-ball-shadow block rounded-[50%] bg-black/60 blur-[0.5cqw]"
+          style={{ width: stageSize(360), height: stageSize(36), marginTop: stageSize(-18) }}
+        />
+      </div>
     );
   }
 
@@ -241,6 +369,8 @@ function NumberBoard({ draw }: { draw: StageDraw }) {
   const drawn = drawnEntryIdSet(draw);
   const columns = bingoColumns(draw);
   const latestId = draw.latestEntryId;
+  // どの列の球が出たのか。見出しを光らせて、探す前に目を向けさせる。
+  const latestColumn = latestId ? bingoColumnOf(draw, latestId) : null;
 
   /** 見出しの色。球の色と揃えると、盤と球が同じものだと分かる。 */
   const headerColor: Record<string, string> = {
@@ -252,7 +382,15 @@ function NumberBoard({ draw }: { draw: StageDraw }) {
   };
 
   return (
-    <div className="flex h-full min-h-0 items-stretch" style={{ gap: stageSize(12) }}>
+    <div className="relative flex h-full min-h-0 items-stretch" style={{ gap: stageSize(12) }}>
+      {/* 新しい球が入るたび、盤を一度なでる光。どこが変わったか探す前に気づける。 */}
+      {latestId ? (
+        <span
+          key={`sweep-${latestId}`}
+          aria-hidden="true"
+          className="stage-sweep pointer-events-none absolute inset-y-0 z-10 w-[18%] bg-gradient-to-r from-transparent via-white/25 to-transparent"
+        />
+      ) : null}
       {columns.map((column, columnIndex) => (
         <div
           key={column.label ?? columnIndex}
@@ -261,9 +399,12 @@ function NumberBoard({ draw }: { draw: StageDraw }) {
         >
           {column.label ? (
             <div
+              // 出た列だけ、球が出るたびに一度だけ光らせる。
+              key={`${column.label}-${column.label === latestColumn ? latestId : 'idle'}`}
               className={cn(
                 'shrink-0 rounded-lg text-center font-bold',
                 headerColor[column.label] ?? 'text-stage-950 bg-white/80',
+                column.label === latestColumn && 'stage-column-hit',
               )}
               style={{ fontSize: stageSize(STAGE_FONT.body), paddingBlock: stageSize(4) }}
             >
@@ -284,7 +425,7 @@ function NumberBoard({ draw }: { draw: StageDraw }) {
                 <div
                   key={entry.id}
                   className={cn(
-                    'flex items-center justify-center rounded-md border-2 font-bold tabular-nums',
+                    'relative flex items-center justify-center rounded-md border-2 font-bold tabular-nums',
                     isLatest
                       ? 'stage-mark text-stage-950 border-amber-200 bg-amber-300'
                       : isDrawn
@@ -300,6 +441,17 @@ function NumberBoard({ draw }: { draw: StageDraw }) {
                         : {}),
                   }}
                 >
+                  {/*
+                    紙のカードを押さえるスタンプ。出た瞬間に丸が落ちてくる。
+                    数字の上には乗せず、枠の中で少しだけ大きい輪を重ねる。
+                  */}
+                  {isLatest ? (
+                    <span
+                      key={`stamp-${entry.id}`}
+                      aria-hidden="true"
+                      className="stage-stamp pointer-events-none absolute inset-0 rounded-md border-[0.25cqw] border-red-500/70"
+                    />
+                  ) : null}
                   {entry.label}
                 </div>
               );

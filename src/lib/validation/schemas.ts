@@ -23,6 +23,7 @@ import {
   DRAW_FONT_SIZE_MAX,
   DRAW_FONT_SIZE_MIN,
   DRAW_LABEL_MAX_LENGTH,
+  DRAW_LAYOUTS,
   DRAW_LIST_KINDS,
   DRAW_NUMBER_MAX,
   DRAW_NUMBER_MIN,
@@ -170,7 +171,7 @@ const drawSettingsSchema = z
     spinDurationMs: z.int().min(SPIN_DURATION_MIN_MS).max(SPIN_DURATION_MAX_MS),
     resultFontSize: z.int().min(DRAW_FONT_SIZE_MIN).max(DRAW_FONT_SIZE_MAX),
     historyFontSize: z.int().min(DRAW_FONT_SIZE_MIN).max(DRAW_FONT_SIZE_MAX),
-    showBoard: z.boolean(),
+    layout: z.enum(DRAW_LAYOUTS),
     backgroundAssetId: uuidSchema.nullable(),
     // 動画そのものは受け取らない（このアプリは画像しかアップロードを許していない）。
     openingVideoUrl: z.url().max(2048).nullable(),

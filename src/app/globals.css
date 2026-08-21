@@ -437,6 +437,168 @@ button {
   animation: stage-pop-big 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* ===========================================================================
+ * ビンゴの球まわり
+ *
+ * 「数字が変わるだけ」の画面にしないための動き。
+ * 本物のビンゴ機に寄せて、かごで回る → 筒を上ってくる → 受け皿で弾む、
+ * という流れを見せる。
+ * =========================================================================== */
+
+/* --- 抽選機から筒を通って出てくる。落ちるのではなく、下から**上がってくる**。 --- */
+@keyframes stage-ball-launch {
+  0% {
+    transform: translate3d(0, 120%, 0) scale(0.45);
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+  }
+  55% {
+    transform: translate3d(0, -12%, 0) scale(1.12);
+  }
+  70% {
+    /* 着地の潰れ。硬い球が受け皿へ当たった感じを出す。 */
+    transform: translate3d(0, 4%, 0) scale(1.06, 0.92);
+  }
+  84% {
+    transform: translate3d(0, -3%, 0) scale(0.98, 1.03);
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.stage-ball-launch {
+  animation: stage-ball-launch 1s cubic-bezier(0.22, 1.1, 0.36, 1) both;
+}
+
+/* --- 球の表面が回る。光の当たる位置をゆっくり回して、丸いものだと分からせる。 --- */
+@keyframes stage-ball-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.stage-ball-shine {
+  animation: stage-ball-spin 3.4s linear infinite;
+}
+
+/* --- 球の下の影。浮いて見えないように敷く。 --- */
+@keyframes stage-ball-shadow {
+  0% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  55% {
+    transform: scale(1.05);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+}
+
+.stage-ball-shadow {
+  animation: stage-ball-shadow 1s cubic-bezier(0.22, 1.1, 0.36, 1) both;
+}
+
+/* --- 抽選機の中で球が円を描く。かごごと回すより、中身が churn して見える。 --- */
+@keyframes stage-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.stage-orbit {
+  animation: stage-orbit var(--stage-orbit-duration, 2.4s) linear infinite;
+  animation-delay: var(--stage-orbit-delay, 0ms);
+}
+
+/* 逆回りを混ぜると、かご全体が回っているだけには見えなくなる。 */
+.stage-orbit-reverse {
+  animation-direction: reverse;
+}
+
+/* --- 抽選機がわずかに揺れる。回している間だけ。 --- */
+@keyframes stage-cage-shake {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(-0.6deg);
+  }
+  50% {
+    transform: translate3d(0, -0.4%, 0) rotate(0.6deg);
+  }
+}
+
+.stage-cage-shake {
+  animation: stage-cage-shake 260ms ease-in-out infinite;
+}
+
+/* --- 出た列の見出しが光る。どの列の球が出たのかが一目で分かる。 --- */
+@keyframes stage-column-hit {
+  0% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+  35% {
+    transform: scale(1.14);
+    filter: brightness(1.9);
+  }
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+}
+
+.stage-column-hit {
+  animation: stage-column-hit 900ms ease-out both;
+}
+
+/* --- 紙のカードを押さえるスタンプ。出たマスの上へ丸を落とす。 --- */
+@keyframes stage-stamp {
+  0% {
+    transform: scale(2.2) rotate(-12deg);
+    opacity: 0;
+  }
+  45% {
+    transform: scale(0.88) rotate(3deg);
+    opacity: 0.9;
+  }
+  70% {
+    transform: scale(1.06) rotate(-1deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 0.85;
+  }
+}
+
+.stage-stamp {
+  animation: stage-stamp 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* --- 盤面を一度なでる光。新しい球が入ったことを盤全体で知らせる。 --- */
+@keyframes stage-sweep {
+  0% {
+    transform: translate3d(-120%, 0, 0) skewX(-18deg);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.5;
+  }
+  100% {
+    transform: translate3d(120%, 0, 0) skewX(-18deg);
+    opacity: 0;
+  }
+}
+
+.stage-sweep {
+  animation: stage-sweep 900ms ease-out both;
+}
+
 /* 投影画面のフォントは 1920x1080 基準で cqw ではなく vw ベースに寄せる */
 .stage-scale {
   container-type: inline-size;

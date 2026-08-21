@@ -33,6 +33,7 @@ export function BingoBall({
   size,
   settled,
   spinning,
+  spin = false,
 }: {
   /** 球に書く文字（ふつうは数字）。 */
   label: string;
@@ -44,6 +45,8 @@ export function BingoBall({
   settled: boolean;
   /** 抽選中か。抽選中は揺れる。 */
   spinning: boolean;
+  /** 表面の光を回すか。大きく出しているときだけ回す（受け皿の小さい球では煩い）。 */
+  spin?: boolean;
 }) {
   const palette = (column !== null ? COLUMN_COLORS[column] : undefined) ?? NEUTRAL;
 
@@ -51,20 +54,35 @@ export function BingoBall({
     <div
       className={cn(
         'relative flex shrink-0 items-center justify-center rounded-full',
-        settled ? 'stage-drop' : spinning ? 'stage-tumble' : '',
+        // 決まった球は抽選機から**上がってくる**。落とすより、出てきた感じが出る。
+        settled ? 'stage-ball-launch' : spinning ? 'stage-tumble' : '',
       )}
       style={{
         width: stageSize(size),
         height: stageSize(size),
         // 上からの光・下からの照り返し・地の色を重ねて球に見せる。
         background: `
-          radial-gradient(circle at 32% 26%, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.35) 16%, transparent 42%),
           radial-gradient(circle at 70% 82%, ${palette.rim} 0%, transparent 48%),
           radial-gradient(circle at 50% 45%, ${palette.base} 42%, ${palette.ink} 100%)
         `,
         boxShadow: `inset 0 ${stageSize(-size * 0.06)} ${stageSize(size * 0.12)} rgba(0,0,0,0.45), 0 ${stageSize(size * 0.04)} ${stageSize(size * 0.14)} rgba(0,0,0,0.5), 0 0 ${stageSize(size * 0.16)} ${palette.rim}55`,
       }}
     >
+      {/*
+        表面の照り返し。ゆっくり回して「丸いものが回っている」ことを伝える。
+        数字の面は回さない（回すと読めない）。光だけを回す。
+      */}
+      <span
+        aria-hidden="true"
+        className={cn(
+          'pointer-events-none absolute inset-0 rounded-full',
+          spin && 'stage-ball-shine',
+        )}
+        style={{
+          background:
+            'radial-gradient(circle at 32% 26%, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.35) 16%, transparent 42%)',
+        }}
+      />
       {/* 数字を載せる白い面。球の色が濃くても数字が読めるようにする。 */}
       <div
         className="flex flex-col items-center justify-center rounded-full bg-white"
@@ -107,21 +125,29 @@ export function BingoBall({
  * 抽選中だけ出す。「いま引いている」ことが、数字が変わる以外の手がかりでも伝わる。
  * 中の球は飾りなので固定の並びでよい（乱数を使うとサーバー描画と食い違う）。
  */
+/**
+ * かごの中の球。
+ *
+ * `radius` はかごの中心からの距離（％）、`duration` は 1 周にかかる時間。
+ * わざと**ばらばらの半径と速さ**にし、逆回りも混ぜてある。
+ * 全部を同じ速さで回すと「かごごと回っているだけ」に見えて、churn しない。
+ */
 const CAGE_BALLS = [
-  { x: 30, y: 28, size: 15, color: '#1d4ed8' },
-  { x: 62, y: 22, size: 12, color: '#dc2626' },
-  { x: 22, y: 58, size: 13, color: '#16a34a' },
-  { x: 55, y: 62, size: 16, color: '#f59e0b' },
-  { x: 44, y: 42, size: 11, color: '#e2e8f0' },
-  { x: 70, y: 52, size: 12, color: '#0ea5e9' },
-  { x: 38, y: 72, size: 10, color: '#f9a8d4' },
+  { radius: 26, size: 15, duration: 2.1, delay: 0, color: '#1d4ed8', reverse: false },
+  { radius: 32, size: 12, duration: 2.8, delay: 300, color: '#dc2626', reverse: true },
+  { radius: 18, size: 13, duration: 1.7, delay: 150, color: '#16a34a', reverse: false },
+  { radius: 30, size: 16, duration: 2.4, delay: 600, color: '#f59e0b', reverse: true },
+  { radius: 12, size: 11, duration: 1.4, delay: 450, color: '#e2e8f0', reverse: false },
+  { radius: 28, size: 12, duration: 3.1, delay: 900, color: '#0ea5e9', reverse: false },
+  { radius: 22, size: 10, duration: 1.9, delay: 750, color: '#f9a8d4', reverse: true },
+  { radius: 34, size: 11, duration: 2.6, delay: 1050, color: '#a78bfa', reverse: false },
 ] as const;
 
 export function BingoCage({ size, spinning }: { size: number; spinning: boolean }) {
   return (
     <div
       aria-hidden="true"
-      className="relative shrink-0 rounded-full"
+      className={cn('relative shrink-0 rounded-full', spinning && 'stage-cage-shake')}
       style={{
         width: stageSize(size),
         height: stageSize(size),
@@ -131,21 +157,43 @@ export function BingoCage({ size, spinning }: { size: number; spinning: boolean 
         boxShadow: `inset 0 0 ${stageSize(size * 0.12)} rgba(255,255,255,0.18), 0 0 ${stageSize(size * 0.1)} rgba(103,232,249,0.35)`,
       }}
     >
-      <div className={cn('absolute inset-0', spinning ? 'stage-cage' : '')}>
-        {CAGE_BALLS.map((ball, index) => (
+      {CAGE_BALLS.map((ball, index) => (
+        // 外側の枠を中心で回し、球を半径ぶんずらして置くと円軌道になる。
+        <span
+          key={index}
+          className={cn(
+            'absolute inset-0 block',
+            spinning && 'stage-orbit',
+            spinning && ball.reverse && 'stage-orbit-reverse',
+          )}
+          style={{
+            ['--stage-orbit-duration' as string]: `${ball.duration}s`,
+            ['--stage-orbit-delay' as string]: `${ball.delay}ms`,
+          }}
+        >
           <span
-            key={index}
             className="absolute rounded-full"
             style={{
-              left: `${ball.x}%`,
-              top: `${ball.y}%`,
+              left: `${50 - ball.size / 2}%`,
+              top: `${50 - ball.size / 2 - ball.radius}%`,
               width: `${ball.size}%`,
               height: `${ball.size}%`,
               background: `radial-gradient(circle at 34% 30%, #ffffff 0%, ${ball.color} 55%, rgba(0,0,0,0.5) 100%)`,
             }}
           />
-        ))}
-      </div>
+        </span>
+      ))}
+
+      {/* 下の口。ここから球が出てくる、と分かるようにしておく。 */}
+      <span
+        className="absolute rounded-b-full border-x border-b border-white/25 bg-black/35"
+        style={{
+          left: '38%',
+          right: '38%',
+          bottom: `-${size * 0.06}%`,
+          height: `${14}%`,
+        }}
+      />
     </div>
   );
 }

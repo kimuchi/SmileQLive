@@ -82,7 +82,7 @@ describe.skipIf(!available)('抽選リストの画像の使用件数', () => {
           spinDurationMs: 2500,
           resultFontSize: 240,
           historyFontSize: 96,
-          showBoard: true,
+          layout: 'board',
           backgroundAssetId: options.backgroundAssetId ?? null,
           openingVideoUrl: null,
         },

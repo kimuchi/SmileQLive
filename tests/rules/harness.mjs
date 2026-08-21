@@ -360,7 +360,7 @@ async function seed(adminDb, roles) {
       spinDurationMs: 2500,
       resultFontSize: 240,
       historyFontSize: 96,
-      showBoard: true,
+      layout: 'board',
       backgroundAssetId: null,
       openingVideoUrl: null,
     },

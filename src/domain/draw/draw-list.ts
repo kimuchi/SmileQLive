@@ -68,6 +68,47 @@ export const DRAW_NUMBER_MAX = 9999;
 // 演出の設定（GAS 版のスクリプトプロパティに相当）
 // ---------------------------------------------------------------------------
 
+/**
+ * 投影の見せ方。
+ *
+ * 会によって見せたいものが違う。
+ *   result … いま出たものだけを大きく出す。1 件ずつ盛り上げたいとき
+ *   board  … 大きい表示と一覧（ビンゴの盤面）を並べる。手元のカードと見比べるとき
+ *   list   … 出たものの一覧だけを出す。あとから来た人が追いつけるようにするとき、
+ *            会場の隅のサブ画面、抽選会の当選者一覧を貼り出すときなど
+ */
+export const DRAW_LAYOUTS = ['result', 'board', 'list'] as const;
+export type DrawLayout = (typeof DRAW_LAYOUTS)[number];
+
+export const DRAW_LAYOUT_LABELS: Record<DrawLayout, string> = {
+  result: 'いま出たものを大きく',
+  board: '大きい表示と一覧を並べる',
+  list: '出たものの一覧だけ',
+};
+
+export const DRAW_LAYOUT_HINTS: Record<DrawLayout, string> = {
+  result: '1 件ずつ発表して盛り上げたいとき。一覧は「出た球」ボタンで開けます。',
+  board: 'ビンゴの標準。手元のカードと見比べながら進められます。',
+  list: '出たものだけを並べます。あとから来た人が追いつけます。',
+};
+
+export function isDrawLayout(value: unknown): value is DrawLayout {
+  return typeof value === 'string' && (DRAW_LAYOUTS as readonly string[]).includes(value);
+}
+
+/**
+ * 保存済みの設定から見せ方を決める。
+ *
+ * `layout` が増える前のドキュメントには `showBoard`（真偽値）しか入っていない。
+ * 会の途中で見た目が変わると事故なので、そのときの意図をそのまま引き継ぐ。
+ */
+export function drawLayoutOf(settings: { layout?: unknown; showBoard?: unknown }): DrawLayout {
+  if (isDrawLayout(settings.layout)) {
+    return settings.layout;
+  }
+  return settings.showBoard === false ? 'result' : 'board';
+}
+
 export type DrawSettings = {
   /** 候補を切り替える間隔 (ms)。小さいほど速く回る。GAS の ROULETTE_SPEED 相当。 */
   spinIntervalMs: number;
@@ -77,8 +118,13 @@ export type DrawSettings = {
   resultFontSize: number;
   /** 履歴の文字の大きさ（1920x1080 基準の px）。GAS の HISTORY_FONT_SIZE 相当。 */
   historyFontSize: number;
-  /** 既に出たものを常に画面へ並べるか（ビンゴのボード）。 */
-  showBoard: boolean;
+  /** 投影の見せ方。 */
+  layout: DrawLayout;
+  /**
+   * @deprecated `layout` が増える前の項目。
+   * 保存済みのドキュメントを読むときだけ見る（`drawLayoutOf` が面倒を見る）。
+   */
+  showBoard?: boolean;
   /** 投影の背景に敷く画像。無ければ既定の背景。 */
   backgroundAssetId: string | null;
   /**
@@ -95,7 +141,7 @@ export const DEFAULT_DRAW_SETTINGS: DrawSettings = {
   spinDurationMs: 2500,
   resultFontSize: 240,
   historyFontSize: 96,
-  showBoard: true,
+  layout: 'board',
   backgroundAssetId: null,
   openingVideoUrl: null,
 };

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DRAW_ENTRY_MAX_COUNT,
   buildNumberEntries,
+  drawLayoutOf,
   drawnEntries,
   latestDraw,
   remainingEntries,
@@ -136,5 +137,38 @@ describe('ルームのモード', () => {
     expect(acceptsParticipants('quiz')).toBe(true);
     expect(acceptsParticipants('lottery')).toBe(false);
     expect(acceptsParticipants('bingo')).toBe(false);
+  });
+});
+
+describe('drawLayoutOf', () => {
+  /**
+   * 見せ方は途中で増えた設定。古い抽選リストには showBoard（真偽値）しか無い。
+   * 会の途中で見た目が勝手に変わると事故なので、そのときの意図を引き継ぐ。
+   */
+  it('layout があればそれを使う', () => {
+    expect(drawLayoutOf({ layout: 'list' })).toBe('list');
+    expect(drawLayoutOf({ layout: 'result' })).toBe('result');
+    expect(drawLayoutOf({ layout: 'board' })).toBe('board');
+  });
+
+  it('古い設定の showBoard: true は「大きい表示と一覧」', () => {
+    expect(drawLayoutOf({ showBoard: true })).toBe('board');
+  });
+
+  it('古い設定の showBoard: false は「いま出たものだけ」', () => {
+    expect(drawLayoutOf({ showBoard: false })).toBe('result');
+  });
+
+  it('どちらも無ければ既定（大きい表示と一覧）', () => {
+    expect(drawLayoutOf({})).toBe('board');
+  });
+
+  it('知らない値は既定へ寄せる', () => {
+    // 手で書き換えられた設定でも、投影が壊れるより既定で出るほうがよい。
+    expect(drawLayoutOf({ layout: 'wall' })).toBe('board');
+  });
+
+  it('新しい設定では layout が showBoard より強い', () => {
+    expect(drawLayoutOf({ layout: 'list', showBoard: true })).toBe('list');
   });
 });
