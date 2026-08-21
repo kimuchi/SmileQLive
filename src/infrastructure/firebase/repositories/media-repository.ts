@@ -11,6 +11,8 @@ import 'server-only';
 
 import { getDb } from '@/infrastructure/firebase/admin';
 import {
+  drawEntriesCollection,
+  drawListsCollection,
   mediaAssetRef,
   mediaAssetsCollection,
   questionsCollection,
@@ -76,11 +78,14 @@ export async function deleteAsset(assetId: string): Promise<void> {
 }
 
 /**
- * この画像が問題・選択肢から参照されている件数。
+ * この画像が問題・選択肢・抽選リストから参照されている件数。
  *
  * Firestore ではコレクショングループの索引を追加せずに
- * `questions` 全体を横断検索できないため、**所有者のクイズだけ**を走査する。
+ * `questions` 全体を横断検索できないため、**所有者のクイズと抽選リストだけ**を走査する。
  * 画像削除は管理画面のまれな操作なので、この読み取り量は許容する。
+ *
+ * 抽選リストも数えるのは、使用中の景品写真や背景を消せてしまうと
+ * 当日の投影画面から絵が消えるため。
  */
 export async function countUsages(assetId: string): Promise<number> {
   const asset = await getAsset(assetId);
@@ -88,7 +93,14 @@ export async function countUsages(assetId: string): Promise<number> {
     return 0;
   }
 
-  const quizzes = await quizzesCollection().where('ownerId', '==', asset.ownerId).get();
+  return (
+    (await countQuizUsages(assetId, asset.ownerId)) +
+    (await countDrawListUsages(assetId, asset.ownerId))
+  );
+}
+
+async function countQuizUsages(assetId: string, ownerId: string): Promise<number> {
+  const quizzes = await quizzesCollection().where('ownerId', '==', ownerId).get();
 
   let usages = 0;
   for (const quiz of quizzes.docs) {
@@ -105,6 +117,29 @@ export async function countUsages(assetId: string): Promise<number> {
         if (choice.imageAssetId === assetId) {
           usages += 1;
         }
+      }
+    }
+  }
+
+  return usages;
+}
+
+async function countDrawListUsages(assetId: string, ownerId: string): Promise<number> {
+  const lists = await drawListsCollection().where('ownerId', '==', ownerId).get();
+
+  let usages = 0;
+  for (const list of lists.docs) {
+    if (list.data().settings.backgroundAssetId === assetId) {
+      usages += 1;
+    }
+    // 数字のリストは行を持たないので読みに行かない。
+    if (list.data().kind === 'number') {
+      continue;
+    }
+    const entries = await drawEntriesCollection(list.id).get();
+    for (const entry of entries.docs) {
+      if (entry.data().imageAssetId === assetId) {
+        usages += 1;
       }
     }
   }

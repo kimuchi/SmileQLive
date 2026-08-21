@@ -28,6 +28,8 @@ import {
   PUBLIC_STATE_DOC,
   STAFF_PROGRESS_DOC,
   type AnswerDoc,
+  type DrawListDoc,
+  type DrawListEntryDoc,
   type MediaAssetDoc,
   type PresentationLinkDoc,
   type ProfileDoc,
@@ -64,6 +66,8 @@ const profileConverter = docConverter<ProfileDoc>();
 const quizConverter = docConverter<QuizDoc>();
 const questionConverter = docConverter<QuestionDoc>();
 const mediaAssetConverter = docConverter<MediaAssetDoc>();
+const drawListConverter = docConverter<DrawListDoc>();
+const drawListEntryConverter = docConverter<DrawListEntryDoc>();
 const roomConverter = docConverter<RoomDoc>();
 const publicStateConverter = docConverter<RoomPublicStateDoc>();
 const staffProgressConverter = docConverter<RoomStaffProgressDoc>();
@@ -126,6 +130,33 @@ export function mediaAssetsCollection(): CollectionReference<MediaAssetDoc> {
 
 export function mediaAssetRef(assetId: string): DocumentReference<MediaAssetDoc> {
   return mediaAssetsCollection().doc(assetId);
+}
+
+// ---------------------------------------------------------------------------
+// drawLists（抽選会の名簿・ビンゴの球。司会者のみ読める）
+// ---------------------------------------------------------------------------
+
+export function drawListsCollection(): CollectionReference<DrawListDoc> {
+  return getDb().collection(COLLECTIONS.drawLists).withConverter(drawListConverter);
+}
+
+export function drawListRef(listId: string): DocumentReference<DrawListDoc> {
+  return drawListsCollection().doc(listId);
+}
+
+/**
+ * `drawLists/{listId}/entries/{entryId}`
+ * 数字モードのリストは entries を持たない（範囲から機械的に展開する）。
+ */
+export function drawEntriesCollection(listId: string): CollectionReference<DrawListEntryDoc> {
+  return drawListsCollection()
+    .doc(listId)
+    .collection(COLLECTIONS.drawEntries)
+    .withConverter(drawListEntryConverter);
+}
+
+export function drawEntryRef(listId: string, entryId: string): DocumentReference<DrawListEntryDoc> {
+  return drawEntriesCollection(listId).doc(entryId);
 }
 
 // ---------------------------------------------------------------------------

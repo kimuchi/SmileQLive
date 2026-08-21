@@ -7,7 +7,7 @@ import { FieldHint, FieldLabel } from '@/components/shared/FieldLabel';
 import { Spinner } from '@/components/shared/Spinner';
 import { TextInput } from '@/components/shared/TextInput';
 import { ALT_TEXT_MAX_LENGTH } from '@/components/admin/question-draft';
-import { uploadQuizImage } from '@/components/admin/upload-media';
+import { uploadAdminImage, type MediaScope } from '@/components/admin/upload-media';
 import type { MediaUsage } from '@/domain/media/image-policy';
 import { toUserErrorMessage } from '@/lib/client/error-text';
 import { cn } from '@/lib/client/cn';
@@ -25,7 +25,8 @@ const ACCEPT_ATTRIBUTE = 'image/jpeg,image/png,image/webp';
 
 export type ImageFieldProps = {
   label: string;
-  quizId: string;
+  /** 画像の紐づけ先。クイズか抽選リスト。所有者の確認に使われる。 */
+  scope: MediaScope;
   usage: MediaUsage;
   image: AdminMediaRef | null;
   alt: string;
@@ -40,7 +41,7 @@ export type ImageFieldProps = {
 
 export function ImageField({
   label,
-  quizId,
+  scope,
   usage,
   image,
   alt,
@@ -69,7 +70,7 @@ export function ImageField({
       setUploading(true);
       onUploadingChange?.(true);
       try {
-        const asset = await uploadQuizImage({ file, quizId, usage, alt });
+        const asset = await uploadAdminImage({ file, scope, usage, alt });
         onImageChange({
           assetId: asset.id,
           url: asset.url,
@@ -84,7 +85,7 @@ export function ImageField({
         onUploadingChange?.(false);
       }
     },
-    [alt, onImageChange, onUploadingChange, quizId, usage],
+    [alt, onImageChange, onUploadingChange, scope, usage],
   );
 
   const handleRemove = useCallback(() => {

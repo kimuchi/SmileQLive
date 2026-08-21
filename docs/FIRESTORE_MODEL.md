@@ -43,8 +43,18 @@ quizzes/{quizId}
            選択肢は最大 5 件なので、ドキュメント内に配列として埋め込む
            （1 問の更新が 1 回の書き込みで原子的に済む）。
 
+drawLists/{listId}                  ★ 作った本人だけ読める（名簿は氏名の塊）
+    抽選会の名簿・ビンゴの球。kind は name / number / item。
+    number は範囲（numberMin/numberMax）だけを保存し、読むときに展開する。
+    settings: 回す速さ・文字の大きさ・背景画像・オープニング動画の URL。
+    └─ entries/{entryId}
+           position / label / imageAssetId（item のみ）
+
 rooms/{roomId}                      ★ 司会者のみ読める（正解を含む）
+    mode: quiz | lottery | bingo（作成時に決めて変えない）
     quizSnapshot（正解・解説・正解画像を含む開催時点の固定コピー）
+    drawSnapshot（抽選会・ビンゴのみ。開催時点の抽選リストの固定コピー）
+    drawn: [{ order, entryId }]（引いた順。order がそのまま当選順位）
     joinTokenHash / phase / stateVersion / currentQuestionId / answerDeadlineAt ...
     │
     ├─ public/state                 ★ 参加者・投影担当が購読する「公開状態」
@@ -69,6 +79,23 @@ rooms/{roomId}                      ★ 司会者のみ読める（正解を含�
 presentationLinks/{linkId}
     投影用一時リンク（トークンは SHA-256 ハッシュのみ保存）。
 ```
+
+### 抽選会・ビンゴのルームでも `quizSnapshot` を空で入れる理由
+
+`quizSnapshot` は `fetchRoom` を通って**あらゆる認証済みリクエストが読む**中心データで、
+`parseQuizSnapshot()` の呼び出し元も多くあります。
+ここを null 許容にすると、読み取り経路のすべてに分岐が増えて壊しやすくなります。
+
+そこで抽選会・ビンゴのルームでも「問題 0 問のクイズ」を必ず入れています
+（`title` は抽選リストの名前）。既存の読み取り経路はそのまま素通りします。
+抽選の中身は別に `drawSnapshot` が持ちます。
+
+### なぜ名簿を参加者・投影担当に読ませないか
+
+抽選の名簿には参加者の氏名がそのまま並びます。個人情報の塊です。
+`drawLists/**` は**作った本人だけ**が読めます（Security Rules）。
+投影に必要な内容は、Cloud Run が `rooms/{roomId}.drawSnapshot` から
+必要なぶんだけ組み立てて配ります。
 
 ### なぜ `rooms/{roomId}` を直接購読させないか
 

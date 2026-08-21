@@ -5,6 +5,12 @@ import { AdminPageBody } from '@/components/admin/admin-page-body';
 import { HostConsole, type HostQuestionOutline } from '@/components/admin/host-console';
 import { FullScreenMessage } from '@/components/shared/FullScreenMessage';
 import { parseQuizSnapshot } from '@/application/services/quiz-snapshot-codec';
+import {
+  ROOM_MODE_DESCRIPTIONS,
+  isDrawMode,
+  roomModeOf,
+  type RoomMode,
+} from '@/domain/room/room-mode';
 import { logger } from '@/infrastructure/logging/logger';
 import { requireRoomOwner } from '@/lib/auth/session';
 import { uuidSchema } from '@/lib/validation/schemas';
@@ -15,6 +21,9 @@ import { uuidSchema } from '@/lib/validation/schemas';
  * 進行に必要な「問題の並び（ID と番号）」だけをサーバー側で取り出して渡す。
  * ルームのスナップショットには正解情報が含まれるため、
  * ここでは ID・番号・回答形式・問題文の要約だけを取り出し、正解はクライアントへ送らない。
+ *
+ * 抽選会・ビンゴのルームには問題が無い（0 問のクイズが入っている）。
+ * 引くものは Snapshot の draw で届くため、ここでは案内文と戻り先だけをモードに合わせる。
  *
  * Next.js 16 では params が Promise なので await して使う。
  */
@@ -51,9 +60,12 @@ export default async function HostRoomPage({ params }: { params: Promise<{ roomI
 
   let quizTitle = '';
   let outline: HostQuestionOutline[] = [];
+  // 保存されていないルームはクイズとして扱う（モードが増える前に作られたもの）。
+  let mode: RoomMode = 'quiz';
 
   try {
     const { room } = await requireRoomOwner(parsed.data);
+    mode = roomModeOf(room.mode);
     const snapshot = parseQuizSnapshot(room.quizSnapshot);
     quizTitle = snapshot.title;
     outline = [...snapshot.questions]
@@ -121,11 +133,22 @@ export default async function HostRoomPage({ params }: { params: Promise<{ roomI
       <AdminHeader />
       <AdminPageBody
         title="司会画面"
-        description="参加は二次元コードの読み取りだけで完了します。"
+        description={
+          isDrawMode(mode)
+            ? ROOM_MODE_DESCRIPTIONS[mode]
+            : '参加は二次元コードの読み取りだけで完了します。'
+        }
         breadcrumb={
-          <Link href="/admin/quizzes" className="text-brand-700 font-bold hover:underline">
-            ← クイズ一覧へ戻る
-          </Link>
+          // 抽選会・ビンゴはクイズから開かない。戻り先もルーム一覧にする。
+          isDrawMode(mode) ? (
+            <Link href="/admin/rooms" className="text-brand-700 font-bold hover:underline">
+              ← ルーム一覧へ戻る
+            </Link>
+          ) : (
+            <Link href="/admin/quizzes" className="text-brand-700 font-bold hover:underline">
+              ← クイズ一覧へ戻る
+            </Link>
+          )
         }
       >
         <HostConsole roomId={parsed.data} quizTitle={quizTitle} outline={outline} />

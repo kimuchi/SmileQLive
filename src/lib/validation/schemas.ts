@@ -17,6 +17,20 @@ import {
   EXTEND_SECONDS_MIN,
   ROOM_ACTIONS,
 } from '@/domain/room/state-machine';
+import { ROOM_MODES } from '@/domain/room/room-mode';
+import {
+  DRAW_ENTRY_MAX_COUNT,
+  DRAW_FONT_SIZE_MAX,
+  DRAW_FONT_SIZE_MIN,
+  DRAW_LABEL_MAX_LENGTH,
+  DRAW_LIST_KINDS,
+  DRAW_NUMBER_MAX,
+  DRAW_NUMBER_MIN,
+  SPIN_DURATION_MAX_MS,
+  SPIN_DURATION_MIN_MS,
+  SPIN_INTERVAL_MAX_MS,
+  SPIN_INTERVAL_MIN_MS,
+} from '@/domain/draw/draw-list';
 import { MEDIA_USAGES } from '@/domain/media/image-policy';
 
 /**
@@ -146,13 +160,82 @@ export const reorderChoicesSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// 抽選リスト（抽選会・ビンゴ）
+// ---------------------------------------------------------------------------
+
+const drawSettingsSchema = z
+  .object({
+    spinIntervalMs: z.int().min(SPIN_INTERVAL_MIN_MS).max(SPIN_INTERVAL_MAX_MS),
+    spinDurationMs: z.int().min(SPIN_DURATION_MIN_MS).max(SPIN_DURATION_MAX_MS),
+    resultFontSize: z.int().min(DRAW_FONT_SIZE_MIN).max(DRAW_FONT_SIZE_MAX),
+    historyFontSize: z.int().min(DRAW_FONT_SIZE_MIN).max(DRAW_FONT_SIZE_MAX),
+    showBoard: z.boolean(),
+    backgroundAssetId: uuidSchema.nullable(),
+    // 動画そのものは受け取らない（このアプリは画像しかアップロードを許していない）。
+    openingVideoUrl: z.url().max(2048).nullable(),
+  })
+  .partial();
+
+export const createDrawListSchema = z.object({
+  title: z.string().trim().min(1).max(100),
+  kind: z.enum(DRAW_LIST_KINDS),
+  numberMin: z.int().min(DRAW_NUMBER_MIN).max(DRAW_NUMBER_MAX).optional(),
+  numberMax: z.int().min(DRAW_NUMBER_MIN).max(DRAW_NUMBER_MAX).optional(),
+});
+
+export const updateDrawListSchema = z.object({
+  title: z.string().trim().min(1).max(100).optional(),
+  numberMin: z.int().min(DRAW_NUMBER_MIN).max(DRAW_NUMBER_MAX).nullable().optional(),
+  numberMax: z.int().min(DRAW_NUMBER_MIN).max(DRAW_NUMBER_MAX).nullable().optional(),
+  settings: drawSettingsSchema.optional(),
+});
+
+export const replaceDrawEntriesSchema = z.object({
+  entries: z
+    .array(
+      z.object({
+        label: z.string().trim().min(1).max(DRAW_LABEL_MAX_LENGTH),
+        imageAssetId: uuidSchema.nullable().optional(),
+        imageAlt: z.string().max(IMAGE_ALT_MAX_LENGTH).nullable().optional(),
+      }),
+    )
+    .max(DRAW_ENTRY_MAX_COUNT),
+});
+
+export const importDrawEntriesSchema = z.object({
+  /** 貼り付けた本文。表計算からのコピーはタブ区切りで来る。 */
+  text: z.string().max(1_000_000),
+  hasHeader: z.boolean().optional(),
+  labelColumnIndex: z.int().min(0).max(64).optional(),
+  /** 既存の行に足すか（既定は入れ替え）。 */
+  append: z.boolean().optional(),
+});
+
+// ---------------------------------------------------------------------------
 // ルーム・司会
 // ---------------------------------------------------------------------------
 
-export const createRoomSchema = z.object({
-  quizId: uuidSchema,
-  maxParticipants: z.int().min(2).max(1000).optional(),
-});
+/**
+ * ルーム作成。
+ *
+ * `mode` を省略したときはクイズとして扱う（既存の呼び出しをそのまま通すため）。
+ * クイズなら quizId、抽選会・ビンゴなら drawListId が要る。
+ */
+export const createRoomSchema = z
+  .object({
+    mode: z.enum(ROOM_MODES).optional(),
+    quizId: uuidSchema.optional(),
+    drawListId: uuidSchema.optional(),
+    maxParticipants: z.int().min(2).max(1000).optional(),
+  })
+  .refine(
+    (value) => ((value.mode ?? 'quiz') === 'quiz' ? value.quizId !== undefined : true),
+    { message: 'クイズを選んでください', path: ['quizId'] },
+  )
+  .refine(
+    (value) => ((value.mode ?? 'quiz') === 'quiz' ? true : value.drawListId !== undefined),
+    { message: '抽選リストを選んでください', path: ['drawListId'] },
+  );
 
 export const roomActionSchema = z
   .object({
@@ -198,3 +281,7 @@ export type RoomActionInput = z.infer<typeof roomActionSchema>;
 export type RegisterParticipantInput = z.infer<typeof registerParticipantSchema>;
 export type SubmitAnswerRequest = z.infer<typeof submitAnswerSchema>;
 export type CreateRoomInput = z.infer<typeof createRoomSchema>;
+export type CreateDrawListInput = z.infer<typeof createDrawListSchema>;
+export type UpdateDrawListInput = z.infer<typeof updateDrawListSchema>;
+export type ReplaceDrawEntriesInput = z.infer<typeof replaceDrawEntriesSchema>;
+export type ImportDrawEntriesInput = z.infer<typeof importDrawEntriesSchema>;

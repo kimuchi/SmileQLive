@@ -1,5 +1,12 @@
 import type { Timestamp } from 'firebase-admin/firestore';
 import type { QuizSnapshot } from '@/domain/quiz/quiz-snapshot';
+import type {
+  DrawListKind,
+  DrawRecord,
+  DrawSettings,
+  DrawSnapshot,
+} from '@/domain/draw/draw-list';
+import type { RoomMode } from '@/domain/room/room-mode';
 import type { QuestionType } from '@/domain/quiz/question';
 import type { RoomPhase } from '@/domain/room/state-machine';
 
@@ -24,6 +31,8 @@ export const COLLECTIONS = {
   quizzes: 'quizzes',
   questions: 'questions',
   mediaAssets: 'mediaAssets',
+  drawLists: 'drawLists',
+  drawEntries: 'entries',
   rooms: 'rooms',
   members: 'members',
   answers: 'answers',
@@ -148,10 +157,49 @@ export type QuestionDoc = {
 };
 
 /** 正解を含む。参加者へ読ませない（Security Rules で所有者のみ）。 */
+/**
+ * 抽選リスト（抽選会の名簿・ビンゴの球）。
+ * クイズと同じく、司会者が事前に用意して使い回す資産。
+ */
+export type DrawListDoc = {
+  id: string;
+  ownerId: string;
+  title: string;
+  kind: DrawListKind;
+  /** kind === 'number' のときだけ意味を持つ。 */
+  numberMin: number | null;
+  numberMax: number | null;
+  settings: DrawSettings;
+  /** 一覧表示用のキャッシュ。数字モードでは範囲から導いた件数。 */
+  entryCount: number;
+  createdAt: FirestoreTimestamp;
+  updatedAt: FirestoreTimestamp;
+};
+
+/** `drawLists/{listId}/entries/{entryId}` — 数字モードでは作らない（範囲から展開する）。 */
+export type DrawListEntryDoc = {
+  id: string;
+  listId: string;
+  position: number;
+  label: string;
+  /** 品目モードのみ。クイズの画像と同じく ID と代替テキストだけを持つ。 */
+  imageAssetId: string | null;
+  imageAlt: string | null;
+  createdAt: FirestoreTimestamp;
+  updatedAt: FirestoreTimestamp;
+};
+
 export type RoomDoc = {
   id: string;
   ownerId: string;
-  quizId: string;
+  /**
+   * ルームのモード。
+   * この項目が増える前に作られたルームには入っていない。
+   * 読むときは必ず `roomModeOf()` を通すこと（既定はクイズ）。
+   */
+  mode?: RoomMode;
+  /** 抽選会・ビンゴのルームでは null。 */
+  quizId: string | null;
   joinTokenHash: string;
   joinTokenRotatedAt: FirestoreTimestamp;
   phase: RoomPhase;
@@ -164,6 +212,19 @@ export type RoomDoc = {
   joinOpen: boolean;
   maxParticipants: number;
   participantCount: number;
+  /**
+   * 抽選会・ビンゴで引くものの一覧。ルームを作った瞬間の内容を写し取る
+   * （当日リストを編集されても、進行中のルームの中身は変わらない）。
+   * クイズのルームでは null。
+   */
+  drawSnapshot: DrawSnapshot | null;
+  /**
+   * 引いた記録。引いた順に増える。`order` がそのまま当選順位になる。
+   *
+   * 引く操作をするのは司会 1 人だけなので、1 ドキュメントへの書き込みが
+   * 集中することはない（参加登録と違い、ここは配列で持って良い）。
+   */
+  drawn: DrawRecord[];
   createdAt: FirestoreTimestamp;
   updatedAt: FirestoreTimestamp;
   finishedAt: FirestoreTimestamp | null;

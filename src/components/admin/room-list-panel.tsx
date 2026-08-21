@@ -7,6 +7,7 @@ import { Button } from '@/components/shared/Button';
 import { Card } from '@/components/shared/Card';
 import { ErrorMessage } from '@/components/shared/ErrorMessage';
 import { Spinner } from '@/components/shared/Spinner';
+import { ROOM_MODE_LABELS, isDrawMode, type RoomMode } from '@/domain/room/room-mode';
 import { apiGet } from '@/lib/client/api-client';
 import { formatCount, formatShortDateTime } from '@/lib/format';
 import type { RoomListItem, RoomListResponse } from '@/types/api';
@@ -19,6 +20,18 @@ import type { RoomListItem, RoomListResponse } from '@/types/api';
  * 操作できるのは作成した本人だけなので、一覧も自分の分だけが返る。
  */
 
+/**
+ * モードの色。
+ *
+ * 一覧では「クイズなのか抽選なのか」を真っ先に見分けたいので、
+ * 3 つが遠目でも混ざらない色（青・橙・緑）を当てる。
+ */
+const MODE_VARIANT: Record<RoomMode, BadgeVariant> = {
+  quiz: 'brand',
+  lottery: 'warning',
+  bingo: 'success',
+};
+
 const PHASE_LABEL: Record<RoomListItem['phase'], string> = {
   lobby: '受付中',
   question_ready: '出題準備',
@@ -26,6 +39,8 @@ const PHASE_LABEL: Record<RoomListItem['phase'], string> = {
   question_locked: '締切',
   answer_revealed: '正解発表',
   scoreboard: '途中経過',
+  draw_ready: '抽選待ち',
+  draw_revealed: '結果表示中',
   finished: '終了',
 };
 
@@ -36,6 +51,8 @@ const PHASE_VARIANT: Record<RoomListItem['phase'], BadgeVariant> = {
   question_locked: 'warning',
   answer_revealed: 'success',
   scoreboard: 'brand',
+  draw_ready: 'info',
+  draw_revealed: 'success',
   finished: 'neutral',
 };
 
@@ -71,13 +88,10 @@ export function RoomListPanel() {
     return (
       <Card title="ルームがありません">
         <p className="text-sm text-slate-600">
-          クイズ一覧から「ルーム作成」を選ぶと、参加用の二次元コードが表示されます。
+          「ルームを作成する」から、クイズ・抽選会・ビンゴのルームを作れます。
         </p>
         <div className="mt-4">
-          <Link
-            href="/admin/rooms/new"
-            className="text-brand-700 font-bold hover:underline"
-          >
+          <Link href="/admin/rooms/new" className="text-brand-700 font-bold hover:underline">
             ルームを作成する
           </Link>
         </div>
@@ -91,11 +105,15 @@ export function RoomListPanel() {
       description="司会画面を開き直せます。操作できるのは作成した本人だけです。"
     >
       <div className="overflow-x-auto">
-        <table className="w-full min-w-160 border-collapse text-sm">
+        <table className="w-full min-w-180 border-collapse text-sm">
           <thead>
             <tr className="border-b border-slate-200 text-left text-slate-600">
               <th scope="col" className="px-4 py-2 font-bold">
-                クイズ
+                {/* 抽選会・ビンゴでは抽選リスト名が入るため「クイズ」とは呼べない。 */}
+                タイトル
+              </th>
+              <th scope="col" className="px-4 py-2 font-bold">
+                モード
               </th>
               <th scope="col" className="px-4 py-2 font-bold">
                 状態
@@ -118,10 +136,14 @@ export function RoomListPanel() {
                   {room.quizTitle}
                 </th>
                 <td className="px-4 py-3">
+                  <Badge variant={MODE_VARIANT[room.mode]}>{ROOM_MODE_LABELS[room.mode]}</Badge>
+                </td>
+                <td className="px-4 py-3">
                   <Badge variant={PHASE_VARIANT[room.phase]}>{PHASE_LABEL[room.phase]}</Badge>
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums">
-                  {formatCount(room.participantCount, '人')}
+                  {/* 抽選会・ビンゴは参加者が来ない。0人と出すと「誰も入れない不具合」に見える。 */}
+                  {isDrawMode(room.mode) ? '—' : formatCount(room.participantCount, '人')}
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap text-slate-600">
                   {formatShortDateTime(room.createdAt)}

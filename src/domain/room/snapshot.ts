@@ -2,6 +2,8 @@ import type { AnswerBreakdown, MyAnswer, RevealInfo } from '@/domain/answer/answ
 import type { PublicQuestion } from '@/domain/quiz/public-question';
 import type { RankedParticipant } from '@/domain/room/scoring';
 import type { RoomAction, RoomPhase } from '@/domain/room/state-machine';
+import type { RoomMode } from '@/domain/room/room-mode';
+import type { StageDraw } from '@/domain/draw/draw-stage';
 
 /**
  * Snapshot は「現在状態の唯一の復元手段」。
@@ -10,6 +12,8 @@ import type { RoomAction, RoomPhase } from '@/domain/room/state-machine';
 
 export type SnapshotBase = {
   roomId: string;
+  /** ルームのモード。画面はこれを見てクイズ／抽選会／ビンゴを出し分ける。 */
+  mode: RoomMode;
   quizTitle: string;
   phase: RoomPhase;
   stateVersion: number;
@@ -58,6 +62,11 @@ export type StaffSnapshot = SnapshotBase & {
   breakdown: AnswerBreakdown | null;
   reveal: RevealInfo | null;
   leaderboard: RankedParticipant[] | null;
+  /**
+   * 抽選会・ビンゴの状態。クイズのルームでは null。
+   * **次に何が出るかは入っていない**（引く操作を受けたときにサーバーが決める）。
+   */
+  draw: StageDraw | null;
   /** 次に実行可能な操作（司会画面のボタン制御）。 */
   availableActions: RoomAction[];
   /** 事前読込対象の画像 URL。 */

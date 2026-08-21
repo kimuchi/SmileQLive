@@ -11,15 +11,19 @@ import { Spinner } from '@/components/shared/Spinner';
 import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import { CopyButton } from '@/components/admin/copy-button';
 import { HostBreakdownPanel } from '@/components/admin/host-breakdown-panel';
+import { HostDrawPanel } from '@/components/admin/host-draw-panel';
 import { JoinUrlPanel } from '@/components/admin/join-url-panel';
 import { ParticipantList } from '@/components/admin/participant-list';
 import { recallJoinUrl, rememberJoinUrl } from '@/components/admin/join-url-store';
+import { drawUnit } from '@/domain/draw/draw-stage';
 import type { QuestionType } from '@/domain/quiz/question';
+import { ROOM_MODE_LABELS, isDrawMode } from '@/domain/room/room-mode';
 import type { StaffSnapshot } from '@/domain/room/snapshot';
 import {
   EXTEND_SECONDS_PRESETS,
   ROOM_ACTION_LABELS,
   ROOM_PHASE_LABELS,
+  isRoomAction,
   nextStep,
   type RoomAction,
 } from '@/domain/room/state-machine';
@@ -41,6 +45,11 @@ import type { PresentationLinkResponse, RotateJoinTokenResponse } from '@/types/
 
 /**
  * 司会進行画面。
+ *
+ * クイズ・抽選会・ビンゴの 3 モードを 1 つの画面で扱う。
+ * 抽選会・ビンゴには参加者も問題も無いため、クイズ用の表示
+ * （問題一覧・回答済み人数・集計・参加者一覧・参加URL）は出さず、
+ * 抽選の操作（host-draw-panel.tsx）へ置き換える。
  *
  * 守っている約束:
  * - ルームコードは存在しない。参加導線は二次元コード（参加URL）だけを案内する。
@@ -128,7 +137,9 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
       snapshot
         ? nextStep({
             phase: snapshot.phase,
+            mode: snapshot.mode,
             nextQuestionPosition: nextQuestion?.position ?? null,
+            remainingDrawCount: snapshot.draw?.remainingCount ?? 0,
           })
         : null,
     [nextQuestion?.position, snapshot],
@@ -145,9 +156,7 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
     () =>
       (snapshot?.availableActions ?? []).filter(
         (action) =>
-          action !== 'extend_deadline' &&
-          action !== 'reopen_room' &&
-          action !== 'reopen_question',
+          action !== 'extend_deadline' && action !== 'reopen_room' && action !== 'reopen_question',
       ),
     [snapshot?.availableActions],
   );
@@ -184,6 +193,19 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
       }
     },
     [refresh, roomId, snapshot],
+  );
+
+  /**
+   * 抽選の操作。
+   *
+   * 進行 API はクイズと同じ。問題も秒数も伴わないので、そのまま action だけを送る。
+   * 確認ダイアログは host-draw-panel 側が出す（何が消えるかは向こうしか知らない）。
+   */
+  const handleDrawAction = useCallback(
+    (action: RoomAction) => {
+      void runAction(action);
+    },
+    [runAction],
   );
 
   const handleToggleJoin = useCallback(
@@ -272,6 +294,9 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
 
   const actionsBusy = busy !== null;
   const isLobby = snapshot.phase === 'lobby';
+  // 抽選会・ビンゴには参加者も問題も無い。クイズ用の表示をまとめて外すための判定。
+  const isDraw = isDrawMode(snapshot.mode);
+  const draw = snapshot.draw;
 
   // 投影端末は開催中に落ちることがある。待機中に限らず常に再発行できるようにしておく。
   const presentationCard = (
@@ -325,19 +350,34 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
               <Badge variant="brand" size="md">
                 {ROOM_PHASE_LABELS[snapshot.phase]}
               </Badge>
-              <span>
-                {snapshot.currentQuestionPosition === null
-                  ? `全${snapshot.totalQuestions}問`
-                  : formatQuestionProgress(
-                      snapshot.currentQuestionPosition,
-                      snapshot.totalQuestions,
-                    )}
-              </span>
+              {isDraw ? (
+                // 抽選会とビンゴは同じ画面で進めるため、どちらの催しかを添える。
+                <Badge size="md">{ROOM_MODE_LABELS[snapshot.mode]}</Badge>
+              ) : (
+                <span>
+                  {snapshot.currentQuestionPosition === null
+                    ? `全${snapshot.totalQuestions}問`
+                    : formatQuestionProgress(
+                        snapshot.currentQuestionPosition,
+                        snapshot.totalQuestions,
+                      )}
+                </span>
+              )}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <Stat label="参加人数" value={formatCount(snapshot.participantCount)} />
-            <Stat label="オンライン" value={formatCount(snapshot.onlineCount)} />
+            {isDraw && draw !== null ? (
+              <>
+                <Stat label="引いた" value={formatCount(draw.drawn.length, drawUnit(draw.kind))} />
+                <Stat label="残り" value={formatCount(draw.remainingCount, drawUnit(draw.kind))} />
+              </>
+            ) : null}
+            {isDraw ? null : (
+              <>
+                <Stat label="参加人数" value={formatCount(snapshot.participantCount)} />
+                <Stat label="オンライン" value={formatCount(snapshot.onlineCount)} />
+              </>
+            )}
             <ConnectionStatus status={status} showWhenConnected />
           </div>
         </div>
@@ -368,185 +408,209 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
         </Alert>
       ) : null}
 
-      {/* 進行操作 */}
-      <Card
-        title="進行操作"
-        description="ふつうはこの大きなボタンを押していくだけで進みます。"
-      >
-        {step !== null ? (
-          <div className="flex flex-col gap-2">
-            <Button
-              size="lg"
-              variant={step.action === 'finish_room' ? 'danger' : 'primary'}
-              className="min-h-16 w-full text-xl"
-              loading={busy === step.action}
-              disabled={actionsBusy && busy !== step.action}
-              onClick={() => {
-                if (step.action === 'finish_room') {
-                  setConfirmFinish(true);
-                  return;
-                }
-                void runAction(
-                  step.action,
-                  step.action === 'show_question' && nextQuestion !== null
-                    ? { questionId: nextQuestion.id }
-                    : {},
-                );
-              }}
-            >
-              {step.label}
-            </Button>
-            <p className="text-xs text-slate-600">
-              いまは「{ROOM_PHASE_LABELS[snapshot.phase]}」です。
-            </p>
-          </div>
-        ) : (
-          <p className="text-sm text-slate-600">
-            {snapshot.phase === 'finished'
-              ? 'クイズは終了しています。下の「クイズを再開」から続きを再開できます。'
-              : '進められる操作がありません。クイズに問題が登録されているか確認してください。'}
-          </p>
-        )}
+      {/* 抽選会・ビンゴの進行 */}
+      {isDraw ? (
+        <>
+          {draw !== null ? (
+            <HostDrawPanel
+              mode={snapshot.mode}
+              phase={snapshot.phase}
+              draw={draw}
+              availableActions={snapshot.availableActions}
+              // busy には延長ボタン用のキーも入る。進行操作のときだけ渡す。
+              busyAction={busy !== null && isRoomAction(busy) ? busy : null}
+              busy={actionsBusy}
+              onRunAction={handleDrawAction}
+            />
+          ) : (
+            <Alert variant="warning" title="引くものが入っていません">
+              このルームには抽選リストが固められていません。ルーム一覧から作り直してください。
+            </Alert>
+          )}
+          {presentationCard}
+        </>
+      ) : null}
 
-        <details className="mt-4">
-          <summary className="cursor-pointer text-sm font-bold text-slate-700">
-            そのほかの操作
-          </summary>
-          <div className="mt-3 flex flex-wrap gap-2">
-          {inlineActions.length === 0 ? (
-            <p className="text-sm text-slate-600">個別に選べる操作はありません。</p>
-          ) : null}
-          {inlineActions.map((action) => {
-            if (action === 'show_question') {
-              if (nextQuestion === null) {
-                return null;
-              }
-              return (
-                <Button
-                  key={action}
-                  size="md"
-                  variant="secondary"
-                  loading={busy === action}
-                  disabled={actionsBusy && busy !== action}
-                  onClick={() => void runAction('show_question', { questionId: nextQuestion.id })}
-                >
-                  第{nextQuestion.position}問を表示
-                </Button>
-              );
-            }
-            if (action === 'finish_room') {
-              return (
-                <Button
-                  key={action}
-                  size="md"
-                  variant="danger"
-                  disabled={actionsBusy}
-                  onClick={() => {
-                    setConfirmFinish(true);
-                  }}
-                >
-                  {ROOM_ACTION_LABELS[action]}
-                </Button>
-              );
-            }
-            return (
+      {/* 進行操作（クイズ） */}
+      {isDraw ? null : (
+        <Card title="進行操作" description="ふつうはこの大きなボタンを押していくだけで進みます。">
+          {step !== null ? (
+            <div className="flex flex-col gap-2">
               <Button
-                key={action}
-                size="md"
-                variant="secondary"
-                loading={busy === action}
-                disabled={actionsBusy && busy !== action}
-                onClick={() => void runAction(action)}
+                size="lg"
+                variant={step.action === 'finish_room' ? 'danger' : 'primary'}
+                className="min-h-16 w-full text-xl"
+                loading={busy === step.action}
+                disabled={actionsBusy && busy !== step.action}
+                onClick={() => {
+                  if (step.action === 'finish_room') {
+                    setConfirmFinish(true);
+                    return;
+                  }
+                  void runAction(
+                    step.action,
+                    step.action === 'show_question' && nextQuestion !== null
+                      ? { questionId: nextQuestion.id }
+                      : {},
+                  );
+                }}
               >
-                {ROOM_ACTION_LABELS[action]}
+                {step.label}
               </Button>
-            );
-          })}
-          </div>
-        </details>
-
-        {snapshot.phase === 'question_open' ? (
-          <div className="mt-4 flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <div className="flex flex-wrap items-center gap-4">
-              <p className="text-lg font-bold text-slate-900 tabular-nums">
-                {formatRemainingSeconds(countdown.remainingSeconds)}
-              </p>
-              <p className="text-sm font-bold text-slate-700">
-                回答済み {formatRatioCount(snapshot.answeredCount, snapshot.participantCount)}
-              </p>
               <p className="text-xs text-slate-600">
-                締切はサーバー時刻で判定します。集計は締切後に表示されます。
+                いまは「{ROOM_PHASE_LABELS[snapshot.phase]}」です。
               </p>
             </div>
-
-            {snapshot.availableActions.includes('extend_deadline') ? (
-              <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
-                <span className="text-sm font-bold text-slate-700">回答時間を延長</span>
-                {EXTEND_SECONDS_PRESETS.map((seconds) => (
-                  <Button
-                    key={seconds}
-                    size="sm"
-                    variant="secondary"
-                    loading={busy === `extend-${seconds}`}
-                    disabled={actionsBusy && busy !== `extend-${seconds}`}
-                    onClick={() =>
-                      void runAction('extend_deadline', {
-                        extendSeconds: seconds,
-                        busyKey: `extend-${seconds}`,
-                      })
-                    }
-                  >
-                    +{seconds}秒
-                  </Button>
-                ))}
-                <span className="text-xs text-slate-600">
-                  締切を過ぎていた場合は、押した時点からその秒数だけ受け付けます。
-                </span>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        {snapshot.phase === 'question_locked' ? (
-          <div className="mt-4 flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <p className="text-sm font-bold text-slate-700">
-              回答済み {formatRatioCount(snapshot.answeredCount, snapshot.participantCount)}
-              <span className="ml-2 font-normal text-slate-600">
-                — 「正解を発表」で集計と正解を表示します。
-              </span>
+          ) : (
+            <p className="text-sm text-slate-600">
+              {snapshot.phase === 'finished'
+                ? 'クイズは終了しています。下の「クイズを再開」から続きを再開できます。'
+                : '進められる操作がありません。クイズに問題が登録されているか確認してください。'}
             </p>
+          )}
 
-            {snapshot.availableActions.includes('reopen_question') ? (
-              <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
-                <span className="text-sm font-bold text-slate-700">回答受付を再開</span>
-                {EXTEND_SECONDS_PRESETS.map((seconds) => (
+          <details className="mt-4">
+            <summary className="cursor-pointer text-sm font-bold text-slate-700">
+              そのほかの操作
+            </summary>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {inlineActions.length === 0 ? (
+                <p className="text-sm text-slate-600">個別に選べる操作はありません。</p>
+              ) : null}
+              {inlineActions.map((action) => {
+                if (action === 'show_question') {
+                  if (nextQuestion === null) {
+                    return null;
+                  }
+                  return (
+                    <Button
+                      key={action}
+                      size="md"
+                      variant="secondary"
+                      loading={busy === action}
+                      disabled={actionsBusy && busy !== action}
+                      onClick={() =>
+                        void runAction('show_question', { questionId: nextQuestion.id })
+                      }
+                    >
+                      第{nextQuestion.position}問を表示
+                    </Button>
+                  );
+                }
+                if (action === 'finish_room') {
+                  return (
+                    <Button
+                      key={action}
+                      size="md"
+                      variant="danger"
+                      disabled={actionsBusy}
+                      onClick={() => {
+                        setConfirmFinish(true);
+                      }}
+                    >
+                      {ROOM_ACTION_LABELS[action]}
+                    </Button>
+                  );
+                }
+                return (
                   <Button
-                    key={seconds}
-                    size="sm"
+                    key={action}
+                    size="md"
                     variant="secondary"
-                    loading={busy === `extend-${seconds}`}
-                    disabled={actionsBusy && busy !== `extend-${seconds}`}
-                    onClick={() =>
-                      void runAction('reopen_question', {
-                        extendSeconds: seconds,
-                        busyKey: `extend-${seconds}`,
-                      })
-                    }
+                    loading={busy === action}
+                    disabled={actionsBusy && busy !== action}
+                    onClick={() => void runAction(action)}
                   >
-                    {seconds}秒
+                    {ROOM_ACTION_LABELS[action]}
                   </Button>
-                ))}
-                <span className="text-xs text-slate-600">
-                  締め切ってしまった直後に戻せます。正解を発表したあとは戻せません。
-                </span>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </Card>
+                );
+              })}
+            </div>
+          </details>
 
-      {/* 待機中の準備 */}
-      {isLobby ? (
+          {snapshot.phase === 'question_open' ? (
+            <div className="mt-4 flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="flex flex-wrap items-center gap-4">
+                <p className="text-lg font-bold text-slate-900 tabular-nums">
+                  {formatRemainingSeconds(countdown.remainingSeconds)}
+                </p>
+                <p className="text-sm font-bold text-slate-700">
+                  回答済み {formatRatioCount(snapshot.answeredCount, snapshot.participantCount)}
+                </p>
+                <p className="text-xs text-slate-600">
+                  締切はサーバー時刻で判定します。集計は締切後に表示されます。
+                </p>
+              </div>
+
+              {snapshot.availableActions.includes('extend_deadline') ? (
+                <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
+                  <span className="text-sm font-bold text-slate-700">回答時間を延長</span>
+                  {EXTEND_SECONDS_PRESETS.map((seconds) => (
+                    <Button
+                      key={seconds}
+                      size="sm"
+                      variant="secondary"
+                      loading={busy === `extend-${seconds}`}
+                      disabled={actionsBusy && busy !== `extend-${seconds}`}
+                      onClick={() =>
+                        void runAction('extend_deadline', {
+                          extendSeconds: seconds,
+                          busyKey: `extend-${seconds}`,
+                        })
+                      }
+                    >
+                      +{seconds}秒
+                    </Button>
+                  ))}
+                  <span className="text-xs text-slate-600">
+                    締切を過ぎていた場合は、押した時点からその秒数だけ受け付けます。
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {snapshot.phase === 'question_locked' ? (
+            <div className="mt-4 flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-sm font-bold text-slate-700">
+                回答済み {formatRatioCount(snapshot.answeredCount, snapshot.participantCount)}
+                <span className="ml-2 font-normal text-slate-600">
+                  — 「正解を発表」で集計と正解を表示します。
+                </span>
+              </p>
+
+              {snapshot.availableActions.includes('reopen_question') ? (
+                <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
+                  <span className="text-sm font-bold text-slate-700">回答受付を再開</span>
+                  {EXTEND_SECONDS_PRESETS.map((seconds) => (
+                    <Button
+                      key={seconds}
+                      size="sm"
+                      variant="secondary"
+                      loading={busy === `extend-${seconds}`}
+                      disabled={actionsBusy && busy !== `extend-${seconds}`}
+                      onClick={() =>
+                        void runAction('reopen_question', {
+                          extendSeconds: seconds,
+                          busyKey: `extend-${seconds}`,
+                        })
+                      }
+                    >
+                      {seconds}秒
+                    </Button>
+                  ))}
+                  <span className="text-xs text-slate-600">
+                    締め切ってしまった直後に戻せます。正解を発表したあとは戻せません。
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </Card>
+      )}
+
+      {/* 待機中の準備（クイズ） */}
+      {isLobby && !isDraw ? (
         <>
           <Card
             title="参加用の二次元コード"
@@ -647,9 +711,10 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
         </Card>
       ) : null}
 
-      {!isLobby ? presentationCard : null}
+      {/* 抽選会・ビンゴでは投影画面の欄を上へ出しているので、ここでは重ねない。 */}
+      {!isLobby && !isDraw ? presentationCard : null}
 
-      {!isLobby ? (
+      {!isLobby && !isDraw ? (
         <Card title="回答の集計">
           <HostBreakdownPanel
             breakdown={snapshot.breakdown}
@@ -708,7 +773,8 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
         </Card>
       ) : null}
 
-      {snapshot.phase === 'finished' ? (
+      {/* 抽選会・ビンゴの再開は host-draw-panel が出す（上のバーからルーム一覧へ戻れる）。 */}
+      {snapshot.phase === 'finished' && !isDraw ? (
         <Card title="クイズは終了しました">
           <p className="text-sm text-slate-700">お疲れさまでした。</p>
           <p className="mt-3 text-sm text-slate-700">

@@ -5,5 +5,7 @@
   "answer-reveal": "default/answer-reveal.wav",
   "ranking": "default/ranking.wav",
   "fanfare": "default/fanfare.wav",
-  "finish": "default/finish.wav"
+  "finish": "default/finish.wav",
+  "draw-spin": "default/draw-spin.wav",
+  "draw-win": "default/draw-win.wav"
 }

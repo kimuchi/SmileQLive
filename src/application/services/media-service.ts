@@ -27,10 +27,15 @@ import {
   type MediaUsage,
 } from '@/domain/media/image-policy';
 import type { MediaRef, Question } from '@/domain/quiz/question';
+import type { DrawEntry } from '@/domain/draw/draw-list';
+import type { StageDrawEntry } from '@/domain/draw/draw-stage';
+import type { PublicImage } from '@/domain/quiz/public-question';
 import { requireHostUser, requireQuizOwner } from '@/lib/auth/session';
+import { requireDrawList } from '@/infrastructure/firebase/repositories/draw-list-repository';
 import { AppError } from '@/lib/errors/app-error';
 import { logger } from '@/infrastructure/logging/logger';
 import {
+  buildMediaLookup,
   countUsages,
   deleteAsset as deleteAssetRow,
   getAsset,
@@ -46,15 +51,39 @@ import {
 } from '@/infrastructure/firebase/storage/media-storage';
 import type { MediaUploadResponse } from '@/types/api';
 
+/**
+ * 画像の紐づけ先。
+ *
+ * クイズの問題・選択肢・解説で使うか、抽選リスト（景品の写真・投影の背景）で使うか。
+ * どちらも「所有者だけがアップロードできる」を守るため、
+ * ここで所有者の確認先を切り替える。
+ */
+export type UploadScope = { kind: 'quiz'; quizId: string } | { kind: 'drawList'; listId: string };
+
 export type UploadImageInput = {
   file: File;
-  quizId: string;
+  scope: UploadScope;
   usage: MediaUsage;
   alt?: string;
 };
 
+/** 紐づけ先の所有者を確かめ、保存パスに使う ID を返す。 */
+async function requireScopeOwner(scope: UploadScope): Promise<{ ownerId: string; scopeId: string }> {
+  if (scope.kind === 'quiz') {
+    const { user } = await requireQuizOwner(scope.quizId);
+    return { ownerId: user.id, scopeId: scope.quizId };
+  }
+
+  const { user } = await requireHostUser();
+  const list = await requireDrawList(scope.listId);
+  if (list.ownerId !== user.uid) {
+    throw new AppError('FORBIDDEN');
+  }
+  return { ownerId: user.id, scopeId: list.id };
+}
+
 export async function uploadImage(input: UploadImageInput): Promise<MediaUploadResponse> {
-  const { user } = await requireQuizOwner(input.quizId);
+  const { ownerId, scopeId } = await requireScopeOwner(input.scope);
 
   if (input.alt !== undefined && input.alt.length > IMAGE_ALT_MAX_LENGTH) {
     throw new AppError('VALIDATION_FAILED', {
@@ -109,7 +138,7 @@ export async function uploadImage(input: UploadImageInput): Promise<MediaUploadR
       throw error;
     }
     logger.warn('media.process_failed', {
-      quizId: input.quizId,
+      scopeId,
       errorMessage: error instanceof Error ? error.message : String(error),
     });
     throw new AppError('MEDIA_PROCESSING_FAILED', { cause: error });
@@ -124,8 +153,8 @@ export async function uploadImage(input: UploadImageInput): Promise<MediaUploadR
   const bucket = mediaBucketName();
 
   const { objectPath } = await uploadProcessedImage({
-    ownerId: user.id,
-    quizId: input.quizId,
+    ownerId,
+    scopeId,
     assetId,
     buffer: processed.data,
     contentType: OUTPUT_MIME_TYPE,
@@ -134,7 +163,7 @@ export async function uploadImage(input: UploadImageInput): Promise<MediaUploadR
   try {
     const asset = await insertAsset({
       id: assetId,
-      ownerId: user.id,
+      ownerId,
       bucket,
       objectPath,
       mimeType: OUTPUT_MIME_TYPE,
@@ -274,4 +303,49 @@ export async function resolveSingleQuestionMedia(
 ): Promise<Question> {
   const [resolved] = await resolveQuestionMedia([question], options);
   return resolved ?? question;
+}
+
+/**
+ * 抽選リストの画像をまとめて配信 URL へ解決する。
+ *
+ * 問題の画像と同じく、保存されているのは参照だけ。
+ * 1 件ずつ署名すると件数ぶん往復するので、まとめて 1 回で解決する。
+ */
+export async function resolveDrawEntryMedia(
+  entries: readonly DrawEntry[],
+): Promise<StageDrawEntry[]> {
+  const refs = entries.map((entry) => entry.image?.url ?? null);
+  const hasImage = refs.some((ref) => ref !== null);
+  const resolved = hasImage ? await resolveMediaUrls(refs) : refs;
+
+  return entries.map((entry, index) => {
+    const url = resolved[index];
+    return {
+      id: entry.id,
+      position: entry.position,
+      label: entry.label,
+      image:
+        entry.image && url
+          ? { url, alt: entry.image.alt, width: entry.image.width, height: entry.image.height }
+          : null,
+    };
+  });
+}
+
+/**
+ * 投影の背景画像を配信 URL へ解決する。
+ *
+ * 背景は 1 枚だけなので、まとめて解決する仕組みは要らない。
+ * 見つからなくても投影は続けられるように、失敗は null で返す。
+ */
+export async function resolveStageBackground(assetId: string | null): Promise<PublicImage | null> {
+  if (!assetId) {
+    return null;
+  }
+  const lookup = await buildMediaLookup([assetId], { resolveUrls: true });
+  const asset = lookup.get(assetId);
+  if (!asset) {
+    return null;
+  }
+  return { url: asset.url, alt: '', width: asset.width, height: asset.height };
 }

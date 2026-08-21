@@ -17,11 +17,19 @@ export function StageFrame({
   footer,
   children,
   className,
+  backgroundUrl = null,
 }: {
   header?: ReactNode;
   footer?: ReactNode;
   children: ReactNode;
   className?: string;
+  /**
+   * ステージ全体の背景に敷く画像。
+   *
+   * 抽選会・ビンゴで会場の雰囲気に合わせた背景を使うためのもの。
+   * 文字が読めなくならないよう、上から暗い膜を重ねる。
+   */
+  backgroundUrl?: string | null;
 }) {
   return (
     <main className="stage-root flex min-h-dvh w-full items-center justify-center overflow-hidden">
@@ -30,8 +38,18 @@ export function StageFrame({
         // 高さが足りないときは高さ基準で幅を決め、16:9 のまま収める。
         style={{ width: 'min(100vw, calc(100dvh * 16 / 9))' }}
       >
+        {backgroundUrl ? (
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 bg-cover bg-center"
+            style={{ backgroundImage: `url(${JSON.stringify(backgroundUrl)})` }}
+          >
+            {/* 背景の明るさに関係なく、白い文字が読める濃さまで落とす。 */}
+            <div className="absolute inset-0 bg-black/55" />
+          </div>
+        ) : null}
         <div
-          className={cn('flex h-full w-full flex-col', className)}
+          className={cn('relative flex h-full w-full flex-col', className)}
           style={{ padding: stageSize(56), gap: stageSize(24) }}
         >
           {header ?? null}

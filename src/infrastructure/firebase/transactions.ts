@@ -37,13 +37,17 @@ import {
   toIso,
   toIsoOr,
 } from '@/infrastructure/firebase/converters';
+import { randomInt } from 'node:crypto';
 import { countAnswers } from '@/infrastructure/firebase/repositories/room-repository';
+import { remainingEntries, type DrawRecord } from '@/domain/draw/draw-list';
+import { acceptsParticipants, roomModeOf } from '@/domain/room/room-mode';
 import { judgeNumberAnswer, toDecimalRule } from '@/domain/answer/number-judgement';
 import { findSnapshotQuestion, type QuizSnapshot } from '@/domain/quiz/quiz-snapshot';
 import type { Question } from '@/domain/quiz/question';
 import { publicEventTypeForPhase } from '@/domain/room/events';
 import { awardPoints } from '@/domain/room/scoring';
 import {
+  actionAllowedInMode,
   canTransition,
   nextPhase,
   EXTEND_SECONDS_MAX,
@@ -183,8 +187,10 @@ async function applyTransition(
   const snapshot = parseQuizSnapshot(room.quizSnapshot);
   const now = nowTimestamp();
   const nextVersion = room.stateVersion + 1;
+  const mode = roomModeOf(room.mode);
   const phase = nextPhase(room.phase, action, {
     hasCurrentQuestion: room.currentQuestionId !== null,
+    mode,
   });
 
   let currentQuestionId = room.currentQuestionId;
@@ -192,6 +198,8 @@ async function applyTransition(
   let answerDeadlineAt: Timestamp | null = room.answerDeadlineAt;
   let finishedAt: Timestamp | null = room.finishedAt;
   let joinOpen = room.joinOpen;
+  // 抽選会・ビンゴで引いた記録。クイズのルームでは触らない。
+  let drawn: DrawRecord[] = room.drawn ?? [];
 
   // 公開してよい回答数。締切・正解発表では必ず正確な値を書く（§3.4）。
   const publicSnapshot = await tx.get(publicStateRef(roomId));
@@ -265,6 +273,47 @@ async function applyTransition(
       answerDeadlineAt = null;
       break;
     }
+
+    // --- 抽選会・ビンゴ ---
+    case 'open_draw':
+    case 'continue_draw': {
+      // 表示を切り替えるだけ。引いた記録は動かさない。
+      answerDeadlineAt = null;
+      break;
+    }
+    case 'draw_next': {
+      const pool = room.drawSnapshot;
+      if (!pool) {
+        throw new AppError('ROOM_MODE_MISMATCH');
+      }
+      const remaining = remainingEntries(pool.entries, drawn);
+      if (remaining.length === 0) {
+        throw new AppError('DRAW_POOL_EMPTY');
+      }
+      // **ここで初めて当たりが決まる。** 事前に決めてクライアントへ渡さない。
+      // 偏りの無い乱数を使う（Math.random() は剰余で偏りが出る取り方をされがち）。
+      const picked = remaining[randomInt(remaining.length)];
+      if (!picked) {
+        throw new AppError('DRAW_POOL_EMPTY');
+      }
+      // order は常に 1..N の連番。取り消しは末尾を落とすだけなので歯抜けにならない。
+      drawn = [...drawn, { order: drawn.length + 1, entryId: picked.id }];
+      answerDeadlineAt = null;
+      break;
+    }
+    case 'undo_draw': {
+      if (drawn.length === 0) {
+        throw new AppError('DRAW_NOTHING_TO_UNDO');
+      }
+      drawn = drawn.slice(0, -1);
+      answerDeadlineAt = null;
+      break;
+    }
+    case 'reset_draws': {
+      drawn = [];
+      answerDeadlineAt = null;
+      break;
+    }
     case 'finish_room': {
       answerDeadlineAt = null;
       finishedAt = now;
@@ -272,12 +321,15 @@ async function applyTransition(
       break;
     }
     case 'reopen_room': {
-      // 得点・回答は消さない。終了の記録だけを取り消して続きから再開できるようにする。
+      // 得点・回答・引いた記録は消さない。終了の記録だけを取り消して続きから再開する。
       answerDeadlineAt = null;
       finishedAt = null;
       // 終了時に閉じた参加受付を戻す。二次元コードもそのまま使える
       // （参加 URL を無効にしたい場合は司会画面から改めて再発行する）。
-      joinOpen = true;
+      //
+      // **抽選会・ビンゴでは戻さない。** これらは参加者が来ないモードなので、
+      // 再開のたびに受付が開くと「参加受付中」と表示され、状態として嘘になる。
+      joinOpen = acceptsParticipants(mode);
       break;
     }
   }
@@ -285,6 +337,7 @@ async function applyTransition(
   tx.update(roomRef(roomId), {
     phase,
     stateVersion: nextVersion,
+    drawn,
     currentQuestionId,
     currentQuestionPosition,
     // 延長はフェーズを変えないので「いつこのフェーズに入ったか」も動かさない。
@@ -384,6 +437,11 @@ export async function transitionRoom(input: TransitionRoomInput): Promise<Transi
     }
     if (!canTransition(room.phase, input.action)) {
       throw new AppError('INVALID_TRANSITION');
+    }
+    // モードをまたいだ操作を通さない。
+    // 画面には出ないが、API を直接叩かれる可能性がある。
+    if (!actionAllowedInMode(input.action, roomModeOf(room.mode))) {
+      throw new AppError('ROOM_MODE_MISMATCH');
     }
 
     return applyTransition(tx, room, input.action, {

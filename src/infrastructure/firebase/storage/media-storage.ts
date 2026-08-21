@@ -88,7 +88,7 @@ export async function uploadProcessedImage(
   input: UploadProcessedImageInput,
 ): Promise<{ objectPath: string }> {
   const bucket = getMediaBucket();
-  const objectPath = buildObjectPath(input.ownerId, input.quizId, input.assetId);
+  const objectPath = buildObjectPath(input.ownerId, input.scopeId, input.assetId);
 
   try {
     await bucket.file(objectPath).save(input.buffer, {

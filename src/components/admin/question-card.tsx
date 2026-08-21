@@ -339,7 +339,7 @@ export function QuestionCard({
 
         <ImageField
           label="問題画像（任意）"
-          quizId={quizId}
+          scope={{ kind: 'quiz', quizId }}
           usage="question"
           image={draft.image}
           alt={draft.imageAlt}
@@ -414,7 +414,7 @@ export function QuestionCard({
 
         <ImageField
           label="正解・解説画像（任意）"
-          quizId={quizId}
+          scope={{ kind: 'quiz', quizId }}
           usage="reveal"
           image={draft.revealImage}
           alt={draft.revealImageAlt}

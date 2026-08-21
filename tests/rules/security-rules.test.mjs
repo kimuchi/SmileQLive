@@ -117,6 +117,21 @@ export default async function run(report, ctx) {
     readDoc(participant, 'mediaAssets', IDS.asset)(),
   );
 
+  // 抽選の名簿は氏名の塊。参加者にも投影担当にも読ませない
+  // （投影に要る内容は Cloud Run が rooms 側の drawSnapshot から配る）。
+  await report.denied('匿名参加者が drawLists を読む', () =>
+    readDoc(participant, 'drawLists', IDS.drawList)(),
+  );
+  await report.denied('匿名参加者が drawLists の中身を読む', () =>
+    readDoc(participant, 'drawLists', IDS.drawList, 'entries', IDS.drawEntry)(),
+  );
+  await report.denied('投影担当が drawLists を読む', () =>
+    readDoc(presenter, 'drawLists', IDS.drawList)(),
+  );
+  await report.denied('投影担当が drawLists の中身を読む', () =>
+    readDoc(presenter, 'drawLists', IDS.drawList, 'entries', IDS.drawEntry)(),
+  );
+
   // -------------------------------------------------------------------------
   report.section('2. 公開状態 rooms/{roomId}/public/state');
   // -------------------------------------------------------------------------
@@ -259,12 +274,24 @@ export default async function run(report, ctx) {
   await report.allowed('司会者が自分の mediaAssets を読む', () =>
     readDoc(host, 'mediaAssets', IDS.asset)(),
   );
+  await report.allowed('司会者が自分の drawLists を読む', () =>
+    readDoc(host, 'drawLists', IDS.drawList)(),
+  );
+  await report.allowed('司会者が自分の drawLists の中身を読む', () =>
+    readDoc(host, 'drawLists', IDS.drawList, 'entries', IDS.drawEntry)(),
+  );
   await report.allowed('司会者が自分の profiles を読む', () =>
     readDoc(host, 'profiles', host.uid)(),
   );
 
   await report.denied('別の司会者が他人の rooms/{roomId} を読む', () =>
     readDoc(otherHost, 'rooms', IDS.room)(),
+  );
+  await report.denied('別の司会者が他人の drawLists を読む', () =>
+    readDoc(otherHost, 'drawLists', IDS.drawList)(),
+  );
+  await report.denied('別の司会者が他人の drawLists の中身を読む', () =>
+    readDoc(otherHost, 'drawLists', IDS.drawList, 'entries', IDS.drawEntry)(),
   );
   await report.denied('別の司会者が他人の quizzes/{quizId} を読む', () =>
     readDoc(otherHost, 'quizzes', IDS.quiz)(),

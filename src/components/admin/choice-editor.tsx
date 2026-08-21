@@ -178,7 +178,7 @@ export function ChoiceEditor({
                 />
                 <ImageField
                   label={`選択肢${label}の画像（任意）`}
-                  quizId={quizId}
+                  scope={{ kind: 'quiz', quizId }}
                   usage="choice"
                   image={choice.image}
                   alt={choice.imageAlt}

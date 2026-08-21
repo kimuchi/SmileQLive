@@ -30,7 +30,7 @@ const SOURCE_NAME = '効果音ラボ';
 const SOURCE_URL = 'https://soundeffect-lab.info/';
 
 /**
- * SmileQ Live が鳴らす 7 音と、その用途に合う効果音ラボの素材。
+ * SmileQ Live が鳴らす 9 音と、その用途に合う効果音ラボの素材。
  *
  * `file` は配布元でのファイル名。利用者がダウンロードした際の名前と一致する。
  */
@@ -82,6 +82,22 @@ const RECOMMENDED = [
     purpose: '終了',
     label: 'ジャジャーン',
     file: 'jajean1.mp3',
+    page: 'https://soundeffect-lab.info/sound/anime/',
+  },
+  {
+    // 回している間ずっと繰り返すため、ranking のドラムロールとは別の素材を割り当てる
+    // （ranking は途中で速くなる「ため」の音なので、繰り返すと拍が崩れる）。
+    name: 'draw-spin',
+    purpose: '抽選のルーレット中',
+    label: 'ティンパニロール（ドドドド）',
+    file: 'tympani-roll1.mp3',
+    page: 'https://soundeffect-lab.info/sound/anime/',
+  },
+  {
+    name: 'draw-win',
+    purpose: '当選が確定した瞬間',
+    label: 'ラッパのファンファーレ',
+    file: 'trumpet1.mp3',
     page: 'https://soundeffect-lab.info/sound/anime/',
   },
 ];

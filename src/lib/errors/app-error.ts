@@ -53,6 +53,19 @@ export const APP_ERROR_DEFINITIONS = {
   CHOICE_LIMIT_REACHED: { status: 422, message: '選択肢は最大5個までです' },
   CHOICE_MINIMUM_REACHED: { status: 422, message: '選択肢は最低2個必要です' },
 
+  // 抽選会・ビンゴ
+  DRAW_LIST_NOT_FOUND: { status: 404, message: '抽選リストが見つかりません' },
+  DRAW_LIST_EMPTY: { status: 422, message: '抽選リストが空です。1件以上登録してください' },
+  DRAW_LIST_TOO_LARGE: { status: 422, message: '抽選リストの件数が多すぎます' },
+  DRAW_LIST_RANGE_INVALID: { status: 422, message: '数字の範囲が正しくありません' },
+  DRAW_LIST_KIND_MISMATCH: {
+    status: 422,
+    message: 'このモードでは使えない種類の抽選リストです',
+  },
+  DRAW_POOL_EMPTY: { status: 409, message: 'もう引けるものがありません' },
+  DRAW_NOTHING_TO_UNDO: { status: 409, message: '取り消せる抽選がありません' },
+  ROOM_MODE_MISMATCH: { status: 409, message: 'このルームでは実行できない操作です' },
+
   // 画像
   MEDIA_TOO_LARGE: { status: 422, message: '画像は8MB以下にしてください' },
   MEDIA_UNSUPPORTED_TYPE: { status: 422, message: 'JPEG・PNG・WebP の画像を指定してください' },

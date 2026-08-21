@@ -5,6 +5,7 @@ import {
   ROOM_PHASES,
   ROOM_PHASE_LABELS,
   acceptsAnswers,
+  actionAllowedInMode,
   availableActions,
   canTransition,
   isRoomAction,
@@ -13,10 +14,12 @@ import {
   nextStep,
   requiresQuestionId,
   revealsAnswer,
+  roomActionLabel,
   showsBreakdown,
   showsQuestion,
 } from '@/domain/room/state-machine';
 import type { RoomAction, RoomPhase } from '@/domain/room/state-machine';
+import { ROOM_MODES, type RoomMode } from '@/domain/room/room-mode';
 
 /**
  * ルーム進行の状態機械（仕様書 §37.1）。
@@ -25,14 +28,21 @@ import type { RoomAction, RoomPhase } from '@/domain/room/state-machine';
  * 「どの遷移が許されるか」を表として固定し、意図しない緩和を検出する。
  */
 
-/** 各フェーズから実行できるアクション（仕様上の正）。 */
+/**
+ * 各フェーズから実行できるアクション（仕様上の正）。
+ *
+ * モードを問わない素の遷移表。モードによる絞り込みは availableActions が行う
+ * （クイズのルームで抽選の操作が出ない、など）。
+ */
 const EXPECTED_ACTIONS: Record<RoomPhase, RoomAction[]> = {
-  lobby: ['show_question', 'finish_room'],
+  lobby: ['show_question', 'open_draw', 'finish_room'],
   question_ready: ['open_question'],
   question_open: ['lock_question', 'extend_deadline'],
   question_locked: ['reopen_question', 'reveal_answer', 'finish_room'],
   answer_revealed: ['show_question', 'show_scoreboard', 'finish_room'],
   scoreboard: ['show_question', 'finish_room'],
+  draw_ready: ['draw_next', 'undo_draw', 'reset_draws', 'finish_room'],
+  draw_revealed: ['draw_next', 'continue_draw', 'undo_draw', 'reset_draws', 'finish_room'],
   finished: ['reopen_room'],
 };
 
@@ -45,6 +55,11 @@ const EXPECTED_NEXT_PHASE: Record<RoomAction, RoomPhase> = {
   reopen_question: 'question_open',
   reveal_answer: 'answer_revealed',
   show_scoreboard: 'scoreboard',
+  open_draw: 'draw_ready',
+  draw_next: 'draw_revealed',
+  continue_draw: 'draw_ready',
+  undo_draw: 'draw_ready',
+  reset_draws: 'draw_ready',
   finish_room: 'finished',
   // 出題前に終了した場合の戻り先。出題済みなら scoreboard（別途検証）。
   reopen_room: 'lobby',
@@ -133,24 +148,111 @@ describe('nextPhase', () => {
   });
 });
 
+/** そのモードで使える操作（仕様上の正）。 */
+const MODE_ACTIONS: Record<RoomMode, RoomAction[]> = {
+  quiz: [
+    'show_question',
+    'open_question',
+    'lock_question',
+    'extend_deadline',
+    'reopen_question',
+    'reveal_answer',
+    'show_scoreboard',
+    'finish_room',
+    'reopen_room',
+  ],
+  lottery: ['open_draw', 'draw_next', 'continue_draw', 'undo_draw', 'reset_draws', 'finish_room', 'reopen_room'],
+  bingo: ['open_draw', 'draw_next', 'continue_draw', 'undo_draw', 'reset_draws', 'finish_room', 'reopen_room'],
+};
+
+function expectedFor(phase: RoomPhase, mode: RoomMode): RoomAction[] {
+  return EXPECTED_ACTIONS[phase].filter((action) => MODE_ACTIONS[mode].includes(action));
+}
+
 describe('availableActions', () => {
-  it.each(ROOM_PHASES)('%s のボタン一覧', (phase) => {
-    expect(availableActions(phase)).toEqual(EXPECTED_ACTIONS[phase]);
+  it.each(ROOM_PHASES)('%s のボタン一覧（クイズ）', (phase) => {
+    expect(availableActions(phase, 'quiz')).toEqual(expectedFor(phase, 'quiz'));
+  });
+
+  it.each(ROOM_PHASES)('%s のボタン一覧（抽選会）', (phase) => {
+    expect(availableActions(phase, 'lottery')).toEqual(expectedFor(phase, 'lottery'));
+  });
+
+  it.each(ROOM_PHASES)('%s のボタン一覧（ビンゴ）', (phase) => {
+    expect(availableActions(phase, 'bingo')).toEqual(expectedFor(phase, 'bingo'));
+  });
+
+  it('モードを省略したらクイズとして扱う（既存の呼び出しを変えない）', () => {
+    for (const phase of ROOM_PHASES) {
+      expect(availableActions(phase)).toEqual(availableActions(phase, 'quiz'));
+    }
+  });
+
+  it('クイズのルームに抽選の操作は出ない', () => {
+    // 出てしまうと、司会が押せてしまい、サーバー側でしか止められなくなる。
+    for (const phase of ROOM_PHASES) {
+      const actions = availableActions(phase, 'quiz');
+      expect(actions).not.toContain('draw_next');
+      expect(actions).not.toContain('open_draw');
+      expect(actions).not.toContain('reset_draws');
+    }
+  });
+
+  it('抽選会・ビンゴのルームにクイズの操作は出ない', () => {
+    for (const mode of ['lottery', 'bingo'] as const) {
+      for (const phase of ROOM_PHASES) {
+        const actions = availableActions(phase, mode);
+        expect(actions).not.toContain('show_question');
+        expect(actions).not.toContain('open_question');
+        expect(actions).not.toContain('reveal_answer');
+      }
+    }
   });
 
   it('ROOM_ACTIONS の宣言順を保つ（司会画面のボタン並びが安定する）', () => {
-    const actions = availableActions('answer_revealed');
+    const actions = availableActions('answer_revealed', 'quiz');
     const order = actions.map((action) => ROOM_ACTIONS.indexOf(action));
 
     expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
 
-  it('返り値は canTransition と一致する', () => {
-    for (const phase of ROOM_PHASES) {
-      for (const action of ROOM_ACTIONS) {
-        expect(availableActions(phase).includes(action)).toBe(canTransition(phase, action));
+  it('返り値は canTransition とモードの両方に一致する', () => {
+    for (const mode of ROOM_MODES) {
+      for (const phase of ROOM_PHASES) {
+        for (const action of ROOM_ACTIONS) {
+          expect(availableActions(phase, mode).includes(action)).toBe(
+            canTransition(phase, action) && actionAllowedInMode(action, mode),
+          );
+        }
       }
     }
+  });
+});
+
+describe('モードごとの文言', () => {
+  it('同じ操作でもモードに合わせた言い方になる', () => {
+    // 司会は会場を見ながら片手で押す。画面の言葉がその場の言い方と違うと迷う。
+    expect(roomActionLabel('draw_next', 'lottery')).toBe('抽選する');
+    expect(roomActionLabel('draw_next', 'bingo')).toBe('1つ引く');
+    expect(roomActionLabel('finish_room', 'quiz')).toBe('クイズを終了');
+    expect(roomActionLabel('finish_room', 'lottery')).toBe('抽選会を終了');
+    expect(roomActionLabel('finish_room', 'bingo')).toBe('ビンゴを終了');
+  });
+
+  it('すべての操作に文言がある（モードを問わず空にならない）', () => {
+    for (const mode of ROOM_MODES) {
+      for (const action of ROOM_ACTIONS) {
+        expect(roomActionLabel(action, mode).length).toBeGreaterThan(0);
+      }
+    }
+  });
+});
+
+describe('終了からの再開（抽選会・ビンゴ）', () => {
+  it('抽選会・ビンゴは「引ける状態」へ戻す', () => {
+    // ランキングも問題も無いモードなので、クイズと同じ戻り先にはできない。
+    expect(nextPhase('finished', 'reopen_room', { mode: 'lottery' })).toBe('draw_ready');
+    expect(nextPhase('finished', 'reopen_room', { mode: 'bingo' })).toBe('draw_ready');
   });
 });
 
@@ -307,5 +409,53 @@ describe('nextStep（司会の「次へ」）', () => {
 
   it('問題が 1 問も無ければ待機中では進めない', () => {
     expect(nextStep({ phase: 'lobby', nextQuestionPosition: null })).toBeNull();
+  });
+});
+
+describe('nextStep（抽選会・ビンゴの1ボタン進行）', () => {
+  it('待機中は「はじめる」', () => {
+    expect(nextStep({ phase: 'lobby', mode: 'lottery', nextQuestionPosition: null })).toEqual({
+      action: 'open_draw',
+      label: '抽選をはじめる',
+      questionPosition: null,
+    });
+    expect(nextStep({ phase: 'lobby', mode: 'bingo', nextQuestionPosition: null })?.label).toBe(
+      'ビンゴをはじめる',
+    );
+  });
+
+  it('残りがあれば「引く」を出す', () => {
+    for (const phase of ['draw_ready', 'draw_revealed'] as const) {
+      expect(
+        nextStep({ phase, mode: 'lottery', nextQuestionPosition: null, remainingDrawCount: 3 }),
+      ).toEqual({ action: 'draw_next', label: '抽選する', questionPosition: null });
+    }
+  });
+
+  it('残りが無ければ「終了」へ導く（押せるのに何も起きないボタンを出さない）', () => {
+    expect(
+      nextStep({
+        phase: 'draw_revealed',
+        mode: 'bingo',
+        nextQuestionPosition: null,
+        remainingDrawCount: 0,
+      }),
+    ).toEqual({ action: 'finish_room', label: 'ビンゴを終了', questionPosition: null });
+  });
+
+  it('終了後は「次」を出さない（再開は専用の導線）', () => {
+    expect(
+      nextStep({ phase: 'finished', mode: 'lottery', nextQuestionPosition: null }),
+    ).toBeNull();
+  });
+
+  it('抽選のモードではクイズの進行を返さない', () => {
+    // 問題番号を渡しても、抽選のルームで「第1問へ」が出てはいけない。
+    const step = nextStep({ phase: 'lobby', mode: 'bingo', nextQuestionPosition: 1 });
+    expect(step?.action).toBe('open_draw');
+  });
+
+  it('モードを省略したらクイズとして扱う', () => {
+    expect(nextStep({ phase: 'lobby', nextQuestionPosition: 1 })?.action).toBe('show_question');
   });
 });

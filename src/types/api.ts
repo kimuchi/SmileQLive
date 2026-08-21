@@ -8,6 +8,11 @@ import type { ParticipantSnapshot, StaffSnapshot } from '@/domain/room/snapshot'
 import type { RankedParticipant } from '@/domain/room/scoring';
 import type { QuestionType } from '@/domain/quiz/question';
 import type { RoomPhase } from '@/domain/room/state-machine';
+import type { RoomMode } from '@/domain/room/room-mode';
+import type {
+  AdminDrawList,
+  DrawListSummary,
+} from '@/infrastructure/firebase/repositories/draw-list-repository';
 
 /**
  * HTTP API のレスポンス契約。
@@ -115,9 +120,13 @@ export type MediaUploadResponse = {
 
 export type CreateRoomResponse = {
   roomId: string;
-  /** 平文の参加 URL。ここでしか返らない（DB にはハッシュのみ保存）。 */
-  joinUrl: string;
-  joinToken: string;
+  mode: RoomMode;
+  /**
+   * 平文の参加 URL。ここでしか返らない（DB にはハッシュのみ保存）。
+   * 抽選会・ビンゴのルームでは参加者が来ないため null。
+   */
+  joinUrl: string | null;
+  joinToken: string | null;
   quizTitle: string;
 };
 
@@ -143,6 +152,7 @@ export type StaffSnapshotResponse = { snapshot: StaffSnapshot };
 
 export type RoomListItem = {
   id: string;
+  mode: RoomMode;
   quizTitle: string;
   phase: RoomPhase;
   participantCount: number;
@@ -203,4 +213,27 @@ export type DiagnosticsResponse = {
   checks: Array<{ name: string; ok: boolean; detail?: string }>;
   environment: string;
   appBaseUrl: string;
+};
+
+// ---------------------------------------------------------------------------
+// 抽選リスト（抽選会・ビンゴ）
+// ---------------------------------------------------------------------------
+
+export type DrawListsResponse = { lists: DrawListSummary[] };
+export type DrawListDetailResponse = { list: AdminDrawList };
+
+/** 取り込みの結果。黙って一部を落とさないために、何が起きたかを返す。 */
+export type DrawImportSummary = {
+  count: number;
+  headers: string[] | null;
+  labelColumnIndex: number;
+  skippedEmpty: number;
+  truncated: number;
+  shortened: number;
+  duplicates: number;
+};
+
+export type DrawListImportResponse = {
+  list: AdminDrawList;
+  imported: DrawImportSummary;
 };

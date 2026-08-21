@@ -26,6 +26,9 @@ export const PUBLIC_EVENT_TYPES = [
   'question.locked',
   'answer.revealed',
   'scoreboard.shown',
+  // 抽選会・ビンゴ
+  'draw.ready',
+  'draw.revealed',
   'room.finished',
 ] as const;
 export type PublicEventType = (typeof PUBLIC_EVENT_TYPES)[number];
@@ -100,6 +103,10 @@ export function publicEventTypeForPhase(phase: RoomPhase): PublicEventType {
       return 'answer.revealed';
     case 'scoreboard':
       return 'scoreboard.shown';
+    case 'draw_ready':
+      return 'draw.ready';
+    case 'draw_revealed':
+      return 'draw.revealed';
     case 'finished':
       return 'room.finished';
   }

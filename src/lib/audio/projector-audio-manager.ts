@@ -25,7 +25,14 @@ export type SoundName =
   | 'ranking'
   /** ランキングが出た瞬間の音（ファンファーレ）。 */
   | 'fanfare'
-  | 'finish';
+  | 'finish'
+  /**
+   * 抽選のルーレットを回している間ずっと鳴らす音。
+   * startLoop で繰り返すため、素材の長さがそのまま継ぎ目の間隔になる（同梱音は 1 秒ちょうど）。
+   */
+  | 'draw-spin'
+  /** 引いたものが確定した瞬間の音。 */
+  | 'draw-win';
 
 export const SOUND_NAMES = [
   'question-start',
@@ -35,6 +42,8 @@ export const SOUND_NAMES = [
   'ranking',
   'fanfare',
   'finish',
+  'draw-spin',
+  'draw-win',
 ] as const satisfies readonly SoundName[];
 
 export function isSoundName(value: string): value is SoundName {

@@ -1,26 +1,43 @@
 /**
  * ルーム進行の状態機械。
  *
- * LOBBY → QUESTION_READY → QUESTION_OPEN → QUESTION_LOCKED → ANSWER_REVEALED
- *   → (SCOREBOARD) → QUESTION_READY ... → FINISHED
+ * ルームには 3 つのモードがある（domain/room/room-mode.ts）。
+ * どのモードでも `lobby` で始まり `finished` で終わり、
+ * `finished` からは `reopen_room` で復帰できる（誤って終了しても続きから再開できる）。
  *
- * FINISHED からは reopen_room で復帰できる（誤って終了しても続きから再開できる）。
+ * クイズ:
+ *   LOBBY → QUESTION_READY → QUESTION_OPEN → QUESTION_LOCKED → ANSWER_REVEALED
+ *     → (SCOREBOARD) → QUESTION_READY ... → FINISHED
+ *
+ * 抽選会・ビンゴ（1 つずつ引くモード）:
+ *   LOBBY → DRAW_READY ⇄ DRAW_REVEALED → FINISHED
+ *
  * すべての状態変更で state_version を 1 増やし、司会 API は expectedVersion を検証する。
+ * **同じフェーズ名を両方のモードで使い回さない。** 使い回すと
+ * 「クイズのつもりの操作が抽選のルームで通る」事故が起きる。
+ * どの操作が出せるかは availableActions(phase, mode) が決める。
  */
+
+import type { RoomMode } from '@/domain/room/room-mode';
 
 export const ROOM_PHASES = [
   'lobby',
+  // クイズ
   'question_ready',
   'question_open',
   'question_locked',
   'answer_revealed',
   'scoreboard',
+  // 抽選会・ビンゴ
+  'draw_ready',
+  'draw_revealed',
   'finished',
 ] as const;
 
 export type RoomPhase = (typeof ROOM_PHASES)[number];
 
 export const ROOM_ACTIONS = [
+  // クイズ
   'show_question',
   'open_question',
   'lock_question',
@@ -28,6 +45,13 @@ export const ROOM_ACTIONS = [
   'reopen_question',
   'reveal_answer',
   'show_scoreboard',
+  // 抽選会・ビンゴ
+  'open_draw',
+  'draw_next',
+  'continue_draw',
+  'undo_draw',
+  'reset_draws',
+  // 共通
   'finish_room',
   'reopen_room',
 ] as const;
@@ -47,7 +71,26 @@ const ALLOWED_FROM: Record<RoomAction, readonly RoomPhase[]> = {
   reopen_question: ['question_locked'],
   reveal_answer: ['question_locked'],
   show_scoreboard: ['answer_revealed'],
-  finish_room: ['lobby', 'answer_revealed', 'scoreboard', 'question_locked'],
+
+  // --- 抽選会・ビンゴ ---
+  open_draw: ['lobby'],
+  // 結果を出したまま続けて引ける（ビンゴは「引く」を繰り返すのが自然）。
+  draw_next: ['draw_ready', 'draw_revealed'],
+  // 表示を READY へ戻す（抽選会の「次へ」）。
+  continue_draw: ['draw_revealed'],
+  // 引き間違い・二度押しからの復帰。直前の 1 件だけを取り消す。
+  undo_draw: ['draw_ready', 'draw_revealed'],
+  // 全部戻して最初から。GAS 版の「当選リセット」に相当。
+  reset_draws: ['draw_ready', 'draw_revealed'],
+
+  finish_room: [
+    'lobby',
+    'answer_revealed',
+    'scoreboard',
+    'question_locked',
+    'draw_ready',
+    'draw_revealed',
+  ],
   // 終了からの復帰。ここだけが finished から出る唯一の道。
   reopen_room: ['finished'],
 };
@@ -62,6 +105,15 @@ const RESULT_PHASE: Record<RoomAction, RoomPhase> = {
   reopen_question: 'question_open',
   reveal_answer: 'answer_revealed',
   show_scoreboard: 'scoreboard',
+
+  open_draw: 'draw_ready',
+  draw_next: 'draw_revealed',
+  continue_draw: 'draw_ready',
+  // 取り消したあとは必ず READY へ戻す。直前の結果を出したままだと
+  // 「取り消したのに画面に残っている」ように見える。
+  undo_draw: 'draw_ready',
+  reset_draws: 'draw_ready',
+
   finish_room: 'finished',
   // 1 問も出していない場合の戻り先。出題済みなら nextPhase() が scoreboard を返す。
   reopen_room: 'lobby',
@@ -76,9 +128,36 @@ const REQUIRES_QUESTION_ID: Record<RoomAction, boolean> = {
   reopen_question: false,
   reveal_answer: false,
   show_scoreboard: false,
+  open_draw: false,
+  draw_next: false,
+  continue_draw: false,
+  undo_draw: false,
+  reset_draws: false,
   finish_room: false,
   reopen_room: false,
 };
+
+/** そのモードで使えるアクションか。モードをまたいだ操作を通さないための表。 */
+const ACTION_MODES: Record<RoomAction, readonly RoomMode[]> = {
+  show_question: ['quiz'],
+  open_question: ['quiz'],
+  lock_question: ['quiz'],
+  extend_deadline: ['quiz'],
+  reopen_question: ['quiz'],
+  reveal_answer: ['quiz'],
+  show_scoreboard: ['quiz'],
+  open_draw: ['lottery', 'bingo'],
+  draw_next: ['lottery', 'bingo'],
+  continue_draw: ['lottery', 'bingo'],
+  undo_draw: ['lottery', 'bingo'],
+  reset_draws: ['lottery', 'bingo'],
+  finish_room: ['quiz', 'lottery', 'bingo'],
+  reopen_room: ['quiz', 'lottery', 'bingo'],
+};
+
+export function actionAllowedInMode(action: RoomAction, mode: RoomMode): boolean {
+  return ACTION_MODES[action].includes(mode);
+}
 
 /** 延長できる秒数の範囲。1 回の操作で足せる秒数。 */
 export const EXTEND_SECONDS_MIN = 5;
@@ -108,12 +187,16 @@ export function canTransition(from: RoomPhase, action: RoomAction): boolean {
 export function nextPhase(
   from: RoomPhase,
   action: RoomAction,
-  context: { hasCurrentQuestion?: boolean } = {},
+  context: { hasCurrentQuestion?: boolean; mode?: RoomMode } = {},
 ): RoomPhase {
   if (!canTransition(from, action)) {
     throw new Error(`INVALID_TRANSITION: ${from} -> ${action}`);
   }
   if (action === 'reopen_room') {
+    // 抽選会・ビンゴには「ランキング」も「問題」も無い。引ける状態へ戻す。
+    if (context.mode === 'lottery' || context.mode === 'bingo') {
+      return 'draw_ready';
+    }
     return context.hasCurrentQuestion ? 'scoreboard' : 'lobby';
   }
   return RESULT_PHASE[action];
@@ -123,9 +206,15 @@ export function requiresQuestionId(action: RoomAction): boolean {
   return REQUIRES_QUESTION_ID[action];
 }
 
-/** 現在フェーズから実行可能なアクション一覧（司会画面のボタン表示に使う）。 */
-export function availableActions(phase: RoomPhase): RoomAction[] {
-  return ROOM_ACTIONS.filter((action) => canTransition(phase, action));
+/**
+ * 現在フェーズとモードから実行可能なアクション一覧（司会画面のボタン表示に使う）。
+ *
+ * モードを渡さないとクイズとして扱う。既存の呼び出しをそのまま通すため。
+ */
+export function availableActions(phase: RoomPhase, mode: RoomMode = 'quiz'): RoomAction[] {
+  return ROOM_ACTIONS.filter(
+    (action) => canTransition(phase, action) && actionAllowedInMode(action, mode),
+  );
 }
 
 /** 回答 API が受付可能なフェーズか。 */
@@ -175,12 +264,54 @@ export type NextStep = {
   questionPosition: number | null;
 };
 
+/**
+ * 抽選会・ビンゴの「次へ」。
+ *
+ * ふつうの進行は「引く」を繰り返すだけ。引くものが無くなったら終了へ導く。
+ * 取り消し・リセットは事故からの復帰なので、この 1 ボタンには載せない。
+ */
+function nextDrawStep(phase: RoomPhase, mode: RoomMode, remainingDrawCount: number): NextStep | null {
+  const drawNext: NextStep = {
+    action: 'draw_next',
+    label: roomActionLabel('draw_next', mode),
+    questionPosition: null,
+  };
+  const finish: NextStep = {
+    action: 'finish_room',
+    label: roomActionLabel('finish_room', mode),
+    questionPosition: null,
+  };
+
+  switch (phase) {
+    case 'lobby':
+      return { action: 'open_draw', label: roomActionLabel('open_draw', mode), questionPosition: null };
+    case 'draw_ready':
+    case 'draw_revealed':
+      // 残りが無ければ「引く」を出さない。押せるのに何も起きないボタンを出さない。
+      return remainingDrawCount > 0 ? drawNext : finish;
+    case 'finished':
+      // 終了後は「次」ではなく再開。誤操作にならないよう専用の導線に任せる。
+      return null;
+    default:
+      return null;
+  }
+}
+
 export function nextStep(input: {
   phase: RoomPhase;
+  /** 省略時はクイズ。 */
+  mode?: RoomMode;
   /** 次に出せる問題の番号。無ければ null。 */
   nextQuestionPosition: number | null;
+  /** 抽選会・ビンゴ: まだ引いていない件数。 */
+  remainingDrawCount?: number;
 }): NextStep | null {
   const { phase, nextQuestionPosition } = input;
+  const mode = input.mode ?? 'quiz';
+
+  if (mode === 'lottery' || mode === 'bingo') {
+    return nextDrawStep(phase, mode, input.remainingDrawCount ?? 0);
+  }
 
   const showNextQuestion = (): NextStep | null =>
     nextQuestionPosition === null
@@ -227,6 +358,8 @@ export const ROOM_PHASE_LABELS: Record<RoomPhase, string> = {
   question_locked: '回答締切',
   answer_revealed: '正解発表',
   scoreboard: 'ランキング',
+  draw_ready: '抽選待ち',
+  draw_revealed: '結果表示中',
   finished: '終了',
 };
 
@@ -238,6 +371,46 @@ export const ROOM_ACTION_LABELS: Record<RoomAction, string> = {
   reopen_question: '回答受付を再開',
   reveal_answer: '正解を発表',
   show_scoreboard: 'ランキングを表示',
-  finish_room: 'クイズを終了',
-  reopen_room: 'クイズを再開',
+  open_draw: 'はじめる',
+  draw_next: '抽選する',
+  continue_draw: '次へ',
+  undo_draw: '直前の1件を取り消す',
+  reset_draws: '最初からやり直す',
+  finish_room: '終了する',
+  reopen_room: '再開する',
 };
+
+/**
+ * モードに合わせた操作の文言。
+ *
+ * 同じ `draw_next` でも、抽選会では「抽選する」、ビンゴでは「1つ引く」のほうが
+ * 会場での言い方に近い。司会が迷わないよう、その場の言葉に合わせる。
+ */
+const MODE_ACTION_LABELS: Partial<Record<RoomMode, Partial<Record<RoomAction, string>>>> = {
+  quiz: {
+    finish_room: 'クイズを終了',
+    reopen_room: 'クイズを再開',
+  },
+  lottery: {
+    open_draw: '抽選をはじめる',
+    draw_next: '抽選する',
+    continue_draw: '次の抽選へ',
+    undo_draw: '直前の当選を取り消す',
+    reset_draws: '当選をリセット',
+    finish_room: '抽選会を終了',
+    reopen_room: '抽選会を再開',
+  },
+  bingo: {
+    open_draw: 'ビンゴをはじめる',
+    draw_next: '1つ引く',
+    continue_draw: '次へ',
+    undo_draw: '直前の1件を取り消す',
+    reset_draws: '出た球をリセット',
+    finish_room: 'ビンゴを終了',
+    reopen_room: 'ビンゴを再開',
+  },
+};
+
+export function roomActionLabel(action: RoomAction, mode: RoomMode = 'quiz'): string {
+  return MODE_ACTION_LABELS[mode]?.[action] ?? ROOM_ACTION_LABELS[action];
+}

@@ -38,9 +38,17 @@ function parseApiError(body: unknown): ApiError['error'] | null {
 
 export type UploadedAsset = MediaUploadResponse['asset'];
 
-export async function uploadQuizImage(input: {
+/**
+ * 画像の紐づけ先。クイズか抽選リストのどちらか一方。
+ *
+ * サーバーはこの ID で所有者を確かめるため、どちらなのかを取り違えると
+ * 「クイズが見つかりません」で弾かれる。型で選ばせて取り違えを防ぐ。
+ */
+export type MediaScope = { kind: 'quiz'; quizId: string } | { kind: 'drawList'; listId: string };
+
+export async function uploadAdminImage(input: {
   file: File;
-  quizId: string;
+  scope: MediaScope;
   usage: MediaUsage;
   alt?: string;
 }): Promise<UploadedAsset> {
@@ -67,7 +75,11 @@ export async function uploadQuizImage(input: {
 
   const form = new FormData();
   form.append('file', input.file);
-  form.append('quizId', input.quizId);
+  if (input.scope.kind === 'quiz') {
+    form.append('quizId', input.scope.quizId);
+  } else {
+    form.append('drawListId', input.scope.listId);
+  }
   form.append('usage', input.usage);
   if (input.alt !== undefined && input.alt.trim().length > 0) {
     form.append('alt', input.alt);

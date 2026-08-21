@@ -36,6 +36,8 @@ import {
 } from '@/infrastructure/firebase/converters';
 import { logger } from '@/infrastructure/logging/logger';
 import type { QuizSnapshot } from '@/domain/quiz/quiz-snapshot';
+import type { DrawSnapshot } from '@/domain/draw/draw-list';
+import { roomModeOf, type RoomMode } from '@/domain/room/room-mode';
 import { AppError } from '@/lib/errors/app-error';
 import type { RoomListItem } from '@/types/api';
 import type {
@@ -49,10 +51,20 @@ import type {
 
 export type CreateRoomDbInput = {
   ownerId: string;
-  quizId: string;
+  /** 抽選会・ビンゴのルームでは null。 */
+  quizId: string | null;
+  mode: RoomMode;
   joinTokenHash: string;
+  /**
+   * 抽選会・ビンゴのルームでも必ず入れる（問題 0 問のクイズとして）。
+   * ここを null 許容にすると、あらゆる読み取り経路へ分岐が増えて壊しやすくなる。
+   */
   quizSnapshot: QuizSnapshot;
+  /** 抽選会・ビンゴのときだけ。クイズでは null。 */
+  drawSnapshot: DrawSnapshot | null;
   maxParticipants: number;
+  /** 参加受付を開けるか。抽選会・ビンゴでは開けない。 */
+  joinOpen: boolean;
 };
 
 export type CreatePresentationLinkInput = {
@@ -89,17 +101,20 @@ export async function createRoom(input: CreateRoomDbInput): Promise<RoomDoc> {
   const room: RoomDoc = {
     id: roomId,
     ownerId: input.ownerId,
+    mode: input.mode,
     quizId: input.quizId,
     joinTokenHash: input.joinTokenHash,
     joinTokenRotatedAt: now,
     phase: 'lobby',
     quizSnapshot: input.quizSnapshot,
+    drawSnapshot: input.drawSnapshot,
+    drawn: [],
     currentQuestionId: null,
     currentQuestionPosition: null,
     phaseStartedAt: null,
     answerDeadlineAt: null,
     stateVersion: 0,
-    joinOpen: true,
+    joinOpen: input.joinOpen,
     maxParticipants: input.maxParticipants,
     participantCount: 0,
     createdAt: now,
@@ -115,7 +130,7 @@ export async function createRoom(input: CreateRoomDbInput): Promise<RoomDoc> {
     currentQuestionPosition: null,
     totalQuestions: input.quizSnapshot.questions.length,
     answerDeadlineAt: null,
-    joinOpen: true,
+    joinOpen: input.joinOpen,
     participantCount: 0,
     answeredCount: 0,
     updatedAt: now,
@@ -213,6 +228,7 @@ export async function listRooms(ownerId: string): Promise<RoomListItem[]> {
     const room = doc.data();
     return {
       id: room.id,
+      mode: roomModeOf(room.mode),
       quizTitle: snapshotTitle(room.quizSnapshot),
       phase: room.phase,
       // participantCount は参加登録トランザクションで加算した確定値。

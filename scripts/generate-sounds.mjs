@@ -178,7 +178,7 @@ function createSamples(durationSec) {
 }
 
 // ---------------------------------------------------------------------------
-// 6 種類の効果音
+// 9 種類の効果音
 // ---------------------------------------------------------------------------
 
 const SOUNDS = {
@@ -381,6 +381,84 @@ const SOUNDS = {
       frequency: NOTES.C6,
       gain: 0.55,
       decay: 1.8,
+    });
+    return samples;
+  },
+
+  /**
+   * 抽選のルーレットを回している間: 回している間ずっと繰り返し鳴らす。
+   *
+   * **長さを 1 秒ちょうどにする。** tick と同じく投影画面が繰り返して鳴らすため、
+   * 長さがずれると継ぎ目で拍が崩れ、「回っている音が途切れた」ように聞こえる。
+   * 打点は 1/16 秒ごとの等間隔に置き、4 打ごとに強い打点を入れる
+   * （0.25 秒周期は 1 秒を割り切るので、何周しても拍が揃う）。
+   * 減衰を速くして次の打点までに鳴り止ませ、末尾へ音を残さない。
+   */
+  'draw-spin': () => {
+    const seconds = 1;
+    const samples = createSamples(seconds);
+    const beats = 16;
+    const interval = seconds / beats;
+
+    for (let beat = 0; beat < beats; beat += 1) {
+      // 拍の頭だけ高く強くする。速く回っている感じは打点の細かさで出す。
+      const accent = beat % 4 === 0;
+      addTone(samples, {
+        startSec: beat * interval,
+        durationSec: interval * 0.8,
+        frequency: accent ? NOTES.C6 : NOTES.G5,
+        gain: accent ? 0.8 : 0.45,
+        attackSec: 0.001,
+        decay: 30,
+        overtone: 0.55,
+      });
+    }
+    return samples;
+  },
+
+  /**
+   * 引いたものが確定した瞬間: 当たりが出た合図。
+   *
+   * draw-spin を止めた直後に鳴らすため、**駆け上がりを一息で終わらせて頭で決める**
+   * （fanfare のように順に駆け上がると、名前が出てから遅れて聞こえる）。
+   * 到達の和音は長めに残し、会場の拍手が入る余地を作る。
+   */
+  'draw-win': () => {
+    const samples = createSamples(1.8);
+    addTone(samples, {
+      startSec: 0,
+      durationSec: 0.18,
+      frequency: NOTES.G5,
+      endFrequency: NOTES.C6,
+      gain: 0.7,
+      attackSec: 0.004,
+      decay: 5,
+    });
+    // 到達の和音。ここが「当たった瞬間」。
+    for (const [frequency, gain] of [
+      [NOTES.C5, 0.75],
+      [NOTES.E5, 0.7],
+      [NOTES.G5, 0.7],
+      [NOTES.C6, 0.6],
+    ]) {
+      addTone(samples, { startSec: 0.16, durationSec: 1.6, frequency, gain, decay: 1.9 });
+    }
+    // 上へ重ねる「キラッ」。和音より遅らせて、当たりの華やかさだけを足す。
+    addTone(samples, {
+      startSec: 0.3,
+      durationSec: 0.9,
+      frequency: NOTES.E6,
+      gain: 0.35,
+      decay: 3.4,
+      overtone: 0.3,
+    });
+    addTone(samples, {
+      startSec: 0.42,
+      durationSec: 0.8,
+      frequency: NOTES.G6,
+      gain: 0.3,
+      decay: 3.8,
+      overtone: 0.3,
     });
     return samples;
   },

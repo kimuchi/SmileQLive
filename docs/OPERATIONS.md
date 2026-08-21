@@ -37,17 +37,25 @@ gcloud run services update smileq-live \
 
 ### 1.3 効果音
 
-- [ ] `public/sounds/` に 6 種類の効果音が配置されている
-- [ ] `public/sounds/LICENSE.md` に出典を記録した
+- [ ] `npm run sounds:check` が 9 件すべて通る
+- [ ] `public/sounds/LICENSE.md` に出典を記録した（同梱音のまま使う場合は不要）
 
 | タイミング | ファイル |
 |---|---|
 | 回答受付開始 | `question-start` |
-| 残り 5〜1 秒 | `tick` |
+| 回答受付の間ずっと | `tick` |
 | 回答締切 | `answer-lock` |
 | 正解発表 | `answer-reveal` |
 | ランキング | `ranking` |
+| ランキングが出た瞬間 | `fanfare` |
 | クイズ終了 | `finish` |
+| 抽選のルーレット中 | `draw-spin` |
+| 当選が確定した瞬間 | `draw-win` |
+
+`tick` と `draw-spin` は**繰り返し**鳴らします。差し替えるときは
+**1 秒ちょうどで、頭と末尾が無音の素材**を選んでください（継ぎ目で拍が崩れます）。
+
+抽選会・ビンゴの進め方は [docs/DRAW_MODES.md](./DRAW_MODES.md) にまとめています。
 
 ---
 

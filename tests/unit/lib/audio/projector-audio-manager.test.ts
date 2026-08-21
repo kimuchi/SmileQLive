@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createProjectorAudioManager,
@@ -34,6 +36,8 @@ const MANIFEST = {
   ranking: 'ranking.wav',
   fanfare: 'fanfare.wav',
   finish: 'finish.wav',
+  'draw-spin': 'draw-spin.wav',
+  'draw-win': 'draw-win.wav',
 };
 
 /** 鳴った回数を数えるための最小限の AudioContext。 */
@@ -121,6 +125,15 @@ function audioResponse(): Response {
     ok: true,
     status: 200,
     arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)),
+  } as unknown as Response;
+}
+
+/** 長さを決めた音源を返す。上の偽の復号器は 44,100 バイトを 1 秒として扱う。 */
+function audioResponseOfSeconds(seconds: number): Response {
+  return {
+    ok: true,
+    status: 200,
+    arrayBuffer: () => Promise.resolve(new ArrayBuffer(Math.round(seconds * 44_100))),
   } as unknown as Response;
 }
 
@@ -474,5 +487,124 @@ describe('鳴らし方', () => {
 
     expect(manager.durationOf('ranking')).toBeGreaterThan(0);
     manager.dispose();
+  });
+});
+
+/**
+ * 抽選会・ビンゴで鳴らす 2 音。
+ *
+ * draw-spin はルーレットを回している間ずっと繰り返し鳴らす。
+ * そのため**素材の長さがそのまま継ぎ目の間隔になる**ので、1 秒ちょうどに固定する
+ * （ずれると会場で「回っている音が途切れた」ように聞こえる）。
+ */
+describe('抽選・ビンゴの効果音', () => {
+  let audio: ReturnType<typeof installFakeAudioContext>;
+  let consoleWarn: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    audio = installFakeAudioContext();
+    consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    // 警告は onWarning へ渡っているはず。console へ漏らさない。
+    expect(consoleWarn).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+    window.sessionStorage.clear();
+  });
+
+  it('ルーレット音と当選音を読み込める', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) =>
+      Promise.resolve(String(input).endsWith('manifest.json') ? manifestResponse() : audioResponse()),
+    );
+
+    const warnings = collectWarnings();
+    const manager = createProjectorAudioManager({
+      dedupeNamespace: 'draw-preload',
+      onWarning: warnings.onWarning,
+    });
+    await manager.unlock();
+    const readiness = await manager.preload();
+
+    expect(readiness.ready).toContain('draw-spin');
+    expect(readiness.ready).toContain('draw-win');
+    expect(readiness.failed).toHaveLength(0);
+    expect(warnings.messages).toEqual([]);
+    manager.dispose();
+  });
+
+  it('ルーレット音は繰り返し再生で鳴らす（回している間ずっと）', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) =>
+      Promise.resolve(String(input).endsWith('manifest.json') ? manifestResponse() : audioResponse()),
+    );
+
+    const warnings = collectWarnings();
+    const manager = createProjectorAudioManager({
+      dedupeNamespace: 'draw-spin',
+      onWarning: warnings.onWarning,
+    });
+    await manager.unlock();
+    await manager.preload();
+
+    manager.startLoop('draw-spin');
+    expect(audio.loopingSources()).toHaveLength(1);
+
+    // 引いたものが決まったら止めて、当選音へ渡す。
+    manager.stopLoop('draw-spin');
+    expect(audio.loopingSources()[0]?.stopped).toBe(true);
+
+    const before = audio.started();
+    manager.play('draw-win');
+    expect(audio.started()).toBe(before + 1);
+    manager.dispose();
+  });
+
+  it('ルーレット音の長さをそのまま返す（繰り返しの間隔になる）', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith('manifest.json')) return Promise.resolve(manifestResponse());
+      if (url.endsWith('draw-spin.wav')) return Promise.resolve(audioResponseOfSeconds(1));
+      return Promise.resolve(audioResponse());
+    });
+
+    const warnings = collectWarnings();
+    const manager = createProjectorAudioManager({
+      dedupeNamespace: 'draw-duration',
+      onWarning: warnings.onWarning,
+    });
+    await manager.unlock();
+    await manager.preload();
+
+    expect(manager.durationOf('draw-spin')).toBe(1);
+    manager.dispose();
+  });
+});
+
+/**
+ * 同梱音（public/sounds/default/）そのものの長さ。
+ *
+ * 上の durationOf は「素材の長さをそのまま返す」ことしか確かめられない。
+ * 実際に繰り返して不自然にならないかは**生成物の長さ**で決まるため、
+ * npm run sounds:generate の出力をここで固定する。
+ */
+describe('同梱音の長さ', () => {
+  /** WAV の見出しから長さ（秒）を読む。generate-sounds.mjs が書く 44 バイトの標準形が前提。 */
+  function bundledDurationSeconds(fileName: string): number {
+    // jsdom 環境では import.meta.url が http: になるためファイルとして辿れない。
+    // vitest はリポジトリ直下で動くので、そこからの相対で開く。
+    const buffer = readFileSync(join(process.cwd(), 'public', 'sounds', 'default', fileName));
+    const bytesPerSecond = buffer.readUInt32LE(28);
+    const dataSize = buffer.readUInt32LE(40);
+    return dataSize / bytesPerSecond;
+  }
+
+  it('draw-spin はちょうど 1 秒（繰り返しの継ぎ目で拍が崩れない）', () => {
+    expect(bundledDurationSeconds('draw-spin.wav')).toBe(1);
+  });
+
+  it('draw-win は当選の余韻が残る長さ', () => {
+    const seconds = bundledDurationSeconds('draw-win.wav');
+    expect(seconds).toBeGreaterThanOrEqual(1.5);
+    expect(seconds).toBeLessThanOrEqual(2);
   });
 });

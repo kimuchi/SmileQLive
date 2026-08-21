@@ -343,7 +343,9 @@ test.describe('§37.3 会場進行の通しテスト', () => {
           await hostApi.post('/api/rooms', { data: { quizId } }),
         );
         roomId = room.roomId;
-        joinUrl = room.joinUrl;
+        // クイズのルームなので参加 URL は必ず返る。
+        expect(room.joinUrl).not.toBeNull();
+        joinUrl = room.joinUrl ?? '';
         expect(room.quizTitle).toBe(QUIZ_TITLE);
         // 参加URLはトークンをパスに持つ（クエリ文字列へ載せない）。
         expect(joinUrl).toContain('/j/');

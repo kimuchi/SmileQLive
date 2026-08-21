@@ -40,6 +40,14 @@ import {
   type RoomPhase,
 } from '@/domain/room/state-machine';
 import { buildSnapshotForQuiz } from '@/application/services/quiz-service';
+import { buildDrawSnapshot } from '@/application/services/draw-list-service';
+import type { StageDraw } from '@/domain/draw/draw-stage';
+import {
+  resolveDrawEntryMedia,
+  resolveStageBackground,
+} from '@/application/services/media-service';
+import type { CreateRoomInput } from '@/lib/validation/schemas';
+import { roomModeOf, type RoomMode } from '@/domain/room/room-mode';
 import { toMyAnswerDto } from '@/application/services/answer-mapper';
 import { parseQuizSnapshot } from '@/application/services/quiz-snapshot-codec';
 import { resolveQuestionMedia } from '@/application/services/media-service';
@@ -196,38 +204,107 @@ function collectImageUrls(question: Question, includeReveal: boolean): string[] 
 // ルーム作成
 // ---------------------------------------------------------------------------
 
-export async function createRoom(input: {
-  quizId: string;
-  maxParticipants?: number;
-}): Promise<CreateRoomResponse> {
+export async function createRoom(input: CreateRoomInput): Promise<CreateRoomResponse> {
+  const mode: RoomMode = input.mode ?? 'quiz';
+  return mode === 'quiz' ? createQuizRoom(input) : createDrawRoom(input, mode);
+}
+
+async function createQuizRoom(input: CreateRoomInput): Promise<CreateRoomResponse> {
+  if (input.mode !== undefined && input.mode !== 'quiz') {
+    throw new AppError('ROOM_MODE_MISMATCH');
+  }
+  const quizId = input.quizId;
+  if (!quizId) {
+    throw new AppError('VALIDATION_FAILED', { details: { reason: 'quiz_id_required' } });
+  }
+
   // 共有されたクイズでもルームを作れる。ルームの所有者は作成した本人になる。
-  const { user, quiz } = await requireQuizAccess(input.quizId);
+  const { user, quiz } = await requireQuizAccess(quizId);
 
   if (quiz.status !== 'published') {
     throw new AppError('QUIZ_NOT_PUBLISHED');
   }
 
-  const snapshot = await buildSnapshotForQuiz(input.quizId);
+  const snapshot = await buildSnapshotForQuiz(quizId);
   const { token, tokenHash } = createJoinToken();
 
   const room = await createRoomDoc({
     ownerId: user.uid,
-    quizId: input.quizId,
+    mode: 'quiz',
+    quizId,
     joinTokenHash: tokenHash,
     quizSnapshot: snapshot,
+    drawSnapshot: null,
     maxParticipants: input.maxParticipants ?? DEFAULT_MAX_PARTICIPANTS,
+    joinOpen: true,
   });
 
   const baseUrl = await currentBaseUrl();
 
   // 平文の参加トークンはレスポンスでしか返らない。ログへは出さない。
-  logger.info('room.created', { roomId: room.id, quizId: input.quizId, userId: user.uid });
+  logger.info('room.created', { roomId: room.id, mode: 'quiz', quizId, userId: user.uid });
 
   return {
     roomId: room.id,
+    mode: 'quiz',
     joinUrl: buildJoinUrl(baseUrl, token),
     joinToken: token,
     quizTitle: snapshot.title,
+  };
+}
+
+/**
+ * 抽選会・ビンゴのルームを作る。
+ *
+ * 参加者は来ないので**参加受付を開かず、参加 URL も返さない**。
+ * `quizSnapshot` には「問題 0 問のクイズ」を入れる。
+ * ここを null にすると、ルームを読むあらゆる経路へ分岐が増えて壊しやすくなる。
+ */
+async function createDrawRoom(
+  input: CreateRoomInput,
+  mode: Exclude<RoomMode, 'quiz'>,
+): Promise<CreateRoomResponse> {
+  const drawListId = input.drawListId;
+  if (!drawListId) {
+    throw new AppError('VALIDATION_FAILED', { details: { reason: 'draw_list_id_required' } });
+  }
+
+  const { user } = await requireHostUser();
+  const drawSnapshot = await buildDrawSnapshot(drawListId, mode);
+
+  // 参加 URL は使わないが、トークンの列は空にしない（他の経路が前提にしている）。
+  const { tokenHash } = createJoinToken();
+
+  const room = await createRoomDoc({
+    ownerId: user.uid,
+    mode,
+    quizId: null,
+    joinTokenHash: tokenHash,
+    quizSnapshot: {
+      quizId: '',
+      title: drawSnapshot.title,
+      settings: {
+        showLeaderboard: false,
+        showTotalQuestions: false,
+        showQuestionBeforeOpen: false,
+        soundTheme: 'default',
+        leaderboardSize: 0,
+      },
+      questions: [],
+    },
+    drawSnapshot,
+    maxParticipants: 0,
+    joinOpen: false,
+  });
+
+  logger.info('room.created', { roomId: room.id, mode, listId: drawListId, userId: user.uid });
+
+  return {
+    roomId: room.id,
+    mode,
+    joinUrl: null,
+    joinToken: null,
+    quizTitle: drawSnapshot.title,
   };
 }
 
@@ -352,8 +429,12 @@ export async function getStaffSnapshot(
       ? publicQuestion
       : null;
 
+  // 抽選会・ビンゴの状態。クイズのルームでは作らない。
+  const draw = await buildStageDraw(room);
+
   const base: StaffSnapshot = {
     roomId,
+    mode: roomModeOf(room.mode),
     quizTitle: snapshot.title,
     phase,
     stateVersion: room.stateVersion,
@@ -372,7 +453,8 @@ export async function getStaffSnapshot(
     breakdown,
     reveal,
     leaderboard,
-    availableActions: availableActions(phase),
+    draw,
+    availableActions: availableActions(phase, roomModeOf(room.mode)),
     preloadImageUrls: buildPreloadUrls(parts),
   };
 
@@ -394,6 +476,47 @@ export async function getStaffSnapshot(
       isActive: entry.isActive,
       joinedAt: toIsoOr(entry.joinedAt),
     })),
+  };
+}
+
+
+/**
+ * 抽選会・ビンゴの状態を、投影・司会画面が使える形へ作る。
+ *
+ * 画像は**ここで初めて署名 URL へ解決する**。
+ * ルームへ固めた drawSnapshot には保存参照しか入っていない
+ * （期限付き URL を固めると当日には切れているため）。
+ */
+async function buildStageDraw(room: RoomDoc): Promise<StageDraw | null> {
+  const pool = room.drawSnapshot;
+  if (!pool) {
+    return null;
+  }
+
+  const drawn = room.drawn ?? [];
+  const [entries, background] = await Promise.all([
+    resolveDrawEntryMedia(pool.entries),
+    resolveStageBackground(pool.settings.backgroundAssetId),
+  ]);
+  const last = drawn.length > 0 ? drawn[drawn.length - 1] : null;
+
+  const numbers =
+    pool.kind === 'number'
+      ? pool.entries.map((entry) => Number(entry.label)).filter((value) => Number.isFinite(value))
+      : [];
+
+  return {
+    title: pool.title,
+    kind: pool.kind,
+    settings: pool.settings,
+    entries,
+    drawn,
+    latestEntryId: last?.entryId ?? null,
+    latestOrder: last?.order ?? null,
+    remainingCount: Math.max(0, pool.entries.length - drawn.length),
+    numberRange:
+      numbers.length > 0 ? { min: Math.min(...numbers), max: Math.max(...numbers) } : null,
+    background,
   };
 }
 
@@ -456,6 +579,7 @@ export async function getParticipantSnapshot(roomId: string): Promise<Participan
 
   return {
     roomId,
+    mode: roomModeOf(room.mode),
     quizTitle: snapshot.title,
     phase,
     stateVersion: room.stateVersion,

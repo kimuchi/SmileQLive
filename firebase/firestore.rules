@@ -98,6 +98,24 @@ service cloud.firestore {
     }
 
     // -------------------------------------------------------------------------
+    // drawLists — 抽選会の名簿・ビンゴの球。作った本人だけ
+    //
+    // 名簿は参加者の氏名がそのまま並ぶ。個人情報の塊なので、
+    // 参加者にも投影担当にも読ませない（投影に必要な内容は
+    // rooms/{roomId} 側の drawSnapshot を Cloud Run 経由で配る）。
+    // -------------------------------------------------------------------------
+    match /drawLists/{listId} {
+      allow read: if isStaffUser() && resource.data.ownerId == uid();
+      allow write: if false;
+
+      match /entries/{entryId} {
+        allow read: if isStaffUser()
+          && get(/databases/$(database)/documents/drawLists/$(listId)).data.ownerId == uid();
+        allow write: if false;
+      }
+    }
+
+    // -------------------------------------------------------------------------
     // rooms — quizSnapshot（正解を含む）があるため所有者のみ
     // -------------------------------------------------------------------------
     match /rooms/{roomId} {

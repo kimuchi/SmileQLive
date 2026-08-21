@@ -282,6 +282,11 @@ const PHASE_SOUND: Partial<Record<RoomPhase, SoundName>> = {
   finished: 'finish',
 };
 
+// 抽選会・ビンゴの音はフェーズでは鳴らさない。
+// draw_revealed へ入った瞬間はまだルーレットを回している最中で、
+// そこで当選音を鳴らすと結果より先に音が出てしまう。
+// 回し終わったところで useDrawSoundCues が鳴らす。
+
 /**
  * ルームの状態変化から効果音を鳴らす。
  *
@@ -356,4 +361,66 @@ export function useStageSoundCues({
       stopLoop('tick');
     };
   }, [isUnlocked, phase, startLoop, stopLoop]);
+}
+
+/**
+ * 抽選会・ビンゴの効果音。
+ *
+ * - 回している間はずっと `draw-spin`（繰り返し再生）
+ * - 回し終わって当たりが見えた瞬間に `draw-win`
+ *
+ * **フェーズでは鳴らさない。** 引いた直後はまだ回している最中で、
+ * そこで当選音を鳴らすと結果より先に音が出てしまう。
+ * 「回し終わった」を合図にするのが、会場での見え方と合う。
+ */
+export function useDrawSoundCues({
+  play,
+  startLoop,
+  stopLoop,
+  isUnlocked,
+  spinning,
+  latestOrder,
+}: {
+  play: (name: SoundName, dedupeKey?: string) => void;
+  startLoop: (name: SoundName) => void;
+  stopLoop: (name: SoundName) => void;
+  isUnlocked: boolean;
+  /** ルーレットを回している最中か。 */
+  spinning: boolean;
+  /** 直近に引いたものの通し番号。同じ番号で二度鳴らさないための鍵。 */
+  latestOrder: number | null;
+}): void {
+  useEffect(() => {
+    if (!isUnlocked || !spinning) {
+      stopLoop('draw-spin');
+      return;
+    }
+    startLoop('draw-spin');
+    return () => {
+      stopLoop('draw-spin');
+    };
+  }, [isUnlocked, spinning, startLoop, stopLoop]);
+
+  /** 当選音を鳴らし終えた通し番号。取り直しで鳴り直さないようにする。 */
+  const soundedOrderRef = useRef<number | null>(null);
+  /** 直前に回していたか。回し終わった瞬間だけを拾う。 */
+  const wasSpinningRef = useRef(false);
+
+  useEffect(() => {
+    const wasSpinning = wasSpinningRef.current;
+    wasSpinningRef.current = spinning;
+
+    if (!isUnlocked || latestOrder === null) {
+      return;
+    }
+    // 回し終わった瞬間だけ鳴らす。
+    if (!wasSpinning || spinning) {
+      return;
+    }
+    if (soundedOrderRef.current === latestOrder) {
+      return;
+    }
+    soundedOrderRef.current = latestOrder;
+    play('draw-win', `draw:${latestOrder}`);
+  }, [isUnlocked, latestOrder, play, spinning]);
 }

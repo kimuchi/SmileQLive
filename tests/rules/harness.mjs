@@ -210,6 +210,8 @@ export const IDS = {
   choiceWrong: 'choice-wrong',
   asset: 'asset-rules-1',
   presentationLink: 'link-rules-1',
+  drawList: 'draw-list-rules-1',
+  drawEntry: 'draw-entry-rules-1',
 };
 
 /** `${questionId}__${participantId}`（src/types/firestore.ts の answerDocId と同じ規則）。 */
@@ -344,6 +346,44 @@ async function seed(adminDb, roles) {
     height: 100,
     createdAt: now,
   });
+
+  // 抽選リスト（名簿。氏名がそのまま並ぶので、所有者以外は読めてはいけない）。
+  await adminDb.collection('drawLists').doc(IDS.drawList).set({
+    id: IDS.drawList,
+    ownerId: roles.host.uid,
+    title: '社員名簿',
+    kind: 'name',
+    numberMin: null,
+    numberMax: null,
+    settings: {
+      spinIntervalMs: 50,
+      spinDurationMs: 2500,
+      resultFontSize: 240,
+      historyFontSize: 96,
+      showBoard: true,
+      backgroundAssetId: null,
+      openingVideoUrl: null,
+    },
+    entryCount: 1,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await adminDb
+    .collection('drawLists')
+    .doc(IDS.drawList)
+    .collection('entries')
+    .doc(IDS.drawEntry)
+    .set({
+      id: IDS.drawEntry,
+      listId: IDS.drawList,
+      position: 1,
+      label: '山田太郎',
+      imageAssetId: null,
+      imageAlt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
 
   // ルーム本体（quizSnapshot に正解が入る）。
   const roomRef = adminDb.collection('rooms').doc(IDS.room);

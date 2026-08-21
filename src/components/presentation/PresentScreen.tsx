@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { AudioControls } from '@/components/presentation/AudioControls';
+import { BingoStage } from '@/components/presentation/BingoStage';
+import { DrawHistoryOverlay } from '@/components/presentation/DrawHistoryOverlay';
+import { DrawWaitingStage } from '@/components/presentation/DrawWaitingStage';
+import { LotteryStage } from '@/components/presentation/LotteryStage';
 import { PresentSetupOverlay } from '@/components/presentation/PresentSetupOverlay';
 import { QuestionStage } from '@/components/presentation/QuestionStage';
 import { RankingStage } from '@/components/presentation/RankingStage';
@@ -14,6 +18,7 @@ import { WaitingStage } from '@/components/presentation/WaitingStage';
 import { useFullscreen } from '@/components/presentation/use-fullscreen';
 import { useJoinUrl } from '@/components/presentation/use-join-url';
 import {
+  useDrawSoundCues,
   useProjectorAudio,
   useStageSoundCues,
 } from '@/components/presentation/use-projector-audio';
@@ -24,7 +29,10 @@ import type { StaffSnapshot } from '@/domain/room/snapshot';
 import { useAnonymousSessionReady } from '@/hooks/use-anonymous-session';
 import { useCountdown } from '@/hooks/use-countdown';
 import { useExpiryLock } from '@/hooks/use-expiry-lock';
+import { useDrawRoulette } from '@/hooks/use-draw-roulette';
 import { useRoomSnapshot } from '@/hooks/use-room-snapshot';
+import { latestStageEntry, remainingStageEntries } from '@/domain/draw/draw-stage';
+import { isDrawMode } from '@/domain/room/room-mode';
 
 /**
  * 会場投影画面。
@@ -42,6 +50,9 @@ import { useRoomSnapshot } from '@/hooks/use-room-snapshot';
 /** ランキング発表をためる時間の下限・上限（素材の長さがこの範囲に丸められる）。 */
 const RANKING_BUILD_UP_MIN_MS = 1_500;
 const RANKING_BUILD_UP_MAX_MS = 6_000;
+
+/** 抽選が無いときに渡す空の候補。毎回 [] を作ると演出が回り直す。 */
+const EMPTY_CANDIDATES: never[] = [];
 
 export function PresentScreen({ roomId }: { roomId: string }) {
   // 再読込でセッションクッキーが切れていても、同じ匿名ユーザーで張り直せるようにする。
@@ -77,6 +88,37 @@ export function PresentScreen({ roomId }: { roomId: string }) {
     phase: snapshot?.phase ?? null,
     stateVersion: snapshot?.stateVersion ?? null,
   });
+
+  /**
+   * 抽選会・ビンゴの演出。
+   *
+   * 引いた結果はサーバーが決めて記録済み。ここは**見せるだけ**。
+   * 投影開始の操作が済むまでは回さない（音が出せないので回しても間が抜ける）。
+   */
+  const draw = snapshot?.draw ?? null;
+  const roulette = useDrawRoulette({
+    latestOrder: draw?.latestOrder ?? null,
+    winner: draw ? latestStageEntry(draw) : null,
+    candidates: draw ? remainingStageEntries(draw) : EMPTY_CANDIDATES,
+    intervalMs: draw?.settings.spinIntervalMs ?? 50,
+    durationMs: draw?.settings.spinDurationMs ?? 2500,
+    enabled: started && audio.isUnlocked,
+  });
+
+  useDrawSoundCues({
+    play,
+    startLoop,
+    stopLoop,
+    isUnlocked: audio.isUnlocked,
+    spinning: roulette.spinning,
+    latestOrder: draw?.latestOrder ?? null,
+  });
+
+  /** 引いたものの一覧を出しているか。 */
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const toggleHistory = useCallback(() => {
+    setHistoryOpen((open) => !open);
+  }, []);
 
   const handleLocked = useCallback(() => {
     void refresh();
@@ -208,10 +250,34 @@ export function PresentScreen({ roomId }: { roomId: string }) {
 
   const phase = snapshot.phase;
   const question = snapshot.currentQuestion;
+  const drawMode = isDrawMode(snapshot.mode);
 
   let body: ReactNode;
 
-  if (phase === 'lobby') {
+  if (drawMode && draw) {
+    // 抽選会・ビンゴ。参加者は来ないので、待機画面も参加 URL を出さない。
+    if (phase === 'lobby') {
+      body = <DrawWaitingStage draw={draw} />;
+    } else if (snapshot.mode === 'bingo') {
+      body = (
+        <BingoStage
+          draw={draw}
+          display={roulette.display}
+          spinning={roulette.spinning}
+          revealed={phase === 'draw_revealed' || phase === 'finished'}
+        />
+      );
+    } else {
+      body = (
+        <LotteryStage
+          draw={draw}
+          display={roulette.display}
+          spinning={roulette.spinning}
+          revealed={phase === 'draw_revealed' || phase === 'finished'}
+        />
+      );
+    }
+  } else if (phase === 'lobby') {
     body = (
       <WaitingStage
         quizTitle={snapshot.quizTitle}
@@ -275,6 +341,8 @@ export function PresentScreen({ roomId }: { roomId: string }) {
   return (
     <>
       <StageFrame
+        // 抽選リストに背景画像があれば敷く（GAS 版の背景画像に相当）。
+        backgroundUrl={draw?.background?.url ?? null}
         header={
           <StageHeader
             quizTitle={snapshot.quizTitle}
@@ -299,8 +367,25 @@ export function PresentScreen({ roomId }: { roomId: string }) {
         >
           {body}
         </div>
+
+        {drawMode && draw && historyOpen ? (
+          <DrawHistoryOverlay
+            draw={draw}
+            ordered={snapshot.mode === 'lottery'}
+            onClose={toggleHistory}
+          />
+        ) : null}
       </StageFrame>
       {controls}
+      {drawMode && draw && started ? (
+        <button
+          type="button"
+          onClick={toggleHistory}
+          className="fixed top-4 right-4 z-40 rounded-lg border border-cyan-300/60 bg-black/60 px-3 py-2 text-sm font-bold text-cyan-200"
+        >
+          {historyOpen ? '閉じる' : snapshot.mode === 'lottery' ? '当選者一覧' : '出た球'}
+        </button>
+      ) : null}
       {overlay}
     </>
   );

@@ -11,7 +11,8 @@
 
 export type UploadProcessedImageInput = {
   ownerId: string;
-  quizId: string;
+  /** 紐づけ先の ID。クイズか抽選リスト。保存パスの中段に使う。 */
+  scopeId: string;
   assetId: string;
   buffer: Uint8Array;
   contentType: string;
