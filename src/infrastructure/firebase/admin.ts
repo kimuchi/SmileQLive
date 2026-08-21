@@ -3,6 +3,7 @@ import { cert, getApps, initializeApp, type App } from 'firebase-admin/app';
 import { getAuth, type Auth } from 'firebase-admin/auth';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 import { getStorage, type Storage } from 'firebase-admin/storage';
+import { mediaBucket } from '@/lib/env/server-env';
 
 /**
  * Firebase Admin SDK。
@@ -60,13 +61,18 @@ function firebaseProjectId(): string {
   return value;
 }
 
+/**
+ * 画像を置くバケット名。
+ *
+ * **決め方は `mediaBucket()` の 1 か所だけ**にする。
+ * 以前はここが `FIREBASE_STORAGE_BUCKET` だけを見ていたため、
+ * デプロイ設定の `mediaBucket`（= 環境変数 MEDIA_BUCKET）を入れても
+ * アプリはそれを無視し、`<プロジェクトID>.firebasestorage.app` へ書きに行っていた。
+ * 設定・手順書・診断はすべて MEDIA_BUCKET を指していたので、
+ * 「設定は合っているのに画像だけ保存できない」が起き続けた。
+ */
 function storageBucketName(): string {
-  const value = process.env.FIREBASE_STORAGE_BUCKET;
-  if (value && value.trim().length > 0) {
-    return value;
-  }
-  // Firebase の既定バケット名
-  return `${firebaseProjectId()}.firebasestorage.app`;
+  return mediaBucket();
 }
 
 export function getFirebaseAdminApp(): App {
