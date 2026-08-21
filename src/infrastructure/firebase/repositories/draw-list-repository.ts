@@ -53,6 +53,8 @@ export type AdminDrawEntry = {
   position: number;
   label: string;
   image: MediaRef | null;
+  /** ルーレットの扇の広さ。重み付きのリストだけが持つ。 */
+  weight?: number;
 };
 
 export type AdminDrawList = {
@@ -200,7 +202,12 @@ export async function getEntries(listId: string): Promise<DrawListEntryDoc[]> {
  */
 export async function replaceEntries(
   listId: string,
-  entries: ReadonlyArray<{ label: string; imageAssetId: string | null; imageAlt: string | null }>,
+  entries: ReadonlyArray<{
+    label: string;
+    imageAssetId: string | null;
+    imageAlt: string | null;
+    weight?: number;
+  }>,
 ): Promise<DrawListEntryDoc[]> {
   if (entries.length > DRAW_ENTRY_MAX_COUNT) {
     throw new AppError('DRAW_LIST_TOO_LARGE', {
@@ -228,6 +235,8 @@ export async function replaceEntries(
     label: entry.label,
     imageAssetId: entry.imageAssetId,
     imageAlt: entry.imageAlt,
+    // 重みを持たないリストでは項目に付けない（Firestore へ undefined は書けない）。
+    ...(typeof entry.weight === 'number' ? { weight: entry.weight } : {}),
     createdAt: now,
     updatedAt: now,
   }));
@@ -279,6 +288,7 @@ export async function loadDrawEntries(
       id: doc.id,
       position: doc.position,
       label: doc.label,
+      ...(typeof doc.weight === 'number' ? { weight: doc.weight } : {}),
       image:
         doc.imageAssetId && asset
           ? {
@@ -336,6 +346,7 @@ export async function getDrawListDetail(list: DrawListDoc): Promise<AdminDrawLis
       position: entry.position,
       label: entry.label,
       image: entry.image,
+      ...(typeof entry.weight === 'number' ? { weight: entry.weight } : {}),
     })),
     createdAt: toIsoOr(list.createdAt),
     updatedAt: toIsoOr(list.updatedAt),

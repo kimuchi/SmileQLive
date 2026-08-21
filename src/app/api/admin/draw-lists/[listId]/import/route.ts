@@ -31,6 +31,8 @@ export const POST = withParams<Params>('admin.draw_lists.import', async (request
       count: imported.rows.length,
       headers: imported.headers,
       labelColumnIndex: imported.labelColumnIndex,
+      weightColumnIndex: imported.weightColumnIndex,
+      weightFallbacks: imported.weightFallbacks,
       skippedEmpty: imported.skippedEmpty,
       truncated: imported.truncated,
       shortened: imported.shortened,

@@ -39,8 +39,8 @@ import {
 } from '@/infrastructure/firebase/converters';
 import { randomInt } from 'node:crypto';
 import { countAnswers } from '@/infrastructure/firebase/repositories/room-repository';
-import { remainingEntries, type DrawRecord } from '@/domain/draw/draw-list';
-import { acceptsParticipants, roomModeOf } from '@/domain/room/room-mode';
+import { pickWeighted, remainingEntries, type DrawRecord } from '@/domain/draw/draw-list';
+import { acceptsParticipants, removesDrawnEntries, roomModeOf } from '@/domain/room/room-mode';
 import { judgeNumberAnswer, toDecimalRule } from '@/domain/answer/number-judgement';
 import { findSnapshotQuestion, type QuizSnapshot } from '@/domain/quiz/quiz-snapshot';
 import type { Question } from '@/domain/quiz/question';
@@ -233,7 +233,11 @@ async function applyTransition(
     }
     case 'extend_deadline': {
       const seconds = options.extendSeconds ?? 0;
-      if (!Number.isInteger(seconds) || seconds < EXTEND_SECONDS_MIN || seconds > EXTEND_SECONDS_MAX) {
+      if (
+        !Number.isInteger(seconds) ||
+        seconds < EXTEND_SECONDS_MIN ||
+        seconds > EXTEND_SECONDS_MAX
+      ) {
         throw new AppError('VALIDATION_FAILED', {
           details: { reason: 'extend_seconds_out_of_range' },
         });
@@ -253,7 +257,11 @@ async function applyTransition(
         throw new AppError('QUESTION_NOT_FOUND');
       }
       const seconds = options.extendSeconds ?? question.timeLimitSeconds;
-      if (!Number.isInteger(seconds) || seconds < EXTEND_SECONDS_MIN || seconds > EXTEND_SECONDS_MAX) {
+      if (
+        !Number.isInteger(seconds) ||
+        seconds < EXTEND_SECONDS_MIN ||
+        seconds > EXTEND_SECONDS_MAX
+      ) {
         throw new AppError('VALIDATION_FAILED', {
           details: { reason: 'extend_seconds_out_of_range' },
         });
@@ -274,10 +282,12 @@ async function applyTransition(
       break;
     }
 
-    // --- 抽選会・ビンゴ ---
+    // --- 抽選会・ビンゴ・ルーレット ---
     case 'open_draw':
-    case 'continue_draw': {
+    case 'continue_draw':
+    case 'start_spin': {
       // 表示を切り替えるだけ。引いた記録は動かさない。
+      // start_spin は「回し始めた」ことを伝えるだけで、**当たりはまだ決めない**。
       answerDeadlineAt = null;
       break;
     }
@@ -286,13 +296,25 @@ async function applyTransition(
       if (!pool) {
         throw new AppError('ROOM_MODE_MISMATCH');
       }
-      const remaining = remainingEntries(pool.entries, drawn);
-      if (remaining.length === 0) {
+
+      /*
+        母集団の決め方はモードで違う。
+
+        抽選会・ビンゴ … 引いたものを外す（同じ人が二度当たらない）。
+        ルーレット     … 外さない。円盤の扇は回すたびに減らないし、
+                         減らすと重みの意味が無くなる。
+      */
+      const candidates = removesDrawnEntries(mode)
+        ? remainingEntries(pool.entries, drawn)
+        : pool.entries;
+      if (candidates.length === 0) {
         throw new AppError('DRAW_POOL_EMPTY');
       }
+
       // **ここで初めて当たりが決まる。** 事前に決めてクライアントへ渡さない。
       // 偏りの無い乱数を使う（Math.random() は剰余で偏りが出る取り方をされがち）。
-      const picked = remaining[randomInt(remaining.length)];
+      // 重みを持つリストでは、重みの合計を上限にしたくじ番号を引く。
+      const picked = pickWeighted(candidates, (exclusiveMax) => randomInt(exclusiveMax));
       if (!picked) {
         throw new AppError('DRAW_POOL_EMPTY');
       }

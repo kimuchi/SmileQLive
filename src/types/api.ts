@@ -1,8 +1,4 @@
-import type {
-  AnswerBreakdown,
-  MyAnswer,
-  SubmitAnswerResult,
-} from '@/domain/answer/answer-dto';
+import type { AnswerBreakdown, MyAnswer, SubmitAnswerResult } from '@/domain/answer/answer-dto';
 import type { PublishIssue } from '@/domain/quiz/publish-validation';
 import type { ParticipantSnapshot, StaffSnapshot } from '@/domain/room/snapshot';
 import type { RankedParticipant } from '@/domain/room/scoring';
@@ -228,6 +224,10 @@ export type DrawImportSummary = {
   count: number;
   headers: string[] | null;
   labelColumnIndex: number;
+  /** 何列目を重みとして読んだか。読まなかったときは null。 */
+  weightColumnIndex: number | null;
+  /** 重みとして読めず 1 にした件数。 */
+  weightFallbacks: number;
   skippedEmpty: number;
   truncated: number;
   shortened: number;

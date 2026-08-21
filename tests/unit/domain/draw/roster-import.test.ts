@@ -173,3 +173,77 @@ describe('取り込み結果の説明', () => {
     expect(message).toContain('同じ名前');
   });
 });
+
+describe('重みの読み取り', () => {
+  /**
+   * ルーレット用の貼り付け。「項目名<TAB>重み」がいちばん多い形。
+   * 重みは扇の広さそのものなので、読み違えると円盤と結果が食い違う。
+   */
+  it('2 列で 2 列目が数字なら重みとして読む', () => {
+    const result = parseRosterText('大当たり\t1\nはずれ\t9');
+
+    expect(result.weightColumnIndex).toBe(1);
+    expect(result.rows.map((row) => [row.label, row.weight])).toEqual([
+      ['大当たり', 1],
+      ['はずれ', 9],
+    ]);
+  });
+
+  it('CSV でも読む', () => {
+    const result = parseRosterText('景品A,3\n景品B,7');
+
+    expect(result.rows.map((row) => row.weight)).toEqual([3, 7]);
+  });
+
+  it('見出しに「重み」があればその列を使う', () => {
+    const result = parseRosterText('項目\t説明\t重み\n当たり\tあたり\t5\nはずれ\tはずれ\t15');
+
+    expect(result.weightColumnIndex).toBe(2);
+    expect(result.rows.map((row) => row.weight)).toEqual([5, 15]);
+  });
+
+  it('全角数字・桁区切り・小数も受け取る', () => {
+    // 会場の PC は日本語入力のままのことが多い。
+    const result = parseRosterText('A\t１０\nB\t1,000\nC\t2.6');
+
+    expect(result.rows.map((row) => row.weight)).toEqual([10, 1000, 3]);
+  });
+
+  it('読めない重みは 1 にして、件数を報告する', () => {
+    // その行を落とすと名簿が欠ける。落とさずに、黙って直さない。
+    const result = parseRosterText('A\t5\nB\tあ', { weightColumnIndex: 1 });
+
+    expect(result.rows.map((row) => row.weight)).toEqual([5, 1]);
+    expect(result.weightFallbacks).toBe(1);
+  });
+
+  it('0 以下は 1 として扱う', () => {
+    // 0 の扇は「見えているのに絶対当たらない」になってしまう。
+    const result = parseRosterText('A\t0\nB\t-3', { weightColumnIndex: 1 });
+
+    expect(result.rows.map((row) => row.weight)).toEqual([1, 1]);
+    expect(result.weightFallbacks).toBe(2);
+  });
+
+  it('名前だけの貼り付けでは重みを読まない', () => {
+    // 名簿へ勝手に重みを付けない。付けると抽選会の当たりやすさが変わってしまう。
+    const result = parseRosterText('山田\n田中\n佐藤');
+
+    expect(result.weightColumnIndex).toBeNull();
+    expect(result.rows.every((row) => row.weight === undefined)).toBe(true);
+  });
+
+  it('3 列以上で見出しが無ければ重みを読まない', () => {
+    // 迷ったら読まない。勝手に重みを付けるより、同じ幅で出すほうが驚かせない。
+    const result = parseRosterText('山田\t営業\t3\n田中\t経理\t5');
+
+    expect(result.weightColumnIndex).toBeNull();
+  });
+
+  it('明示的に null を渡せば読まない', () => {
+    const result = parseRosterText('A\t5\nB\t9', { weightColumnIndex: null });
+
+    expect(result.weightColumnIndex).toBeNull();
+    expect(result.rows.every((row) => row.weight === undefined)).toBe(true);
+  });
+});

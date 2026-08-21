@@ -35,7 +35,7 @@ export default async function AdminRoomNewPage({
       <AdminHeader current="rooms" />
       <AdminPageBody
         title="ルーム作成"
-        description="開催ごとにルームを作ります。まずクイズ・抽選会・ビンゴのどれを開くか選んでください。"
+        description="開催ごとにルームを作ります。まずクイズ・抽選会・ビンゴ・ルーレットのどれを開くか選んでください。"
         breadcrumb={
           // クイズを指定して来た人はクイズ一覧へ、それ以外はルーム一覧へ戻す（来た場所へ返す）。
           parsed.success ? (

@@ -14,10 +14,13 @@ import 'server-only';
 import {
   DRAW_ENTRY_MAX_COUNT,
   DRAW_LABEL_MAX_LENGTH,
+  DRAW_WEIGHT_MAX,
+  DRAW_WEIGHT_MIN,
   drawKindsForMode,
   isDrawKindAllowedForMode,
   isDrawListKind,
   type DrawListKind,
+  type DrawRoomMode,
   type DrawSettings,
   type DrawSnapshot,
 } from '@/domain/draw/draw-list';
@@ -57,10 +60,7 @@ async function requireOwnedDrawList(listId: string): Promise<DrawListDoc> {
  * クイズの buildSnapshotForQuiz と同じ役割。**署名 URL は入れない**
  * （期限付きの URL をルームへ固めると、当日には切れている）。
  */
-export async function buildDrawSnapshot(
-  listId: string,
-  mode: 'lottery' | 'bingo',
-): Promise<DrawSnapshot> {
+export async function buildDrawSnapshot(listId: string, mode: DrawRoomMode): Promise<DrawSnapshot> {
   const list = await requireOwnedDrawList(listId);
 
   if (!isDrawKindAllowedForMode(list.kind, mode)) {
@@ -163,9 +163,22 @@ export async function deleteDrawList(listId: string): Promise<void> {
  *
  * 画面から並べ替え・編集・削除をしたときも、常に「今の全部」を送ってもらう。
  */
+/** 重みを受け入れられる範囲へ収める。0 以下は「絶対に当たらない扇」になるので許さない。 */
+function clampWeight(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DRAW_WEIGHT_MIN;
+  }
+  return Math.min(DRAW_WEIGHT_MAX, Math.max(DRAW_WEIGHT_MIN, Math.round(value)));
+}
+
 export async function replaceDrawEntries(
   listId: string,
-  entries: ReadonlyArray<{ label: string; imageAssetId?: string | null; imageAlt?: string | null }>,
+  entries: ReadonlyArray<{
+    label: string;
+    imageAssetId?: string | null;
+    imageAlt?: string | null;
+    weight?: number;
+  }>,
 ): Promise<AdminDrawList> {
   const list = await requireOwnedDrawList(listId);
   if (list.kind === 'number') {
@@ -180,6 +193,8 @@ export async function replaceDrawEntries(
       // 品目モード以外では画像を持たせない（名簿に画像を混ぜない）。
       imageAssetId: list.kind === 'item' ? (entry.imageAssetId ?? null) : null,
       imageAlt: list.kind === 'item' ? (entry.imageAlt ?? null) : null,
+      // 重みを持つのは重み付きのリストだけ。名簿へ紛れ込ませない。
+      ...(list.kind === 'weighted' ? { weight: clampWeight(entry.weight ?? DRAW_WEIGHT_MIN) } : {}),
     }))
     .filter((entry) => entry.label.length > 0);
 
@@ -197,7 +212,13 @@ export async function replaceDrawEntries(
  */
 export async function importDrawEntries(
   listId: string,
-  input: { text: string; hasHeader?: boolean; labelColumnIndex?: number; append?: boolean },
+  input: {
+    text: string;
+    hasHeader?: boolean;
+    labelColumnIndex?: number;
+    weightColumnIndex?: number | null;
+    append?: boolean;
+  },
 ): Promise<{ list: AdminDrawList; imported: RosterImportResult }> {
   const list = await requireOwnedDrawList(listId);
   if (list.kind === 'number') {
@@ -209,6 +230,8 @@ export async function importDrawEntries(
   const parsed = parseRosterText(input.text, {
     hasHeader: input.hasHeader,
     labelColumnIndex: input.labelColumnIndex,
+    // 重みを読むのは重み付きのリストだけ。名簿へ勝手に重みを付けない。
+    weightColumnIndex: list.kind === 'weighted' ? input.weightColumnIndex : null,
     maxRows: DRAW_ENTRY_MAX_COUNT,
   });
 
@@ -218,8 +241,14 @@ export async function importDrawEntries(
       label: entry.label,
       imageAssetId: entry.imageAssetId,
       imageAlt: entry.imageAlt,
+      ...(typeof entry.weight === 'number' ? { weight: entry.weight } : {}),
     })),
-    ...parsed.rows.map((row) => ({ label: row.label, imageAssetId: null, imageAlt: null })),
+    ...parsed.rows.map((row) => ({
+      label: row.label,
+      imageAssetId: null,
+      imageAlt: null,
+      ...(typeof row.weight === 'number' ? { weight: row.weight } : {}),
+    })),
   ];
 
   if (next.length > DRAW_ENTRY_MAX_COUNT) {

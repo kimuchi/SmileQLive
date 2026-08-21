@@ -68,7 +68,9 @@ export type UploadImageInput = {
 };
 
 /** 紐づけ先の所有者を確かめ、保存パスに使う ID を返す。 */
-async function requireScopeOwner(scope: UploadScope): Promise<{ ownerId: string; scopeId: string }> {
+async function requireScopeOwner(
+  scope: UploadScope,
+): Promise<{ ownerId: string; scopeId: string }> {
   if (scope.kind === 'quiz') {
     const { user } = await requireQuizOwner(scope.quizId);
     return { ownerId: user.id, scopeId: scope.quizId };
@@ -328,6 +330,8 @@ export async function resolveDrawEntryMedia(
         entry.image && url
           ? { url, alt: entry.image.alt, width: entry.image.width, height: entry.image.height }
           : null,
+      // ルーレットの扇の広さ。持たないリストでは付けない（すべて同じ幅になる）。
+      ...(typeof entry.weight === 'number' ? { weight: entry.weight } : {}),
     };
   });
 }

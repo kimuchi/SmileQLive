@@ -28,6 +28,7 @@ const KIND_VARIANT: Record<DrawListKind, BadgeVariant> = {
   name: 'info',
   number: 'brand',
   item: 'success',
+  weighted: 'warning',
 };
 
 type PendingAction = { kind: 'delete'; list: DrawListRow } | null;

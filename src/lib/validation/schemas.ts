@@ -12,11 +12,7 @@ import {
   TIME_LIMIT_MIN_SECONDS,
   UNIT_MAX_LENGTH,
 } from '@/domain/quiz/question';
-import {
-  EXTEND_SECONDS_MAX,
-  EXTEND_SECONDS_MIN,
-  ROOM_ACTIONS,
-} from '@/domain/room/state-machine';
+import { EXTEND_SECONDS_MAX, EXTEND_SECONDS_MIN, ROOM_ACTIONS } from '@/domain/room/state-machine';
 import { ROOM_MODES } from '@/domain/room/room-mode';
 import {
   DRAW_ENTRY_MAX_COUNT,
@@ -27,10 +23,14 @@ import {
   DRAW_LIST_KINDS,
   DRAW_NUMBER_MAX,
   DRAW_NUMBER_MIN,
+  DRAW_WEIGHT_MAX,
+  DRAW_WEIGHT_MIN,
   SPIN_DURATION_MAX_MS,
   SPIN_DURATION_MIN_MS,
   SPIN_INTERVAL_MAX_MS,
   SPIN_INTERVAL_MIN_MS,
+  STOP_DURATION_MAX_MS,
+  STOP_DURATION_MIN_MS,
 } from '@/domain/draw/draw-list';
 import { MEDIA_USAGES } from '@/domain/media/image-policy';
 
@@ -44,11 +44,11 @@ export const uuidSchema = z.uuid();
 export const nicknameSchema = z
   .string()
   .transform((value) => value.normalize('NFKC').trim())
-  .pipe(z.string().min(1, 'ニックネームを入力してください').max(20, '20文字以内で入力してください'));
+  .pipe(
+    z.string().min(1, 'ニックネームを入力してください').max(20, '20文字以内で入力してください'),
+  );
 
-export const joinTokenSchema = z
-  .string()
-  .regex(/^[A-Za-z0-9_-]{20,64}$/, 'この参加URLは無効です');
+export const joinTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{20,64}$/, 'この参加URLは無効です');
 
 export const presentationTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{32,128}$/);
 
@@ -169,6 +169,7 @@ const drawSettingsSchema = z
   .object({
     spinIntervalMs: z.int().min(SPIN_INTERVAL_MIN_MS).max(SPIN_INTERVAL_MAX_MS),
     spinDurationMs: z.int().min(SPIN_DURATION_MIN_MS).max(SPIN_DURATION_MAX_MS),
+    stopDurationMs: z.int().min(STOP_DURATION_MIN_MS).max(STOP_DURATION_MAX_MS),
     resultFontSize: z.int().min(DRAW_FONT_SIZE_MIN).max(DRAW_FONT_SIZE_MAX),
     historyFontSize: z.int().min(DRAW_FONT_SIZE_MIN).max(DRAW_FONT_SIZE_MAX),
     layout: z.enum(DRAW_LAYOUTS),
@@ -199,6 +200,8 @@ export const replaceDrawEntriesSchema = z.object({
         label: z.string().trim().min(1).max(DRAW_LABEL_MAX_LENGTH),
         imageAssetId: uuidSchema.nullable().optional(),
         imageAlt: z.string().max(IMAGE_ALT_MAX_LENGTH).nullable().optional(),
+        /** ルーレットの扇の広さ。省略すると 1（いちばん狭い扇）。 */
+        weight: z.int().min(DRAW_WEIGHT_MIN).max(DRAW_WEIGHT_MAX).optional(),
       }),
     )
     .max(DRAW_ENTRY_MAX_COUNT),
@@ -209,6 +212,8 @@ export const importDrawEntriesSchema = z.object({
   text: z.string().max(1_000_000),
   hasHeader: z.boolean().optional(),
   labelColumnIndex: z.int().min(0).max(64).optional(),
+  /** 何列目を重みとして読むか。null なら重みを読まない。省略時は自動判定。 */
+  weightColumnIndex: z.int().min(0).max(64).nullable().optional(),
   /** 既存の行に足すか（既定は入れ替え）。 */
   append: z.boolean().optional(),
 });
@@ -230,14 +235,14 @@ export const createRoomSchema = z
     drawListId: uuidSchema.optional(),
     maxParticipants: z.int().min(2).max(1000).optional(),
   })
-  .refine(
-    (value) => ((value.mode ?? 'quiz') === 'quiz' ? value.quizId !== undefined : true),
-    { message: 'クイズを選んでください', path: ['quizId'] },
-  )
-  .refine(
-    (value) => ((value.mode ?? 'quiz') === 'quiz' ? true : value.drawListId !== undefined),
-    { message: '抽選リストを選んでください', path: ['drawListId'] },
-  );
+  .refine((value) => ((value.mode ?? 'quiz') === 'quiz' ? value.quizId !== undefined : true), {
+    message: 'クイズを選んでください',
+    path: ['quizId'],
+  })
+  .refine((value) => ((value.mode ?? 'quiz') === 'quiz' ? true : value.drawListId !== undefined), {
+    message: '抽選リストを選んでください',
+    path: ['drawListId'],
+  });
 
 export const roomActionSchema = z
   .object({
@@ -247,10 +252,13 @@ export const roomActionSchema = z
     extendSeconds: z.int().min(EXTEND_SECONDS_MIN).max(EXTEND_SECONDS_MAX).nullable().optional(),
     expectedVersion: z.int().min(0),
   })
-  .refine((value) => value.action !== 'extend_deadline' || typeof value.extendSeconds === 'number', {
-    message: '延長する秒数を指定してください',
-    path: ['extendSeconds'],
-  });
+  .refine(
+    (value) => value.action !== 'extend_deadline' || typeof value.extendSeconds === 'number',
+    {
+      message: '延長する秒数を指定してください',
+      path: ['extendSeconds'],
+    },
+  );
 
 // ---------------------------------------------------------------------------
 // 参加者

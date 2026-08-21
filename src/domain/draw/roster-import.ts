@@ -12,7 +12,12 @@
  * ここはドメイン層。ファイル入出力も DOM も触らない。
  */
 
-import { DRAW_ENTRY_MAX_COUNT, DRAW_LABEL_MAX_LENGTH } from '@/domain/draw/draw-list';
+import {
+  DRAW_ENTRY_MAX_COUNT,
+  DRAW_LABEL_MAX_LENGTH,
+  DRAW_WEIGHT_MAX,
+  DRAW_WEIGHT_MIN,
+} from '@/domain/draw/draw-list';
 
 /** 区切り文字。貼り付けはタブ、CSV はカンマになる。 */
 export type RosterDelimiter = 'tab' | 'comma';
@@ -20,6 +25,11 @@ export type RosterDelimiter = 'tab' | 'comma';
 export type RosterImportRow = {
   /** 取り込む文字（画面に出る名前）。 */
   label: string;
+  /**
+   * ルーレットの扇の広さ。重みの列を指定したときだけ入る。
+   * 読み取れなかった行は 1 として扱う（その行だけ落とすと名簿が欠ける）。
+   */
+  weight?: number;
   /** その行の全項目。列を選び直せるように残しておく。 */
   columns: string[];
 };
@@ -30,6 +40,10 @@ export type RosterImportResult = {
   headers: string[] | null;
   /** 何列目を名前として読んだか（0 始まり）。 */
   labelColumnIndex: number;
+  /** 何列目を重みとして読んだか（0 始まり）。読まなかったときは null。 */
+  weightColumnIndex: number | null;
+  /** 重みとして読めなかった件数（1 として扱った）。 */
+  weightFallbacks: number;
   delimiter: RosterDelimiter;
   /** 空だったので飛ばした行数。 */
   skippedEmpty: number;
@@ -46,6 +60,11 @@ export type RosterImportOptions = {
   hasHeader?: boolean;
   /** 何列目を名前として読むか（0 始まり）。省略時は自動判定。 */
   labelColumnIndex?: number;
+  /**
+   * 何列目を重みとして読むか（0 始まり）。
+   * ルーレット用。省略すると重みを読まない（すべて同じ幅になる）。
+   */
+  weightColumnIndex?: number | null;
   /** 取り込む件数の上限。 */
   maxRows?: number;
 };
@@ -67,9 +86,27 @@ const HEADER_HINTS = [
   '品名',
   '景品',
   '賞品',
+  // ルーレットの貼り付けでよく使われる見出し。
+  '項目',
+  '項目名',
   'name',
   'label',
+  'item',
 ] as const;
+
+/** 見出しに使われがちな「重み」の語。 */
+const WEIGHT_HINTS = [
+  '重み',
+  'ウエイト',
+  'ウェイト',
+  '重さ',
+  '確率',
+  '割合',
+  '比率',
+  'weight',
+  'ratio',
+  'rate',
+];
 
 /** 見出しではあるが、名前の列ではないもの。 */
 const NON_LABEL_HEADERS = ['当選', '順位', '番号', 'no', 'no.', 'id', '備考', 'rank'] as const;
@@ -86,7 +123,9 @@ function isHeaderRow(cells: readonly string[]): boolean {
     }
     return (
       HEADER_HINTS.some((hint) => normalized === hint.toLowerCase()) ||
-      NON_LABEL_HEADERS.some((hint) => normalized === hint.toLowerCase())
+      NON_LABEL_HEADERS.some((hint) => normalized === hint.toLowerCase()) ||
+      // 「重み」だけが手がかりのこともある（項目名<TAB>重み の見出し行）。
+      WEIGHT_HINTS.some((hint) => normalized === hint.toLowerCase())
     );
   });
 }
@@ -210,6 +249,51 @@ function trimCell(value: string): string {
  * 空行は飛ばす。重複は**落とさずに数えるだけ**にする。
  * 同姓同名は実際にありうるし、勝手に消すと「登録したのに居ない」事故になる。
  */
+/**
+ * 重みとして読む列を推測する。
+ *
+ * 見出しに「重み」などがあればその列。
+ * 見出しが無くても、2 列だけで 2 列目がすべて数字なら「項目名＋重み」とみなす
+ * （ルーレット用に貼り付けるときは、この形がいちばん多い）。
+ * 迷ったら読まない。勝手に重みを付けるより、同じ幅で出すほうが驚かせない。
+ */
+function detectWeightColumn(body: string[][], headers: string[] | null): number | null {
+  if (headers) {
+    const index = headers.findIndex((header) => {
+      const normalized = header.normalize('NFKC').toLowerCase();
+      return WEIGHT_HINTS.some((hint) => normalized.includes(hint.toLowerCase()));
+    });
+    if (index >= 0) {
+      return index;
+    }
+  }
+
+  const rows = body.filter((cells) => cells.length >= 2);
+  if (rows.length === 0 || rows.some((cells) => cells.length !== 2)) {
+    return null;
+  }
+  const allNumeric = rows.every((cells) => parseWeight(trimCell(cells[1] ?? '')) !== null);
+  return allNumeric ? 1 : null;
+}
+
+/**
+ * 重みとして読む。
+ *
+ * 全角数字・小数も受け取り、整数へ丸める（扇の幅なので小数に意味は無い）。
+ * 0 以下は「絶対に当たらない扇」になってしまうので受け付けない。
+ */
+function parseWeight(value: string): number | null {
+  const normalized = value.normalize('NFKC').trim().replace(/,/g, '');
+  if (normalized.length === 0) {
+    return null;
+  }
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed < DRAW_WEIGHT_MIN) {
+    return null;
+  }
+  return Math.min(DRAW_WEIGHT_MAX, Math.round(parsed));
+}
+
 export function parseRosterText(
   text: string,
   options: RosterImportOptions = {},
@@ -224,6 +308,8 @@ export function parseRosterText(
       rows: [],
       headers: null,
       labelColumnIndex: options.labelColumnIndex ?? 0,
+      weightColumnIndex: options.weightColumnIndex ?? null,
+      weightFallbacks: 0,
       delimiter,
       skippedEmpty: table.length,
       truncated: 0,
@@ -240,8 +326,19 @@ export function parseRosterText(
   const labelColumnIndex =
     options.labelColumnIndex ?? (headers ? (pickLabelColumn(headers) ?? 0) : 0);
 
+  /*
+    重みの列。
+    指定が無くても、2 列だけで 2 列目がすべて数字なら「項目名＋重み」とみなす。
+    ルーレット用に貼り付けるときは、この形がいちばん多い。
+  */
+  const weightColumnIndex =
+    options.weightColumnIndex === undefined
+      ? detectWeightColumn(body, headers)
+      : options.weightColumnIndex;
+
   let skippedEmpty = table.length - nonEmptyTable.length;
   let shortened = 0;
+  let weightFallbacks = 0;
   const rows: RosterImportRow[] = [];
 
   for (const cells of body) {
@@ -261,7 +358,18 @@ export function parseRosterText(
       value = value.slice(0, DRAW_LABEL_MAX_LENGTH);
       shortened += 1;
     }
-    rows.push({ label: value, columns });
+
+    if (weightColumnIndex === null) {
+      rows.push({ label: value, columns });
+      continue;
+    }
+
+    const weight = parseWeight(columns[weightColumnIndex] ?? '');
+    if (weight === null) {
+      // 重みが読めない行を落とすと名簿が欠ける。1（いちばん狭い扇）として通す。
+      weightFallbacks += 1;
+    }
+    rows.push({ label: value, weight: weight ?? DRAW_WEIGHT_MIN, columns });
   }
 
   const truncated = Math.max(0, rows.length - maxRows);
@@ -281,6 +389,8 @@ export function parseRosterText(
     rows: kept,
     headers,
     labelColumnIndex,
+    weightColumnIndex,
+    weightFallbacks,
     delimiter,
     skippedEmpty,
     truncated,
@@ -295,6 +405,13 @@ export function describeRosterImport(result: RosterImportResult): string {
   if (result.headers) {
     const name = result.headers[result.labelColumnIndex];
     parts.push(name ? `「${name}」の列を使いました` : '見出し行を飛ばしました');
+  }
+  if (result.weightColumnIndex !== null) {
+    const name = result.headers?.[result.weightColumnIndex];
+    parts.push(name ? `「${name}」の列を重みにしました` : '2列目を重みにしました');
+  }
+  if (result.weightFallbacks > 0) {
+    parts.push(`重みを読めなかった ${result.weightFallbacks} 件は 1 にしました`);
   }
   if (result.skippedEmpty > 0) {
     parts.push(`空の行 ${result.skippedEmpty} 件は飛ばしました`);

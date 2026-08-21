@@ -10,6 +10,7 @@
  * ルーレットの見た目（名前が高速に切り替わる）とビンゴのボードに使う。
  */
 
+import { entryWeight } from '@/domain/draw/draw-list';
 import type { DrawListKind, DrawRecord, DrawSettings } from '@/domain/draw/draw-list';
 import type { PublicImage } from '@/domain/quiz/public-question';
 
@@ -19,6 +20,8 @@ export type StageDrawEntry = {
   label: string;
   /** 品目モードのみ。配信用 URL まで解決済み。 */
   image: PublicImage | null;
+  /** ルーレットの扇の広さ。持たないリストでは undefined（＝すべて同じ幅）。 */
+  weight?: number;
 };
 
 export type StageDraw = {
@@ -55,6 +58,9 @@ export function drawUnit(kind: DrawListKind): string {
       return '個';
     case 'item':
       return '件';
+    case 'weighted':
+      // ルーレットは「◯回目」と数える。引いたものは母集団から減らない。
+      return '回';
   }
 }
 
@@ -174,4 +180,64 @@ export function visibleDuringSpin(draw: StageDraw, spinning: boolean): StageDraw
     latestOrder: previous?.order ?? null,
     remainingCount: draw.remainingCount + 1,
   };
+}
+
+// ---------------------------------------------------------------------------
+// ルーレット
+// ---------------------------------------------------------------------------
+
+/** 円盤の扇 1 枚。角度は真上 (12 時) を 0 度として時計回り。 */
+export type WheelSegment = {
+  entry: StageDrawEntry;
+  /** 扇の始まりの角度（度）。 */
+  startAngle: number;
+  /** 扇の終わりの角度（度）。 */
+  endAngle: number;
+  /** 扇の中心の角度（度）。ここが針の位置へ来るように止める。 */
+  centerAngle: number;
+  /** 扇の広さ（度）。 */
+  sweep: number;
+};
+
+/**
+ * 円盤を扇に分ける。
+ *
+ * 幅は重みに比例させる。重みを持たないリストではすべて同じ幅になる。
+ * 角度は**真上を 0 度、時計回り**で数える（画面の針が真上にあるため）。
+ */
+export function wheelSegments(entries: readonly StageDrawEntry[]): WheelSegment[] {
+  if (entries.length === 0) {
+    return [];
+  }
+  const total = entries.reduce((sum, entry) => sum + entryWeight(entry), 0);
+  if (total <= 0) {
+    return [];
+  }
+
+  let cursor = 0;
+  return entries.map((entry) => {
+    const sweep = (entryWeight(entry) / total) * 360;
+    const startAngle = cursor;
+    cursor += sweep;
+    return {
+      entry,
+      startAngle,
+      endAngle: cursor,
+      centerAngle: startAngle + sweep / 2,
+      sweep,
+    };
+  });
+}
+
+/**
+ * 当たりの扇を針の位置へ持ってくるための回転角。
+ *
+ * 円盤を `rotation` 度だけ回すと、`centerAngle` の扇が真上へ来る。
+ * `turns` は止まるまでに回る周回数（多いほど長く回って見える）。
+ *
+ * **ここで結果を決めているわけではない。** 当たりはサーバーが決めて記録済みで、
+ * これは「その扇が針の下へ来る角度」を求めているだけ。
+ */
+export function wheelRotationFor(centerAngle: number, turns: number): number {
+  return turns * 360 - centerAngle;
 }

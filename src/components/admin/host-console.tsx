@@ -46,7 +46,7 @@ import type { PresentationLinkResponse, RotateJoinTokenResponse } from '@/types/
 /**
  * 司会進行画面。
  *
- * クイズ・抽選会・ビンゴの 3 モードを 1 つの画面で扱う。
+ * クイズ・抽選会・ビンゴ・ルーレットの 4 モードを 1 つの画面で扱う。
  * 抽選会・ビンゴには参加者も問題も無いため、クイズ用の表示
  * （問題一覧・回答済み人数・集計・参加者一覧・参加URL）は出さず、
  * 抽選の操作（host-draw-panel.tsx）へ置き換える。

@@ -29,6 +29,8 @@ import {
   SPIN_DURATION_MIN_MS,
   SPIN_INTERVAL_MAX_MS,
   SPIN_INTERVAL_MIN_MS,
+  STOP_DURATION_MAX_MS,
+  STOP_DURATION_MIN_MS,
   drawLayoutOf,
   isDrawKindAllowedForMode,
   type DrawLayout,
@@ -68,6 +70,7 @@ const KIND_VARIANT: Record<DrawListKind, BadgeVariant> = {
   name: 'info',
   number: 'brand',
   item: 'success',
+  weighted: 'warning',
 };
 
 const TITLE_MAX_LENGTH = 100;
@@ -92,6 +95,8 @@ type EntryDraft = {
   label: string;
   image: AdminMediaRef | null;
   imageAlt: string;
+  /** ルーレットの扇の広さ。文字で持つのは、入力中の「1」→「」→「10」を壊さないため。 */
+  weight: string;
 };
 
 type SettingsDraft = {
@@ -100,6 +105,7 @@ type SettingsDraft = {
   numberMax: string;
   spinIntervalMs: string;
   spinDurationMs: string;
+  stopDurationMs: string;
   resultFontSize: string;
   historyFontSize: string;
   layout: DrawLayout;
@@ -112,6 +118,7 @@ type SettingsErrors = {
   range?: string;
   spinIntervalMs?: string;
   spinDurationMs?: string;
+  stopDurationMs?: string;
   resultFontSize?: string;
   historyFontSize?: string;
   openingVideoUrl?: string;
@@ -125,6 +132,7 @@ type UpdateDrawListBody = {
   settings: {
     spinIntervalMs: number;
     spinDurationMs: number;
+    stopDurationMs: number;
     resultFontSize: number;
     historyFontSize: number;
     layout: DrawLayout;
@@ -133,12 +141,28 @@ type UpdateDrawListBody = {
   };
 };
 
+/**
+ * その扇の当たりやすさ。
+ *
+ * 重みは相対値なので、数字だけ見ても当たりやすさが分からない。
+ * 合計に対する割合を添えて、「10 と入れたら何 % か」をその場で見せる。
+ */
+function weightShare(value: string, entries: ReadonlyArray<{ weight: string }>): string {
+  const weight = parseIntegerInput(value) ?? 1;
+  const total = entries.reduce((sum, entry) => sum + (parseIntegerInput(entry.weight) ?? 1), 0);
+  if (total <= 0) {
+    return '';
+  }
+  return `${Math.round((weight / total) * 1000) / 10}%`;
+}
+
 function toEntryDrafts(list: DrawListDetail): EntryDraft[] {
   return list.entries.map((entry) => ({
     key: entry.id,
     label: entry.label,
     image: entry.image,
     imageAlt: entry.image?.alt ?? '',
+    weight: String(entry.weight ?? 1),
   }));
 }
 
@@ -149,6 +173,7 @@ function toSettingsDraft(list: DrawListDetail): SettingsDraft {
     numberMax: String(list.numberMax ?? 75),
     spinIntervalMs: String(list.settings.spinIntervalMs),
     spinDurationMs: String(list.settings.spinDurationMs),
+    stopDurationMs: String(list.settings.stopDurationMs ?? 4000),
     resultFontSize: String(list.settings.resultFontSize),
     historyFontSize: String(list.settings.historyFontSize),
     layout: drawLayoutOf(list.settings),
@@ -232,6 +257,14 @@ function validateSettings(
     errors.spinDurationMs = spinDurationMs.error;
   }
 
+  const stopDurationMs = readBoundedInteger(draft.stopDurationMs, {
+    min: STOP_DURATION_MIN_MS,
+    max: STOP_DURATION_MAX_MS,
+  });
+  if ('error' in stopDurationMs) {
+    errors.stopDurationMs = stopDurationMs.error;
+  }
+
   const resultFontSize = readBoundedInteger(draft.resultFontSize, {
     min: DRAW_FONT_SIZE_MIN,
     max: DRAW_FONT_SIZE_MAX,
@@ -275,6 +308,7 @@ function validateSettings(
     Object.keys(errors).length > 0 ||
     'error' in spinIntervalMs ||
     'error' in spinDurationMs ||
+    'error' in stopDurationMs ||
     'error' in resultFontSize ||
     'error' in historyFontSize ||
     'error' in openingVideoUrl
@@ -290,6 +324,7 @@ function validateSettings(
       settings: {
         spinIntervalMs: spinIntervalMs.value,
         spinDurationMs: spinDurationMs.value,
+        stopDurationMs: stopDurationMs.value,
         resultFontSize: resultFontSize.value,
         historyFontSize: historyFontSize.value,
         layout: draft.layout,
@@ -417,7 +452,7 @@ export function DrawListEditor({ listId }: DrawListEditorProps) {
   const addEntry = useCallback(() => {
     setEntries((previous) => [
       ...previous,
-      { key: createEntryKey(), label: '', image: null, imageAlt: '' },
+      { key: createEntryKey(), label: '', image: null, imageAlt: '', weight: '1' },
     ]);
     setEntriesDirty(true);
     setEntriesStatus('idle');
@@ -465,6 +500,8 @@ export function DrawListEditor({ listId }: DrawListEditorProps) {
             label: entry.label.trim(),
             imageAssetId: entry.image?.assetId ?? null,
             imageAlt: entry.imageAlt.trim().length > 0 ? entry.imageAlt.trim() : null,
+            // 空欄や読めない値は 1（いちばん狭い扇）。入力中に保存されても壊れない。
+            ...(list?.kind === 'weighted' ? { weight: parseIntegerInput(entry.weight) ?? 1 } : {}),
           })),
         },
       );
@@ -477,7 +514,7 @@ export function DrawListEditor({ listId }: DrawListEditorProps) {
       setEntriesError(toUserErrorMessage(caught));
       setEntriesStatus('error');
     }
-  }, [entries, listId]);
+  }, [entries, list?.kind, listId]);
 
   const handleImported = useCallback((imported: DrawListDetail) => {
     setList(imported);
@@ -505,6 +542,7 @@ export function DrawListEditor({ listId }: DrawListEditorProps) {
   const { errors } = validateSettings(settings, list.kind);
   const isNumberKind = list.kind === 'number';
   const hasImages = list.kind === 'item';
+  const hasWeights = list.kind === 'weighted';
   const uploading = uploadingKeys.length > 0;
   const rangeMin = parseIntegerInput(settings.numberMin);
   const rangeMax = parseIntegerInput(settings.numberMax);
@@ -643,6 +681,18 @@ export function DrawListEditor({ listId }: DrawListEditorProps) {
                           patchEntry(entry.key, { label: event.currentTarget.value });
                         }}
                       />
+                      {hasWeights ? (
+                        <TextInput
+                          label="重み"
+                          className="w-24 shrink-0"
+                          inputMode="numeric"
+                          value={entry.weight}
+                          hint={weightShare(entry.weight, entries)}
+                          onChange={(event) => {
+                            patchEntry(entry.key, { weight: event.currentTarget.value });
+                          }}
+                        />
+                      ) : null}
                       <div className="mt-6 flex flex-wrap items-center gap-1.5">
                         <Button
                           variant="ghost"
@@ -725,6 +775,7 @@ export function DrawListEditor({ listId }: DrawListEditorProps) {
 
           <DrawImportPanel
             listId={listId}
+            withWeight={hasWeights}
             currentCount={list.entryCount}
             onImported={handleImported}
             {...(entriesDirty
@@ -763,6 +814,17 @@ export function DrawListEditor({ listId }: DrawListEditorProps) {
               hint={`回し始めてから止まるまでの長さです。長いほど焦らせます（${SPIN_DURATION_MIN_MS}〜${SPIN_DURATION_MAX_MS}）。`}
               onChange={(event) => {
                 patchSettings({ spinDurationMs: event.currentTarget.value });
+              }}
+            />
+            <TextInput
+              label="ストップしてから止まるまで（ミリ秒）"
+              inputMode="numeric"
+              autoComplete="off"
+              value={settings.stopDurationMs}
+              error={errors.stopDurationMs ?? undefined}
+              hint={`ルーレットで使います。「ストップ」を押してから円盤が止まるまでの長さです（${STOP_DURATION_MIN_MS}〜${STOP_DURATION_MAX_MS}）。`}
+              onChange={(event) => {
+                patchSettings({ stopDurationMs: event.currentTarget.value });
               }}
             />
             <TextInput

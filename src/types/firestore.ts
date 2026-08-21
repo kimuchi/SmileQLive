@@ -1,11 +1,6 @@
 import type { Timestamp } from 'firebase-admin/firestore';
 import type { QuizSnapshot } from '@/domain/quiz/quiz-snapshot';
-import type {
-  DrawListKind,
-  DrawRecord,
-  DrawSettings,
-  DrawSnapshot,
-} from '@/domain/draw/draw-list';
+import type { DrawListKind, DrawRecord, DrawSettings, DrawSnapshot } from '@/domain/draw/draw-list';
 import type { RoomMode } from '@/domain/room/room-mode';
 import type { QuestionType } from '@/domain/quiz/question';
 import type { RoomPhase } from '@/domain/room/state-machine';
@@ -193,6 +188,11 @@ export type DrawListEntryDoc = {
   /** 品目モードのみ。クイズの画像と同じく ID と代替テキストだけを持つ。 */
   imageAssetId: string | null;
   imageAlt: string | null;
+  /**
+   * ルーレットの扇の広さ。重み付きのリストだけが持つ。
+   * 未設定は 1 として扱う（読むときは `entryWeight()` を通す）。
+   */
+  weight?: number;
   createdAt: FirestoreTimestamp;
   updatedAt: FirestoreTimestamp;
 };

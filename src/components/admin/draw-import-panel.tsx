@@ -124,6 +124,13 @@ export function describeImportSummary(summary: DrawImportSummary): string[] {
 
 export type DrawImportPanelProps = {
   listId: string;
+  /**
+   * 重みの列も読むか（重み付きのリストだけ true）。
+   *
+   * 名簿・品目では重みを持たせないので、列を選ばせても意味が無い。
+   * 選べてしまうと「重みを付けたつもりで付いていない」を生む。
+   */
+  withWeight: boolean;
   /** 今このリストに入っている件数。「今の行に足す」で上限を超えないか判断するのに使う。 */
   currentCount: number;
   /** 取り込ませたくない理由（未保存の編集があるなど）。あるときは取り込めない。 */
@@ -134,6 +141,7 @@ export type DrawImportPanelProps = {
 
 export function DrawImportPanel({
   listId,
+  withWeight,
   currentCount,
   blockedReason,
   onImported,
@@ -142,6 +150,8 @@ export function DrawImportPanel({
   const [text, setText] = useState('');
   const [headerMode, setHeaderMode] = useState<HeaderMode>('auto');
   const [labelColumn, setLabelColumn] = useState('auto');
+  /** 重みの列。'auto' は自動判定、'none' は読まない（全部同じ幅にする）。 */
+  const [weightColumn, setWeightColumn] = useState('auto');
   const [writeMode, setWriteMode] = useState<WriteMode>('replace');
   const [readingFile, setReadingFile] = useState(false);
   const [fileNotice, setFileNotice] = useState<string | null>(null);
@@ -157,15 +167,29 @@ export function DrawImportPanel({
       ? Math.max(0, DRAW_ENTRY_MAX_COUNT - currentCount)
       : DRAW_ENTRY_MAX_COUNT;
 
+  /**
+   * 重みの列の指定。
+   *
+   * 未指定 (undefined) だと roster-import が自動で見つける。
+   * 重みを持たないリストでは必ず null を渡し、勝手に重みを付けない。
+   */
+  const weightColumnIndex = useMemo((): number | null | undefined => {
+    if (!withWeight || weightColumn === 'none') {
+      return null;
+    }
+    return weightColumn === 'auto' ? undefined : Number.parseInt(weightColumn, 10);
+  }, [weightColumn, withWeight]);
+
   // 取り込みと同じ関数で解釈する。画面とサーバーで読み方をずらさない。
   const preview = useMemo(
     () =>
       parseRosterText(text, {
         ...(headerMode === 'auto' ? {} : { hasHeader: headerMode === 'header' }),
         ...(labelColumn === 'auto' ? {} : { labelColumnIndex: Number.parseInt(labelColumn, 10) }),
+        ...(weightColumnIndex === undefined ? {} : { weightColumnIndex }),
         maxRows,
       }),
-    [headerMode, labelColumn, maxRows, text],
+    [headerMode, labelColumn, maxRows, text, weightColumnIndex],
   );
 
   const columnOptions = useMemo(() => {
@@ -188,6 +212,26 @@ export function DrawImportPanel({
     return options;
   }, [preview]);
 
+  /** 重みの列の選択肢。「読まない」を先頭近くに置き、いつでも同じ幅へ戻せるようにする。 */
+  const weightOptions = useMemo(
+    () => [
+      { value: 'auto', label: '自動で選ぶ' },
+      { value: 'none', label: '重みを読まない（全部同じ幅）' },
+      ...columnOptions.filter((option) => option.value !== 'auto'),
+    ],
+    [columnOptions],
+  );
+
+  const weightColumnText = useMemo(() => {
+    if (preview.weightColumnIndex === null) {
+      return '読みません（全部同じ幅）';
+    }
+    const header = preview.headers?.[preview.weightColumnIndex];
+    return header !== undefined && header.length > 0
+      ? `${preview.weightColumnIndex + 1}列目（${header}）`
+      : `${preview.weightColumnIndex + 1}列目`;
+  }, [preview]);
+
   const usedHeader = preview.headers?.[preview.labelColumnIndex];
   const labelColumnText =
     usedHeader !== undefined && usedHeader.length > 0
@@ -204,6 +248,9 @@ export function DrawImportPanel({
     }
     if (preview.shortened > 0) {
       notes.push(`長すぎる ${preview.shortened} 件は ${DRAW_LABEL_MAX_LENGTH} 文字で切ります`);
+    }
+    if (preview.weightFallbacks > 0) {
+      notes.push(`重みを読めなかった ${preview.weightFallbacks} 件は 1 にします`);
     }
     return notes;
   }, [preview]);
@@ -261,6 +308,7 @@ export function DrawImportPanel({
           text,
           ...(headerMode === 'auto' ? {} : { hasHeader: headerMode === 'header' }),
           ...(labelColumn === 'auto' ? {} : { labelColumnIndex: Number.parseInt(labelColumn, 10) }),
+          ...(weightColumnIndex === undefined ? {} : { weightColumnIndex }),
           append: writeMode === 'append',
         },
       );
@@ -275,7 +323,7 @@ export function DrawImportPanel({
     } finally {
       setImporting(false);
     }
-  }, [headerMode, importing, labelColumn, listId, onImported, text, writeMode]);
+  }, [headerMode, importing, labelColumn, listId, onImported, text, weightColumnIndex, writeMode]);
 
   const canImport =
     blockedReason === undefined &&
@@ -322,7 +370,11 @@ export function DrawImportPanel({
           value={text}
           textAreaClassName="font-mono text-sm"
           hint="1行に1件です。「参加者」「当選」のように何列あってもかまいません（使う列は下で選べます）。"
-          placeholder={'参加者\t当選\n山田 太郎\n鈴木 花子'}
+          placeholder={
+            withWeight
+              ? '項目\t重み\n大当たり\t1\nあたり\t4\nはずれ\t15'
+              : '参加者\t当選\n山田 太郎\n鈴木 花子'
+          }
           onChange={(event) => {
             setText(event.currentTarget.value);
             setFileNotice(null);
@@ -398,6 +450,17 @@ export function DrawImportPanel({
                 setLabelColumn(event.currentTarget.value);
               }}
             />
+            {withWeight ? (
+              <Select
+                label="重みとして読む列"
+                options={weightOptions}
+                value={weightColumn}
+                hint="重みが大きいほど扇が広くなります。読まないときは全部同じ幅になります。"
+                onChange={(event) => {
+                  setWeightColumn(event.currentTarget.value);
+                }}
+              />
+            ) : null}
             <RadioGroup<WriteMode>
               name="draw-import-write-mode"
               legend="今ある行をどうするか"
@@ -432,6 +495,12 @@ export function DrawImportPanel({
                 </dd>
                 <dt className="text-slate-600">名前にする列</dt>
                 <dd className="font-bold text-slate-900">{labelColumnText}</dd>
+                {withWeight ? (
+                  <>
+                    <dt className="text-slate-600">重みにする列</dt>
+                    <dd className="font-bold text-slate-900">{weightColumnText}</dd>
+                  </>
+                ) : null}
                 <dt className="text-slate-600">区切り</dt>
                 <dd className="text-slate-900">
                   {preview.delimiter === 'tab'
@@ -465,6 +534,11 @@ export function DrawImportPanel({
                         {index + 1}
                       </span>
                       <span className="font-bold">{row.label}</span>
+                      {withWeight ? (
+                        <span className="text-xs text-slate-600 tabular-nums">
+                          重み {row.weight ?? 1}
+                        </span>
+                      ) : null}
                     </li>
                   ))}
                   {preview.rows.length > PREVIEW_ROWS ? (

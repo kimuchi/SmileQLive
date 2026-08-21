@@ -41,8 +41,17 @@ const EXPECTED_ACTIONS: Record<RoomPhase, RoomAction[]> = {
   question_locked: ['reopen_question', 'reveal_answer', 'finish_room'],
   answer_revealed: ['show_question', 'show_scoreboard', 'finish_room'],
   scoreboard: ['show_question', 'finish_room'],
-  draw_ready: ['draw_next', 'undo_draw', 'reset_draws', 'finish_room'],
-  draw_revealed: ['draw_next', 'continue_draw', 'undo_draw', 'reset_draws', 'finish_room'],
+  draw_ready: ['start_spin', 'draw_next', 'undo_draw', 'reset_draws', 'finish_room'],
+  // ルーレットが回っている最中。止める・取り消す・やり直すだけができる。
+  draw_spinning: ['draw_next', 'undo_draw', 'reset_draws', 'finish_room'],
+  draw_revealed: [
+    'start_spin',
+    'draw_next',
+    'continue_draw',
+    'undo_draw',
+    'reset_draws',
+    'finish_room',
+  ],
   finished: ['reopen_room'],
 };
 
@@ -56,6 +65,7 @@ const EXPECTED_NEXT_PHASE: Record<RoomAction, RoomPhase> = {
   reveal_answer: 'answer_revealed',
   show_scoreboard: 'scoreboard',
   open_draw: 'draw_ready',
+  start_spin: 'draw_spinning',
   draw_next: 'draw_revealed',
   continue_draw: 'draw_ready',
   undo_draw: 'draw_ready',
@@ -161,8 +171,35 @@ const MODE_ACTIONS: Record<RoomMode, RoomAction[]> = {
     'finish_room',
     'reopen_room',
   ],
-  lottery: ['open_draw', 'draw_next', 'continue_draw', 'undo_draw', 'reset_draws', 'finish_room', 'reopen_room'],
-  bingo: ['open_draw', 'draw_next', 'continue_draw', 'undo_draw', 'reset_draws', 'finish_room', 'reopen_room'],
+  lottery: [
+    'open_draw',
+    'draw_next',
+    'continue_draw',
+    'undo_draw',
+    'reset_draws',
+    'finish_room',
+    'reopen_room',
+  ],
+  bingo: [
+    'open_draw',
+    'draw_next',
+    'continue_draw',
+    'undo_draw',
+    'reset_draws',
+    'finish_room',
+    'reopen_room',
+  ],
+  // ルーレットだけが「スタート」で回してから「ストップ」で止める。
+  roulette: [
+    'open_draw',
+    'start_spin',
+    'draw_next',
+    'continue_draw',
+    'undo_draw',
+    'reset_draws',
+    'finish_room',
+    'reopen_room',
+  ],
 };
 
 function expectedFor(phase: RoomPhase, mode: RoomMode): RoomAction[] {
@@ -444,9 +481,7 @@ describe('nextStep（抽選会・ビンゴの1ボタン進行）', () => {
   });
 
   it('終了後は「次」を出さない（再開は専用の導線）', () => {
-    expect(
-      nextStep({ phase: 'finished', mode: 'lottery', nextQuestionPosition: null }),
-    ).toBeNull();
+    expect(nextStep({ phase: 'finished', mode: 'lottery', nextQuestionPosition: null })).toBeNull();
   });
 
   it('抽選のモードではクイズの進行を返さない', () => {

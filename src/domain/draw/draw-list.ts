@@ -11,7 +11,7 @@
 
 import type { MediaRef } from '@/domain/quiz/question';
 
-export const DRAW_LIST_KINDS = ['name', 'number', 'item'] as const;
+export const DRAW_LIST_KINDS = ['name', 'number', 'item', 'weighted'] as const;
 
 export type DrawListKind = (typeof DRAW_LIST_KINDS)[number];
 
@@ -19,29 +19,44 @@ export const DRAW_LIST_KIND_LABELS: Record<DrawListKind, string> = {
   name: '名簿（文字だけ）',
   number: '数字（範囲）',
   item: '品目（文字＋画像）',
+  weighted: '重み付き（項目名＋重み）',
 };
 
 export const DRAW_LIST_KIND_DESCRIPTIONS: Record<DrawListKind, string> = {
   name: '人の名前・部署名・座席番号など。貼り付けや CSV でまとめて取り込めます。',
   number: '1〜75 のような連番。ビンゴの球に使います。',
   item: '景品名などの文字と、その写真の組み合わせ。',
+  weighted: 'ルーレットの扇。重みが大きいほど扇が広くなり、当たりやすくなります。',
 };
 
 export function isDrawListKind(value: string): value is DrawListKind {
   return (DRAW_LIST_KINDS as readonly string[]).includes(value);
 }
 
+/** 抽選リストを使うモード。クイズは問題を使うのでここには来ない。 */
+export type DrawRoomMode = 'lottery' | 'bingo' | 'roulette';
+
 /**
  * そのモードで使える抽選リストの種類。
  *
  * 抽選会で数字を引いても意味が無く、ビンゴで名簿を引いても成立しない。
  * 品目（文字＋画像）はどちらでも使える（景品の抽選・景品ビンゴ）。
+ *
+ * ルーレットは扇に文字を出すだけなので、名簿・品目・重み付きのどれでも回せる。
+ * 重みを持たないリストは、すべての扇が同じ幅になる。
  */
-export function drawKindsForMode(mode: 'lottery' | 'bingo'): DrawListKind[] {
-  return mode === 'lottery' ? ['name', 'item'] : ['number', 'item'];
+export function drawKindsForMode(mode: DrawRoomMode): DrawListKind[] {
+  switch (mode) {
+    case 'lottery':
+      return ['name', 'item'];
+    case 'bingo':
+      return ['number', 'item'];
+    case 'roulette':
+      return ['weighted', 'name', 'item'];
+  }
 }
 
-export function isDrawKindAllowedForMode(kind: DrawListKind, mode: 'lottery' | 'bingo'): boolean {
+export function isDrawKindAllowedForMode(kind: DrawListKind, mode: DrawRoomMode): boolean {
   return drawKindsForMode(mode).includes(kind);
 }
 
@@ -114,6 +129,13 @@ export type DrawSettings = {
   spinIntervalMs: number;
   /** 回し続ける時間 (ms)。これを過ぎてから減速して止まる。 */
   spinDurationMs: number;
+  /**
+   * ルーレットで「ストップ」を押してから実際に止まるまでの時間 (ms)。
+   *
+   * 抽選会・ビンゴの `spinDurationMs` と違い、**司会が押した時点から**数える。
+   * 長くすると、止まる直前の駆け引きを長く見せられる。
+   */
+  stopDurationMs: number;
   /** 結果の文字の大きさ（1920x1080 基準の px）。GAS の LOTTERY_FONT_SIZE 相当。 */
   resultFontSize: number;
   /** 履歴の文字の大きさ（1920x1080 基準の px）。GAS の HISTORY_FONT_SIZE 相当。 */
@@ -139,6 +161,7 @@ export type DrawSettings = {
 export const DEFAULT_DRAW_SETTINGS: DrawSettings = {
   spinIntervalMs: 50,
   spinDurationMs: 2500,
+  stopDurationMs: 4000,
   resultFontSize: 240,
   historyFontSize: 96,
   layout: 'board',
@@ -150,6 +173,8 @@ export const SPIN_INTERVAL_MIN_MS = 20;
 export const SPIN_INTERVAL_MAX_MS = 500;
 export const SPIN_DURATION_MIN_MS = 500;
 export const SPIN_DURATION_MAX_MS = 15_000;
+export const STOP_DURATION_MIN_MS = 500;
+export const STOP_DURATION_MAX_MS = 20_000;
 export const DRAW_FONT_SIZE_MIN = 24;
 export const DRAW_FONT_SIZE_MAX = 480;
 
@@ -169,7 +194,59 @@ export type DrawEntry = {
    * `url` には保存参照が入っており、読み取り時に署名 URL へ解決する。
    */
   image: MediaRef | null;
+  /**
+   * ルーレットの扇の広さ。大きいほど広く、当たりやすい。
+   *
+   * 重み付き以外のリストでは持たない（読むときは `entryWeight()` を通す）。
+   * 「当たりやすさ」そのものなので、0 や負の値は受け付けない。
+   */
+  weight?: number;
 };
+
+/** 重みの上下限。0 は「絶対に当たらない扇」になってしまうので許さない。 */
+export const DRAW_WEIGHT_MIN = 1;
+export const DRAW_WEIGHT_MAX = 100_000;
+
+/**
+ * 扇の広さとして使う重み。
+ *
+ * 重みを持たないリスト（名簿・品目）でもルーレットは回せる。
+ * その場合はすべて同じ幅になる。
+ */
+export function entryWeight(entry: { weight?: number | null }): number {
+  const value = entry.weight;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < DRAW_WEIGHT_MIN) {
+    return 1;
+  }
+  return Math.min(DRAW_WEIGHT_MAX, value);
+}
+
+/**
+ * 重みに応じて 1 件選ぶ。
+ *
+ * `pick` には 0 以上 `total` 未満の整数を返す関数を渡す
+ * （サーバーでは `node:crypto` の randomInt。偏りのない整数が要る）。
+ * 重みの合計を上限にした「くじ引きの番号」を引き、
+ * 端から重みぶんずつ足していって、番号が入った区間の 1 件を返す。
+ */
+export function pickWeighted<T extends object>(
+  entries: readonly T[],
+  pick: (exclusiveMax: number) => number,
+): T | null {
+  if (entries.length === 0) {
+    return null;
+  }
+  const total = entries.reduce((sum, entry) => sum + entryWeight(entry), 0);
+  let ticket = pick(total);
+  for (const entry of entries) {
+    ticket -= entryWeight(entry);
+    if (ticket < 0) {
+      return entry;
+    }
+  }
+  // 端数で行き過ぎることは無いが、念のため最後の 1 件を返す（null にしない）。
+  return entries[entries.length - 1] ?? null;
+}
 
 /**
  * ルームへ固める抽選リスト。

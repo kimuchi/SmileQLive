@@ -7,6 +7,7 @@ import { DrawHistoryOverlay } from '@/components/presentation/DrawHistoryOverlay
 import { DrawWaitingStage } from '@/components/presentation/DrawWaitingStage';
 import { JoinCodeBadge } from '@/components/presentation/JoinCodeBadge';
 import { LotteryStage } from '@/components/presentation/LotteryStage';
+import { RouletteStage } from '@/components/presentation/RouletteStage';
 import { PresentAudioHint } from '@/components/presentation/PresentAudioHint';
 import { QuestionStage } from '@/components/presentation/QuestionStage';
 import { RankingStage } from '@/components/presentation/RankingStage';
@@ -31,6 +32,7 @@ import { useAnonymousSessionReady } from '@/hooks/use-anonymous-session';
 import { useCountdown } from '@/hooks/use-countdown';
 import { useExpiryLock } from '@/hooks/use-expiry-lock';
 import { useDrawRoulette } from '@/hooks/use-draw-roulette';
+import { useRouletteWheel } from '@/hooks/use-roulette-wheel';
 import { useRoomSnapshot } from '@/hooks/use-room-snapshot';
 import {
   latestStageEntry,
@@ -113,7 +115,23 @@ export function PresentScreen({ roomId }: { roomId: string }) {
     candidates: draw ? remainingStageEntries(draw) : EMPTY_CANDIDATES,
     intervalMs: draw?.settings.spinIntervalMs ?? 50,
     durationMs: draw?.settings.spinDurationMs ?? 2500,
-    enabled: true,
+    // ルーレットは円盤そのものが回るので、候補を切り替える演出は使わない。
+    enabled: snapshot?.mode !== 'roulette',
+  });
+
+  /*
+    ルーレットの円盤。
+    サーバーが「回っている（draw_spinning）」と言っている間だけ回し、
+    結果が届いたら当たりの扇が針の下へ来る角度まで減速して止める。
+    止まるまでの時間は抽選リストの設定に従う。
+  */
+  const wheelSpinning = snapshot?.phase === 'draw_spinning';
+  const wheelRef = useRouletteWheel({
+    entries: draw?.entries ?? EMPTY_CANDIDATES,
+    isSpinning: wheelSpinning,
+    winnerId: draw?.latestEntryId ?? null,
+    latestOrder: draw?.latestOrder ?? null,
+    stopDurationMs: draw?.settings.stopDurationMs ?? 4000,
   });
 
   useDrawSoundCues({
@@ -276,6 +294,16 @@ export function PresentScreen({ roomId }: { roomId: string }) {
     // 抽選会・ビンゴ。参加者は来ないので、待機画面も参加 URL を出さない。
     if (phase === 'lobby') {
       body = <DrawWaitingStage draw={shownDraw} />;
+    } else if (snapshot.mode === 'roulette') {
+      body = (
+        <RouletteStage
+          draw={draw}
+          wheelRef={wheelRef}
+          spinning={wheelSpinning}
+          revealed={phase === 'draw_revealed' || phase === 'finished'}
+          winnerId={wheelSpinning ? null : (draw.latestEntryId ?? null)}
+        />
+      );
     } else if (snapshot.mode === 'bingo') {
       body = (
         <BingoStage

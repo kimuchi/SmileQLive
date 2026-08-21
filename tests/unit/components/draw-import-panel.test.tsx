@@ -15,9 +15,14 @@ import { DRAW_ENTRY_MAX_COUNT } from '@/domain/draw/draw-list';
 
 const LIST_ID = '11111111-1111-4111-8111-111111111111';
 
-function renderPanel(currentCount = 0) {
+function renderPanel(currentCount = 0, withWeight = false) {
   return render(
-    <DrawImportPanel listId={LIST_ID} currentCount={currentCount} onImported={() => {}} />,
+    <DrawImportPanel
+      listId={LIST_ID}
+      withWeight={withWeight}
+      currentCount={currentCount}
+      onImported={() => {}}
+    />,
   );
 }
 
@@ -70,6 +75,37 @@ describe('抽選リストの貼り付け取り込み', () => {
 
     expect(previewValue('取り込む行数')).toBe('2件');
     expect(screen.getByText('空の行 1 件は飛ばします')).toBeInTheDocument();
+  });
+
+  it('重み付きのリストでは、どの列を重みにしたかと各行の重みを取り込む前に出す', () => {
+    renderPanel(0, true);
+    paste('項目\t重み\n大当たり\t1\nあたり\t4\nはずれ\t15\n');
+
+    expect(previewValue('取り込む行数')).toBe('3件');
+    expect(previewValue('重みにする列')).toBe('2列目（重み）');
+    // 重みは相対値なので、貼った時点で 1 件ずつ見えていないと確かめようがない。
+    expect(screen.getByText('重み 15')).toBeInTheDocument();
+  });
+
+  it('「重みを読まない」を選ぶと、全部同じ幅（重み 1）になる', () => {
+    renderPanel(0, true);
+    paste('項目\t重み\n大当たり\t1\nはずれ\t15\n');
+    expect(previewValue('重みにする列')).toBe('2列目（重み）');
+
+    fireEvent.change(screen.getByLabelText('重みとして読む列'), { target: { value: 'none' } });
+
+    expect(previewValue('重みにする列')).toBe('読みません（全部同じ幅）');
+    expect(screen.queryByText('重み 15')).not.toBeInTheDocument();
+    expect(screen.getAllByText('重み 1')).toHaveLength(2);
+  });
+
+  it('重みを持たないリストでは、重みの欄そのものを出さない', () => {
+    renderPanel();
+    paste('項目\t重み\n大当たり\t1\nはずれ\t15\n');
+
+    // 名簿・品目に重みを付けても保存されない。選べると「付けたつもり」を生む。
+    expect(screen.queryByLabelText('重みとして読む列')).not.toBeInTheDocument();
+    expect(screen.queryByText('重みにする列')).not.toBeInTheDocument();
   });
 
   it('今の行に足すと上限を超えるときは、黙って切らずに取り込ませない', () => {

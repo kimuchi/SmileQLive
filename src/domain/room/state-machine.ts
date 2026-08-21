@@ -28,8 +28,10 @@ export const ROOM_PHASES = [
   'question_locked',
   'answer_revealed',
   'scoreboard',
-  // 抽選会・ビンゴ
+  // 抽選会・ビンゴ・ルーレット
   'draw_ready',
+  // ルーレットだけ。回っている最中（まだ当たりは決まっていない）。
+  'draw_spinning',
   'draw_revealed',
   'finished',
 ] as const;
@@ -45,8 +47,10 @@ export const ROOM_ACTIONS = [
   'reopen_question',
   'reveal_answer',
   'show_scoreboard',
-  // 抽選会・ビンゴ
+  // 抽選会・ビンゴ・ルーレット
   'open_draw',
+  // ルーレットだけ。回し始める（この時点では当たりを決めない）。
+  'start_spin',
   'draw_next',
   'continue_draw',
   'undo_draw',
@@ -72,16 +76,19 @@ const ALLOWED_FROM: Record<RoomAction, readonly RoomPhase[]> = {
   reveal_answer: ['question_locked'],
   show_scoreboard: ['answer_revealed'],
 
-  // --- 抽選会・ビンゴ ---
+  // --- 抽選会・ビンゴ・ルーレット ---
   open_draw: ['lobby'],
+  // ルーレットの「スタート」。回すだけで、当たりはまだ決めない。
+  start_spin: ['draw_ready', 'draw_revealed'],
   // 結果を出したまま続けて引ける（ビンゴは「引く」を繰り返すのが自然）。
-  draw_next: ['draw_ready', 'draw_revealed'],
+  // ルーレットでは「ストップ」にあたり、回っている最中からだけ押せる。
+  draw_next: ['draw_ready', 'draw_spinning', 'draw_revealed'],
   // 表示を READY へ戻す（抽選会の「次へ」）。
   continue_draw: ['draw_revealed'],
   // 引き間違い・二度押しからの復帰。直前の 1 件だけを取り消す。
-  undo_draw: ['draw_ready', 'draw_revealed'],
+  undo_draw: ['draw_ready', 'draw_spinning', 'draw_revealed'],
   // 全部戻して最初から。GAS 版の「当選リセット」に相当。
-  reset_draws: ['draw_ready', 'draw_revealed'],
+  reset_draws: ['draw_ready', 'draw_spinning', 'draw_revealed'],
 
   finish_room: [
     'lobby',
@@ -89,6 +96,7 @@ const ALLOWED_FROM: Record<RoomAction, readonly RoomPhase[]> = {
     'scoreboard',
     'question_locked',
     'draw_ready',
+    'draw_spinning',
     'draw_revealed',
   ],
   // 終了からの復帰。ここだけが finished から出る唯一の道。
@@ -107,6 +115,7 @@ const RESULT_PHASE: Record<RoomAction, RoomPhase> = {
   show_scoreboard: 'scoreboard',
 
   open_draw: 'draw_ready',
+  start_spin: 'draw_spinning',
   draw_next: 'draw_revealed',
   continue_draw: 'draw_ready',
   // 取り消したあとは必ず READY へ戻す。直前の結果を出したままだと
@@ -129,6 +138,7 @@ const REQUIRES_QUESTION_ID: Record<RoomAction, boolean> = {
   reveal_answer: false,
   show_scoreboard: false,
   open_draw: false,
+  start_spin: false,
   draw_next: false,
   continue_draw: false,
   undo_draw: false,
@@ -146,13 +156,16 @@ const ACTION_MODES: Record<RoomAction, readonly RoomMode[]> = {
   reopen_question: ['quiz'],
   reveal_answer: ['quiz'],
   show_scoreboard: ['quiz'],
-  open_draw: ['lottery', 'bingo'],
-  draw_next: ['lottery', 'bingo'],
-  continue_draw: ['lottery', 'bingo'],
-  undo_draw: ['lottery', 'bingo'],
-  reset_draws: ['lottery', 'bingo'],
-  finish_room: ['quiz', 'lottery', 'bingo'],
-  reopen_room: ['quiz', 'lottery', 'bingo'],
+  open_draw: ['lottery', 'bingo', 'roulette'],
+  // 回してから止める、という 2 段構えはルーレットだけ。
+  // 抽選会・ビンゴは押した瞬間に決まる（演出の時間は投影側が持つ）。
+  start_spin: ['roulette'],
+  draw_next: ['lottery', 'bingo', 'roulette'],
+  continue_draw: ['lottery', 'bingo', 'roulette'],
+  undo_draw: ['lottery', 'bingo', 'roulette'],
+  reset_draws: ['lottery', 'bingo', 'roulette'],
+  finish_room: ['quiz', 'lottery', 'bingo', 'roulette'],
+  reopen_room: ['quiz', 'lottery', 'bingo', 'roulette'],
 };
 
 export function actionAllowedInMode(action: RoomAction, mode: RoomMode): boolean {
@@ -239,10 +252,7 @@ export function showsBreakdown(phase: RoomPhase): boolean {
  * false（既定）なら question_ready では問題を出さない。
  * 会場では「第3問！」で一度ためてから出すほうが盛り上がるため。
  */
-export function showsQuestion(
-  phase: RoomPhase,
-  options: { beforeOpen?: boolean } = {},
-): boolean {
+export function showsQuestion(phase: RoomPhase, options: { beforeOpen?: boolean } = {}): boolean {
   if (phase === 'question_ready') {
     return options.beforeOpen === true;
   }
@@ -270,7 +280,11 @@ export type NextStep = {
  * ふつうの進行は「引く」を繰り返すだけ。引くものが無くなったら終了へ導く。
  * 取り消し・リセットは事故からの復帰なので、この 1 ボタンには載せない。
  */
-function nextDrawStep(phase: RoomPhase, mode: RoomMode, remainingDrawCount: number): NextStep | null {
+function nextDrawStep(
+  phase: RoomPhase,
+  mode: RoomMode,
+  remainingDrawCount: number,
+): NextStep | null {
   const drawNext: NextStep = {
     action: 'draw_next',
     label: roomActionLabel('draw_next', mode),
@@ -284,11 +298,28 @@ function nextDrawStep(phase: RoomPhase, mode: RoomMode, remainingDrawCount: numb
 
   switch (phase) {
     case 'lobby':
-      return { action: 'open_draw', label: roomActionLabel('open_draw', mode), questionPosition: null };
+      return {
+        action: 'open_draw',
+        label: roomActionLabel('open_draw', mode),
+        questionPosition: null,
+      };
     case 'draw_ready':
     case 'draw_revealed':
       // 残りが無ければ「引く」を出さない。押せるのに何も起きないボタンを出さない。
-      return remainingDrawCount > 0 ? drawNext : finish;
+      if (remainingDrawCount <= 0) {
+        return finish;
+      }
+      // ルーレットは「スタート」で回してから「ストップ」で止める 2 段構え。
+      return mode === 'roulette'
+        ? {
+            action: 'start_spin',
+            label: roomActionLabel('start_spin', mode),
+            questionPosition: null,
+          }
+        : drawNext;
+    case 'draw_spinning':
+      // 回っている最中の次の一手は「ストップ」だけ。
+      return drawNext;
     case 'finished':
       // 終了後は「次」ではなく再開。誤操作にならないよう専用の導線に任せる。
       return null;
@@ -342,7 +373,13 @@ export function nextStep(input: {
       );
     case 'scoreboard':
       // ランキングを見せたあと。次があれば続け、無ければ終了。
-      return showNextQuestion() ?? { action: 'finish_room', label: 'クイズを終了', questionPosition: null };
+      return (
+        showNextQuestion() ?? {
+          action: 'finish_room',
+          label: 'クイズを終了',
+          questionPosition: null,
+        }
+      );
     case 'finished':
       // 終了後は「次」ではなく再開。誤操作にならないよう専用の導線に任せる。
       return null;
@@ -359,6 +396,7 @@ export const ROOM_PHASE_LABELS: Record<RoomPhase, string> = {
   answer_revealed: '正解発表',
   scoreboard: 'ランキング',
   draw_ready: '抽選待ち',
+  draw_spinning: '回転中',
   draw_revealed: '結果表示中',
   finished: '終了',
 };
@@ -372,6 +410,7 @@ export const ROOM_ACTION_LABELS: Record<RoomAction, string> = {
   reveal_answer: '正解を発表',
   show_scoreboard: 'ランキングを表示',
   open_draw: 'はじめる',
+  start_spin: 'スタート',
   draw_next: '抽選する',
   continue_draw: '次へ',
   undo_draw: '直前の1件を取り消す',
@@ -408,6 +447,17 @@ const MODE_ACTION_LABELS: Partial<Record<RoomMode, Partial<Record<RoomAction, st
     reset_draws: '出た球をリセット',
     finish_room: 'ビンゴを終了',
     reopen_room: 'ビンゴを再開',
+  },
+  roulette: {
+    open_draw: 'ルーレットをはじめる',
+    start_spin: 'スタート',
+    // 回っている最中に押す。押してから止まるまでの時間は設定で決める。
+    draw_next: 'ストップ',
+    continue_draw: '次へ',
+    undo_draw: '直前の結果を取り消す',
+    reset_draws: '結果をリセット',
+    finish_room: 'ルーレットを終了',
+    reopen_room: 'ルーレットを再開',
   },
 };
 

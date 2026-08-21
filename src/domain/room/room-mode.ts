@@ -10,7 +10,7 @@
  * 保存されていなければクイズとして扱う（移行作業を要らなくするため）。
  */
 
-export const ROOM_MODES = ['quiz', 'lottery', 'bingo'] as const;
+export const ROOM_MODES = ['quiz', 'lottery', 'bingo', 'roulette'] as const;
 
 export type RoomMode = (typeof ROOM_MODES)[number];
 
@@ -18,6 +18,7 @@ export const ROOM_MODE_LABELS: Record<RoomMode, string> = {
   quiz: 'クイズ',
   lottery: '抽選会',
   bingo: 'ビンゴ',
+  roulette: 'ルーレット',
 };
 
 /** 管理画面でモードを選ぶときの説明。 */
@@ -25,6 +26,7 @@ export const ROOM_MODE_DESCRIPTIONS: Record<RoomMode, string> = {
   quiz: '問題を出して、参加者がスマホで答えます。',
   lottery: '名簿から当選者を 1 人ずつ引きます。参加者のスマホは使いません。',
   bingo: '数字や景品を 1 つずつ引きます。ビンゴカードは紙で配ります。',
+  roulette: '重みを付けた項目を円盤に並べ、回して止めます。同じ項目が何度でも出ます。',
 };
 
 export function isRoomMode(value: string): value is RoomMode {
@@ -42,12 +44,23 @@ export function roomModeOf(value: unknown): RoomMode {
 }
 
 /**
- * 1 つずつ引いていくモードか（抽選会・ビンゴ）。
+ * 1 つずつ引いていくモードか（抽選会・ビンゴ・ルーレット）。
  *
- * この 2 つは「残りから 1 つ選んで出す」という同じ仕組みで動く。
- * 違うのは見せ方（ルーレットで 1 人ずつ / 球を並べていく）だけ。
+ * どれも「引いたものをサーバーが決めて記録し、投影は見せるだけ」という
+ * 同じ仕組みで動く。違うのは見せ方と、引いたものを母集団から外すかどうか。
  */
 export function isDrawMode(mode: RoomMode): boolean {
+  return mode === 'lottery' || mode === 'bingo' || mode === 'roulette';
+}
+
+/**
+ * 引いたものを母集団から外すか。
+ *
+ * 抽選会・ビンゴは外す（同じ人が二度当たらない／同じ球が二度出ない）。
+ * **ルーレットは外さない。** 円盤の扇は回すたびに減らないし、
+ * 減らしてしまうと重みの意味が無くなる（残り 1 つになれば必ずそれが出る）。
+ */
+export function removesDrawnEntries(mode: RoomMode): boolean {
   return mode === 'lottery' || mode === 'bingo';
 }
 

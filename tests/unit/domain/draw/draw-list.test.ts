@@ -3,6 +3,8 @@ import {
   DRAW_ENTRY_MAX_COUNT,
   buildNumberEntries,
   drawLayoutOf,
+  entryWeight,
+  pickWeighted,
   drawnEntries,
   latestDraw,
   remainingEntries,
@@ -170,5 +172,93 @@ describe('drawLayoutOf', () => {
 
   it('新しい設定では layout が showBoard より強い', () => {
     expect(drawLayoutOf({ layout: 'list', showBoard: true })).toBe('list');
+  });
+});
+
+describe('pickWeighted', () => {
+  /**
+   * ルーレットの当たりを決める。
+   *
+   * 重みは「扇の広さ」そのもの。広い扇ほど当たりやすくなければ、
+   * 会場に見えている円盤と結果が食い違う（これがいちばんの事故）。
+   * 乱数は差し替えて、区間の境目まで確かめる。
+   */
+  const entries = [
+    { id: 'a', weight: 1 },
+    { id: 'b', weight: 3 },
+    { id: 'c', weight: 6 },
+  ];
+
+  it('くじ番号が入った区間の 1 件を返す', () => {
+    // 合計 10。0 → a、1〜3 → b、4〜9 → c。
+    expect(pickWeighted(entries, () => 0)?.id).toBe('a');
+    expect(pickWeighted(entries, () => 1)?.id).toBe('b');
+    expect(pickWeighted(entries, () => 3)?.id).toBe('b');
+    expect(pickWeighted(entries, () => 4)?.id).toBe('c');
+    expect(pickWeighted(entries, () => 9)?.id).toBe('c');
+  });
+
+  it('重みの合計を上限として渡す', () => {
+    // 乱数へ渡す上限が合計と違うと、端の扇が当たらない／はみ出す。
+    let received: number | null = null;
+    pickWeighted(entries, (max) => {
+      received = max;
+      return 0;
+    });
+    expect(received).toBe(10);
+  });
+
+  it('重みを持たない項目はすべて同じ幅', () => {
+    const plain = [{ id: 'x' }, { id: 'y' }, { id: 'z' }];
+    expect(pickWeighted(plain, () => 0)?.id).toBe('x');
+    expect(pickWeighted(plain, () => 1)?.id).toBe('y');
+    expect(pickWeighted(plain, () => 2)?.id).toBe('z');
+  });
+
+  it('空なら null', () => {
+    expect(pickWeighted([], () => 0)).toBeNull();
+  });
+
+  it('偏りが重みどおりになる', () => {
+    // 実際に 1 万回引いて、割合が重みへ寄ることを確かめる。
+    const counts = new Map<string, number>();
+    /*
+      決まった手順で数を進める（テストの結果を毎回同じにする）。
+
+      線形合同法の下位ビットをそのまま剰余で使うと、周期が短くて偏る
+      （実際、素朴に seed % max で書いたときは 6 倍のはずが 3 倍になった）。
+      本番が node:crypto の randomInt を使っているのも同じ理由。
+    */
+    let seed = 12345;
+    const next = (max: number) => {
+      seed = (seed + 0x6d2b79f5) >>> 0;
+      let t = seed;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      const unit = ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      return Math.floor(unit * max);
+    };
+    for (let i = 0; i < 10_000; i += 1) {
+      const picked = pickWeighted(entries, next);
+      counts.set(picked?.id ?? '', (counts.get(picked?.id ?? '') ?? 0) + 1);
+    }
+    // c は a の 6 倍あたりやすい。乱数のぶれを見て幅を持たせる。
+    expect((counts.get('c') ?? 0) / (counts.get('a') ?? 1)).toBeGreaterThan(4);
+    expect((counts.get('c') ?? 0) / (counts.get('a') ?? 1)).toBeLessThan(9);
+  });
+});
+
+describe('entryWeight', () => {
+  it('無い・0 以下・数字でないものは 1 として扱う', () => {
+    // 0 の扇は「絶対に当たらないのに見えている」になってしまう。
+    expect(entryWeight({})).toBe(1);
+    expect(entryWeight({ weight: 0 })).toBe(1);
+    expect(entryWeight({ weight: -5 })).toBe(1);
+    expect(entryWeight({ weight: Number.NaN })).toBe(1);
+    expect(entryWeight({ weight: null })).toBe(1);
+  });
+
+  it('大きすぎる重みは上限で止める', () => {
+    expect(entryWeight({ weight: 10_000_000 })).toBe(100_000);
   });
 });

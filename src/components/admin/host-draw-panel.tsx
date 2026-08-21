@@ -11,7 +11,7 @@ import {
   latestStageEntry,
   type StageDraw,
 } from '@/domain/draw/draw-stage';
-import type { RoomMode } from '@/domain/room/room-mode';
+import { removesDrawnEntries, type RoomMode } from '@/domain/room/room-mode';
 import {
   ROOM_PHASE_LABELS,
   nextStep,
@@ -22,7 +22,7 @@ import {
 import { formatCount, formatRank } from '@/lib/format';
 
 /**
- * 司会画面の抽選操作（抽選会・ビンゴ）。
+ * 司会画面の抽選操作（抽選会・ビンゴ・ルーレット）。
  *
  * 守っている約束:
  * - 出せる操作は Snapshot の availableActions だけ。文言は roomActionLabel でモードへ合わせる。
@@ -84,6 +84,13 @@ export function HostDrawPanel({
 
   const isLottery = mode === 'lottery';
   const unit = drawUnit(draw.kind);
+  /*
+    ルーレットは引いたものを母集団から外さない。
+    「残り」という言い方が成り立たないので、件数の見せ方を変える。
+  */
+  const counts = removesDrawnEntries(mode)
+    ? `残り ${formatCount(draw.remainingCount, unit)} / 全 ${formatCount(draw.entries.length, unit)}`
+    : `全 ${formatCount(draw.entries.length, '項目')}`;
 
   const history = useMemo(() => drawnStageEntries(draw), [draw]);
   const latest = useMemo(() => latestStageEntry(draw), [draw]);
@@ -158,9 +165,11 @@ export function HostDrawPanel({
             </Button>
             <p className="text-xs text-slate-600">
               いまは「{ROOM_PHASE_LABELS[phase]}」です。
-              {draw.remainingCount === 0 && draw.drawn.length > 0
-                ? '引くものは残っていません。'
-                : `残り ${formatCount(draw.remainingCount, unit)}。`}
+              {!removesDrawnEntries(mode)
+                ? `${counts}。何度でも出ます。`
+                : draw.remainingCount === 0 && draw.drawn.length > 0
+                  ? '引くものは残っていません。'
+                  : `残り ${formatCount(draw.remainingCount, unit)}。`}
             </p>
           </div>
         ) : (
@@ -194,16 +203,10 @@ export function HostDrawPanel({
         </div>
       </Card>
 
-      <Card
-        title={isLottery ? '直近の当選' : '直近に引いたもの'}
-        description={`残り ${formatCount(draw.remainingCount, unit)} / 全 ${formatCount(
-          draw.entries.length,
-          unit,
-        )}`}
-      >
+      <Card title={isLottery ? '直近の当選' : '直近に引いたもの'} description={counts}>
         {latest === null ? (
           <p className="text-sm text-slate-600">
-            まだ 1 件も引いていません。「{roomActionLabel('draw_next', mode)}
+            まだ 1 件も引いていません。「{step?.label ?? roomActionLabel('draw_next', mode)}
             」を押すとここに出ます。
           </p>
         ) : (

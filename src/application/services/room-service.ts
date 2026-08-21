@@ -47,7 +47,12 @@ import {
   resolveStageBackground,
 } from '@/application/services/media-service';
 import type { CreateRoomInput } from '@/lib/validation/schemas';
-import { acceptsParticipants, roomModeOf, type RoomMode } from '@/domain/room/room-mode';
+import {
+  acceptsParticipants,
+  removesDrawnEntries,
+  roomModeOf,
+  type RoomMode,
+} from '@/domain/room/room-mode';
 import { toMyAnswerDto } from '@/application/services/answer-mapper';
 import { parseQuizSnapshot } from '@/application/services/quiz-snapshot-codec';
 import { resolveQuestionMedia } from '@/application/services/media-service';
@@ -494,7 +499,6 @@ export async function getStaffSnapshot(
   };
 }
 
-
 /**
  * 抽選会・ビンゴの状態を、投影・司会画面が使える形へ作る。
  *
@@ -528,7 +532,16 @@ async function buildStageDraw(room: RoomDoc): Promise<StageDraw | null> {
     drawn,
     latestEntryId: last?.entryId ?? null,
     latestOrder: last?.order ?? null,
-    remainingCount: Math.max(0, pool.entries.length - drawn.length),
+    /*
+      あと何回引けるか。
+
+      抽選会・ビンゴは引いたぶんだけ減る（同じものは二度出ない）。
+      ルーレットは減らない。扇は回すたびに減らないし、
+      減らすと「残り 0」で司会画面が終了を促してしまう。
+    */
+    remainingCount: removesDrawnEntries(roomModeOf(room.mode))
+      ? Math.max(0, pool.entries.length - drawn.length)
+      : pool.entries.length,
     numberRange:
       numbers.length > 0 ? { min: Math.min(...numbers), max: Math.max(...numbers) } : null,
     background,

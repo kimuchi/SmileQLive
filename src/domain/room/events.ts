@@ -26,8 +26,10 @@ export const PUBLIC_EVENT_TYPES = [
   'question.locked',
   'answer.revealed',
   'scoreboard.shown',
-  // 抽選会・ビンゴ
+  // 抽選会・ビンゴ・ルーレット
   'draw.ready',
+  // ルーレットが回り始めた（当たりはまだ決まっていない）。
+  'draw.spinning',
   'draw.revealed',
   'room.finished',
 ] as const;
@@ -105,6 +107,8 @@ export function publicEventTypeForPhase(phase: RoomPhase): PublicEventType {
       return 'scoreboard.shown';
     case 'draw_ready':
       return 'draw.ready';
+    case 'draw_spinning':
+      return 'draw.spinning';
     case 'draw_revealed':
       return 'draw.revealed';
     case 'finished':
