@@ -13,6 +13,7 @@ import { formatCount, formatQuestionProgress } from '@/lib/format';
  */
 export function StageHeader({
   quizTitle,
+  showTitle,
   phase,
   questionPosition,
   totalQuestions,
@@ -23,6 +24,13 @@ export function StageHeader({
   stale,
 }: {
   quizTitle: string;
+  /**
+   * 表題を出すか。
+   *
+   * 抽選会・ビンゴ・ルーレットでは出さない。
+   * 会場のスクリーンにはいちばん見せたいもの（当選者・球）だけを出す。
+   */
+  showTitle: boolean;
   phase: RoomPhase;
   questionPosition: number | null;
   totalQuestions: number;
@@ -48,7 +56,7 @@ export function StageHeader({
       style={{ fontSize: stageSize(STAGE_FONT.caption), gap: stageSize(24) }}
     >
       <div className="flex min-w-0 items-center" style={{ gap: stageSize(20) }}>
-        <span className="truncate font-bold text-white/90">{quizTitle}</span>
+        {showTitle ? <span className="truncate font-bold text-white/90">{quizTitle}</span> : null}
         {questionPosition !== null ? (
           <span className="shrink-0 whitespace-nowrap">
             {formatQuestionProgress(questionPosition, totalQuestions, {

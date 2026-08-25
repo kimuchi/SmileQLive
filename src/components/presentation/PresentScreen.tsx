@@ -11,6 +11,7 @@ import { RevealStage } from '@/components/presentation/RevealStage';
 import { CONTROL_BAR_HEIGHT, DemoControlBar } from '@/components/presentation/DemoControlBar';
 import { DrawStageBody, type DrawStagePhase } from '@/components/presentation/DrawStageBody';
 import { StageFrame } from '@/components/presentation/StageFrame';
+import { stageBodyKey } from '@/components/presentation/stage-key';
 import { UpcomingStage } from '@/components/presentation/UpcomingStage';
 import { StageHeader } from '@/components/presentation/StageHeader';
 import { StageNotice } from '@/components/presentation/StageNotice';
@@ -30,6 +31,7 @@ import { useCountdown } from '@/hooks/use-countdown';
 import { useExpiryLock } from '@/hooks/use-expiry-lock';
 import { useLocalDraw } from '@/hooks/use-local-draw';
 import { useRoomSnapshot } from '@/hooks/use-room-snapshot';
+import { cn } from '@/lib/client/cn';
 import {} from '@/domain/draw/draw-stage';
 import { acceptsParticipants, isDrawMode } from '@/domain/room/room-mode';
 
@@ -385,6 +387,8 @@ export function PresentScreen({ roomId }: { roomId: string }) {
         header={
           <StageHeader
             quizTitle={snapshot.quizTitle}
+            // 抽選会・ビンゴ・ルーレットでは表題を出さない（見せたいものだけを出す）。
+            showTitle={!drawMode}
             phase={phase}
             questionPosition={snapshot.currentQuestionPosition}
             totalQuestions={snapshot.totalQuestions}
@@ -403,8 +407,16 @@ export function PresentScreen({ roomId }: { roomId: string }) {
           会場では画面の切り替わりが伝わりにくいため、動きで「変わった」ことを示す。
         */}
         <div
-          key={`${phase}-${snapshot.currentQuestion?.id ?? ''}`}
-          className="stage-enter flex min-h-0 flex-1 flex-col justify-center"
+          // 作り直すかどうかの決め方は stage-key.ts にまとめてある。
+          key={stageBodyKey({
+            drawMode,
+            phase,
+            questionId: snapshot.currentQuestion?.id ?? null,
+          })}
+          className={cn(
+            'flex min-h-0 flex-1 flex-col justify-center',
+            drawMode ? '' : 'stage-enter',
+          )}
         >
           {body}
         </div>
