@@ -145,7 +145,14 @@ function toStatus(readiness: AudioReadiness): AudioStatus {
   };
 }
 
-export function useProjectorAudio(roomId: string): ProjectorAudio {
+/**
+ * @param roomId 二重再生防止の記録を分ける鍵。音の一覧の取得先にも使う。
+ * @param manifestUrl 音の一覧の取得先を明示する（省略時はルームごとの一覧）。
+ *   ルームを持たないデモは同梱の一覧 `/sounds/manifest.json` を渡す。
+ *   ルーム経由の取得先は **UUID の roomId しか受け付けない**ので、
+ *   `demo` のような名前で呼ぶと 404 になり、音がまったく鳴らなくなる。
+ */
+export function useProjectorAudio(roomId: string, manifestUrl?: string): ProjectorAudio {
   const managerRef = useRef<ProjectorAudioManager | null>(null);
 
   const [isUnlocked, setIsUnlocked] = useState(false);
@@ -166,7 +173,7 @@ export function useProjectorAudio(roomId: string): ProjectorAudio {
         差し替えていない音は同梱の既定音の URL が返るので、
         設定を一度も触っていなくてもそのまま鳴る。
       */
-      manifestUrl: `/api/rooms/${roomId}/sounds`,
+      manifestUrl: manifestUrl ?? `/api/rooms/${roomId}/sounds`,
       volume: settings.volume,
       muted: settings.muted,
       onWarning: setWarning,
@@ -185,7 +192,7 @@ export function useProjectorAudio(roomId: string): ProjectorAudio {
       manager.dispose();
       managerRef.current = null;
     };
-  }, [roomId]);
+  }, [manifestUrl, roomId]);
 
   const enable = useCallback(
     async (options: { silent?: boolean } = {}): Promise<void> => {
@@ -290,7 +297,11 @@ export function useProjectorAudio(roomId: string): ProjectorAudio {
     setTestResult(null);
     // 動作確認は何度でも鳴らせるようにキーを渡さない。
     const result = await manager.playTest(TEST_SOUND);
-    setTestResult(result.ok ? 'テスト音を鳴らしました。会場のスピーカーを確認してください。' : (result.reason ?? '鳴らせませんでした'));
+    setTestResult(
+      result.ok
+        ? 'テスト音を鳴らしました。会場のスピーカーを確認してください。'
+        : (result.reason ?? '鳴らせませんでした'),
+    );
   }, []);
 
   const setMuted = useCallback(
@@ -444,6 +455,7 @@ export function useDrawSoundCues({
   isUnlocked,
   spinning,
   latestOrder,
+  dedupeKey,
 }: {
   play: (name: SoundName, dedupeKey?: string) => void;
   startLoop: (name: SoundName) => void;
@@ -451,8 +463,19 @@ export function useDrawSoundCues({
   isUnlocked: boolean;
   /** ルーレットを回している最中か。 */
   spinning: boolean;
-  /** 直近に引いたものの通し番号。同じ番号で二度鳴らさないための鍵。 */
+  /** 直近に引いたものの通し番号。 */
   latestOrder: number | null;
+  /**
+   * 同じ出来事で二度鳴らさないための鍵。
+   *
+   * 投影画面は Snapshot を取り直すたびに同じ状態へ反応するため、
+   * 本番では**状態番号を含む鍵**を渡して鳴り直しを防ぐ。
+   * 通し番号だけを鍵にすると、「最初からやり直す」で 1 番から引き直したときに
+   * 「もう鳴らした」と判定されて無音になる（実際にそうなった）。
+   *
+   * デモは同じ番号を何度でも引き直すので、**鍵を渡さない**（毎回鳴らす）。
+   */
+  dedupeKey?: string | undefined;
 }): void {
   useEffect(() => {
     if (!isUnlocked || !spinning) {
@@ -474,7 +497,12 @@ export function useDrawSoundCues({
     const wasSpinning = wasSpinningRef.current;
     wasSpinningRef.current = spinning;
 
-    if (!isUnlocked || latestOrder === null) {
+    if (latestOrder === null) {
+      // 引いた記録が消えた（やり直し・デモの「最初から」）。次の 1 番から鳴らし直す。
+      soundedOrderRef.current = null;
+      return;
+    }
+    if (!isUnlocked) {
       return;
     }
     // 回し終わった瞬間だけ鳴らす。
@@ -485,6 +513,6 @@ export function useDrawSoundCues({
       return;
     }
     soundedOrderRef.current = latestOrder;
-    play('draw-win', `draw:${latestOrder}`);
-  }, [isUnlocked, latestOrder, play, spinning]);
+    play('draw-win', dedupeKey);
+  }, [dedupeKey, isUnlocked, latestOrder, play, spinning]);
 }

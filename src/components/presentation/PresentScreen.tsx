@@ -2,16 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { AudioControls } from '@/components/presentation/AudioControls';
-import { BingoStage } from '@/components/presentation/BingoStage';
-import { DrawHistoryOverlay } from '@/components/presentation/DrawHistoryOverlay';
 import { DrawWaitingStage } from '@/components/presentation/DrawWaitingStage';
 import { JoinCodeBadge } from '@/components/presentation/JoinCodeBadge';
-import { LotteryStage } from '@/components/presentation/LotteryStage';
-import { RouletteStage } from '@/components/presentation/RouletteStage';
 import { PresentAudioHint } from '@/components/presentation/PresentAudioHint';
 import { QuestionStage } from '@/components/presentation/QuestionStage';
 import { RankingStage } from '@/components/presentation/RankingStage';
 import { RevealStage } from '@/components/presentation/RevealStage';
+import { CONTROL_BAR_HEIGHT, DemoControlBar } from '@/components/presentation/DemoControlBar';
+import { DrawStageBody, type DrawStagePhase } from '@/components/presentation/DrawStageBody';
 import { StageFrame } from '@/components/presentation/StageFrame';
 import { UpcomingStage } from '@/components/presentation/UpcomingStage';
 import { StageHeader } from '@/components/presentation/StageHeader';
@@ -20,7 +18,6 @@ import { WaitingStage } from '@/components/presentation/WaitingStage';
 import { useFullscreen } from '@/components/presentation/use-fullscreen';
 import { useJoinUrl } from '@/components/presentation/use-join-url';
 import {
-  useDrawSoundCues,
   useProjectorAudio,
   useStageSoundCues,
 } from '@/components/presentation/use-projector-audio';
@@ -31,14 +28,9 @@ import type { StaffSnapshot } from '@/domain/room/snapshot';
 import { useAnonymousSessionReady } from '@/hooks/use-anonymous-session';
 import { useCountdown } from '@/hooks/use-countdown';
 import { useExpiryLock } from '@/hooks/use-expiry-lock';
-import { useDrawRoulette } from '@/hooks/use-draw-roulette';
-import { useRouletteWheel } from '@/hooks/use-roulette-wheel';
+import { useLocalDraw } from '@/hooks/use-local-draw';
 import { useRoomSnapshot } from '@/hooks/use-room-snapshot';
-import {
-  latestStageEntry,
-  remainingStageEntries,
-  visibleDuringSpin,
-} from '@/domain/draw/draw-stage';
+import {} from '@/domain/draw/draw-stage';
 import { acceptsParticipants, isDrawMode } from '@/domain/room/room-mode';
 
 /**
@@ -57,9 +49,6 @@ import { acceptsParticipants, isDrawMode } from '@/domain/room/room-mode';
 /** ランキング発表をためる時間の下限・上限（素材の長さがこの範囲に丸められる）。 */
 const RANKING_BUILD_UP_MIN_MS = 1_500;
 const RANKING_BUILD_UP_MAX_MS = 6_000;
-
-/** 抽選が無いときに渡す空の候補。毎回 [] を作ると演出が回り直す。 */
-const EMPTY_CANDIDATES: never[] = [];
 
 export function PresentScreen({ roomId }: { roomId: string }) {
   // 再読込でセッションクッキーが切れていても、同じ匿名ユーザーで張り直せるようにする。
@@ -103,45 +92,39 @@ export function PresentScreen({ roomId }: { roomId: string }) {
   });
 
   /**
-   * 抽選会・ビンゴの演出。
+   * 抽選会・ビンゴ・ルーレット。
    *
-   * 引いた結果はサーバーが決めて記録済み。ここは**見せるだけ**。
-   * 音が出せるかどうかとは切り離す。音が鳴らない会場でも演出は回す。
+   * 引いた結果はサーバーが決めて記録済み。投影は**見せるだけ**。
+   * 演出と効果音は DrawStageBody が持つ（デモと同じものを使う）。
    */
-  const draw = snapshot?.draw ?? null;
-  const roulette = useDrawRoulette({
-    latestOrder: draw?.latestOrder ?? null,
-    winner: draw ? latestStageEntry(draw) : null,
-    candidates: draw ? remainingStageEntries(draw) : EMPTY_CANDIDATES,
-    intervalMs: draw?.settings.spinIntervalMs ?? 50,
-    durationMs: draw?.settings.spinDurationMs ?? 2500,
-    // ルーレットは円盤そのものが回るので、候補を切り替える演出は使わない。
-    enabled: snapshot?.mode !== 'roulette',
-  });
+  const liveDraw = snapshot?.draw ?? null;
+  const roomMode = snapshot?.mode ?? 'quiz';
 
   /*
-    ルーレットの円盤。
-    サーバーが「回っている（draw_spinning）」と言っている間だけ回し、
-    結果が届いたら当たりの扇が針の下へ来る角度まで減速して止める。
-    止まるまでの時間は抽選リストの設定に従う。
+    デモ。
+
+    用意した抽選リストをそのまま使い、**ブラウザの中だけで**引く。
+    サーバーへは何も送らないので、本番の記録は動かない。
+    当日の前に「どんな画面になるか」を関係者へ見せるためのもの。
   */
-  const wheelSpinning = snapshot?.phase === 'draw_spinning';
-  const wheelRef = useRouletteWheel({
-    entries: draw?.entries ?? EMPTY_CANDIDATES,
-    isSpinning: wheelSpinning,
-    winnerId: draw?.latestEntryId ?? null,
-    latestOrder: draw?.latestOrder ?? null,
-    stopDurationMs: draw?.settings.stopDurationMs ?? 4000,
+  const [demoActive, setDemoActive] = useState(false);
+  const local = useLocalDraw({
+    pool: liveDraw,
+    mode: roomMode,
+    active: demoActive,
+    // ルームの抽選リストは作成時に固まるので、ルームが同じなら母集団も同じ。
+    poolKey: roomId,
   });
 
-  useDrawSoundCues({
-    play,
-    startLoop,
-    stopLoop,
-    isUnlocked: audio.isUnlocked,
-    spinning: roulette.spinning,
-    latestOrder: draw?.latestOrder ?? null,
-  });
+  const draw = demoActive ? local.draw : liveDraw;
+  /** 投影へ渡す進行の段階。本番のフェーズとデモの状態を同じ 3 つへ寄せる。 */
+  const drawPhase: DrawStagePhase = demoActive
+    ? local.phase
+    : snapshot?.phase === 'draw_spinning'
+      ? 'spinning'
+      : snapshot?.phase === 'draw_revealed' || snapshot?.phase === 'finished'
+        ? 'revealed'
+        : 'ready';
 
   /*
     引いたものの一覧を出しているか。
@@ -295,46 +278,26 @@ export function PresentScreen({ roomId }: { roomId: string }) {
   const question = snapshot.currentQuestion;
   const drawMode = isDrawMode(snapshot.mode);
 
-  /*
-    盤面・履歴へ渡すのは「回し終わったぶんだけ」。
-    サーバーは引く操作を受けた瞬間に記録するので、そのまま渡すと
-    回している最中に答えが盤面へ出てしまう（会場がいちばん白ける形）。
-    ルーレットそのものは記録の側（draw）で回す。
-  */
-  const shownDraw = draw ? visibleDuringSpin(draw, roulette.spinning) : null;
-
   let body: ReactNode;
 
-  if (drawMode && draw && shownDraw) {
-    // 抽選会・ビンゴ。参加者は来ないので、待機画面も参加 URL を出さない。
-    if (phase === 'lobby') {
-      body = <DrawWaitingStage draw={shownDraw} />;
-    } else if (snapshot.mode === 'roulette') {
-      body = (
-        <RouletteStage
-          draw={draw}
-          wheelRef={wheelRef}
-          spinning={wheelSpinning}
-          revealed={phase === 'draw_revealed' || phase === 'finished'}
-          winnerId={wheelSpinning ? null : (draw.latestEntryId ?? null)}
-        />
-      );
-    } else if (snapshot.mode === 'bingo') {
-      body = (
-        <BingoStage
-          draw={shownDraw}
-          display={roulette.display}
-          spinning={roulette.spinning}
-          revealed={phase === 'draw_revealed' || phase === 'finished'}
-        />
-      );
+  if (drawMode && draw) {
+    // 抽選会・ビンゴ・ルーレット。参加者は来ないので、待機画面も参加 URL を出さない。
+    if (!demoActive && phase === 'lobby') {
+      body = <DrawWaitingStage draw={draw} />;
     } else {
       body = (
-        <LotteryStage
-          draw={shownDraw}
-          display={roulette.display}
-          spinning={roulette.spinning}
-          revealed={phase === 'draw_revealed' || phase === 'finished'}
+        <DrawStageBody
+          draw={draw}
+          mode={roomMode}
+          phase={drawPhase}
+          audio={audio}
+          historyOpen={historyOpen}
+          onCloseHistory={toggleHistory}
+          /*
+            本番は状態番号を含む鍵で二重再生を防ぐ（取り直しのたびに鳴り直さない）。
+            デモは同じ番号を何度も引き直すので鍵を渡さない（毎回鳴らす）。
+          */
+          {...(demoActive ? {} : { soundDedupeKey: `draw:${snapshot.stateVersion}` })}
         />
       );
     }
@@ -414,6 +377,8 @@ export function PresentScreen({ roomId }: { roomId: string }) {
   return (
     <>
       <StageFrame
+        // デモ中は操作の帯のぶん 16:9 を縮める（盤面の最後の行が隠れないように）。
+        bottomInset={demoActive ? CONTROL_BAR_HEIGHT : 0}
         // 抽選リストに背景画像があれば敷く（GAS 版の背景画像に相当）。
         backgroundUrl={draw?.background?.url ?? null}
         aside={showJoinBadge && joinUrl ? <JoinCodeBadge joinUrl={joinUrl} /> : undefined}
@@ -443,24 +408,64 @@ export function PresentScreen({ roomId }: { roomId: string }) {
         >
           {body}
         </div>
-
-        {drawMode && shownDraw && historyOpen ? (
-          <DrawHistoryOverlay
-            draw={shownDraw}
-            ordered={snapshot.mode === 'lottery'}
-            onClose={toggleHistory}
-          />
-        ) : null}
       </StageFrame>
       {controls}
       {drawMode && draw ? (
-        <button
-          type="button"
-          onClick={toggleHistory}
-          className="fixed top-4 right-4 z-40 rounded-lg border border-cyan-300/60 bg-black/60 px-3 py-2 text-sm font-bold text-cyan-200"
-        >
-          {historyOpen ? '閉じる' : snapshot.mode === 'lottery' ? '当選者一覧' : '出た球'}
-        </button>
+        <div className="fixed top-4 right-4 z-40 flex gap-2 text-sm">
+          <button
+            type="button"
+            onClick={toggleHistory}
+            className="rounded-lg border border-cyan-300/60 bg-black/60 px-3 py-2 font-bold text-cyan-200"
+          >
+            {historyOpen ? '閉じる' : snapshot.mode === 'lottery' ? '当選者一覧' : '出た球'}
+          </button>
+          {/*
+            このルームの抽選リストを使ったデモ。
+            ブラウザの中だけで引くので、本番の記録は動かない。
+            当日の前に「どんな画面になるか」を関係者へ見せるためのもの。
+          */}
+          {!demoActive ? (
+            <button
+              type="button"
+              onClick={() => {
+                setDemoActive(true);
+              }}
+              className="rounded-lg border border-amber-300/60 bg-black/60 px-3 py-2 font-bold text-amber-200"
+            >
+              デモで試す
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {demoActive ? (
+        <DemoControlBar
+          isRoulette={roomMode === 'roulette'}
+          spinning={local.phase === 'spinning'}
+          exhausted={local.exhausted}
+          auto={local.auto}
+          onDrawNext={local.drawNext}
+          onStartSpin={local.startSpin}
+          onReset={local.reset}
+          onToggleAuto={() => {
+            local.setAuto(!local.auto);
+          }}
+          leading={
+            <span className="shrink-0 whitespace-nowrap text-white/70">
+              {draw?.title ?? ''}（本番の記録は動きません）
+            </span>
+          }
+          trailing={
+            <button
+              type="button"
+              onClick={() => {
+                setDemoActive(false);
+              }}
+              className="shrink-0 rounded-lg border border-white/30 px-4 py-2 font-bold text-white/80"
+            >
+              デモを終える
+            </button>
+          }
+        />
       ) : null}
       {overlay}
     </>

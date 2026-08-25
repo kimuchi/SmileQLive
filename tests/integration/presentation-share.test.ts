@@ -125,7 +125,8 @@ describe.skipIf(!available)('投影用リンクの共有', () => {
 
     expect(presenters).toContain('visitor-1');
     expect(presenters).toContain('visitor-2');
-  });
+    // このファイルで最初に走るテスト。エミュレータへの初回接続ぶん長めに待つ。
+  }, 20_000);
 
   it('同じ人が開き直しても通る（再読み込み・戻る操作）', async () => {
     const roomId = await seedRoom();
@@ -138,6 +139,34 @@ describe.skipIf(!available)('投影用リンクの共有', () => {
     visitorUid = 'visitor-same';
     await exchangePresentationToken(token);
     await expect(exchangePresentationToken(token)).resolves.toEqual({ roomId });
+  });
+
+  it('一覧の出し入れは、投影画面へ伝わるように書き込む', async () => {
+    /*
+      投影画面は「取り直して」と言われたときしか読み直さない。
+      ルーム本体だけ書き換えても伝わらず、司会が押しても何も起きない
+      （実際にそうなっていた）。staff/progress を触って知らせる。
+    */
+    const roomId = await seedRoom();
+    const { getDb } = await import('@/infrastructure/firebase/admin');
+    const { Timestamp } = await import('firebase-admin/firestore');
+    const db = getDb();
+
+    const progress = db.collection('rooms').doc(roomId).collection('staff').doc('progress');
+    await progress.set({ roomId, stateVersion: 3, updatedAt: Timestamp.fromMillis(1_000_000) });
+
+    const { setDrawHistoryOpen } =
+      await import('@/infrastructure/firebase/repositories/room-repository');
+    await setDrawHistoryOpen(roomId, true);
+
+    const room = (await db.collection('rooms').doc(roomId).get()).data();
+    expect(room?.showDrawHistory).toBe(true);
+
+    const after = (await progress.get()).data();
+    // 版番号は上げない（司会の二度押し防止を誤検知させないため）。
+    expect(after?.stateVersion).toBe(3);
+    // 更新時刻は動かす。投影画面はこの変化を合図に読み直す。
+    expect(after?.updatedAt?.toMillis()).toBeGreaterThan(1_000_000);
   });
 
   it('でたらめなトークンは通さない', async () => {

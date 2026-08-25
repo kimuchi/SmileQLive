@@ -228,9 +228,18 @@ export async function setJoinOpen(roomId: string, open: boolean): Promise<void> 
  *
  * 見せ方だけなので `public/state` へは写さない（参加者には関係が無い）。
  * stateVersion も上げない。上げると司会の二度押し防止が誤検知する。
+ *
+ * **そのぶん `staff/progress` を触って投影画面へ知らせる。**
+ * 投影画面は「版番号が上がったとき」しか取り直さないため、
+ * ここを触らないと切り替えたことが伝わらない（実際に伝わっていなかった）。
+ * 回答数の進捗と同じ経路で、版番号を変えずに「取り直して」と伝える。
  */
 export async function setDrawHistoryOpen(roomId: string, open: boolean): Promise<void> {
-  await roomRef(roomId).update({ showDrawHistory: open, updatedAt: nowTimestamp() });
+  const now = nowTimestamp();
+  const batch = getDb().batch();
+  batch.update(roomRef(roomId), { showDrawHistory: open, updatedAt: now });
+  batch.set(staffProgressRef(roomId), { updatedAt: now }, { merge: true });
+  await batch.commit();
 }
 
 export async function listRooms(ownerId: string): Promise<RoomListItem[]> {

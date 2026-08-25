@@ -12,7 +12,7 @@
  * ブラウザで描いた HTML が食い違う（画面がちらつく）。
  */
 
-import { DEFAULT_DRAW_SETTINGS, type DrawListKind, type DrawRecord } from '@/domain/draw/draw-list';
+import { DEFAULT_DRAW_SETTINGS, type DrawListKind } from '@/domain/draw/draw-list';
 import type { StageDraw, StageDrawEntry } from '@/domain/draw/draw-stage';
 
 /** デモで見せられる催し。クイズは問題が要るのでここには入れない。 */
@@ -121,68 +121,30 @@ const DEMO_TITLES: Record<DemoMode, string> = {
 };
 
 /**
- * 引いた記録から、投影画面へ渡す形を作る。
+ * デモの母集団と設定。
  *
- * 本番と同じ `StageDraw` を作るので、**見え方は本番とまったく同じ**になる。
- * デモ専用の画面を別に作ると、そちらだけ直し忘れて食い違う。
+ * 引いた記録は持たない（`useLocalDraw` が持つ）。
+ * 本番と同じ `StageDraw` の形なので、投影の見え方も本番とまったく同じになる。
  */
-export function buildDemoDraw(mode: DemoMode, drawn: readonly DrawRecord[]): StageDraw {
+export function buildDemoPool(mode: DemoMode): StageDraw {
   const entries = demoEntries(mode);
-  const latest = drawn[drawn.length - 1] ?? null;
 
   return {
     title: DEMO_TITLES[mode],
     kind: demoKind(mode),
     settings: {
       ...DEFAULT_DRAW_SETTINGS,
-      // デモは見せるのが目的なので、少し短めに回して次々出す。
+      // デモは見せるのが目的なので、少し短めに回す。
       spinDurationMs: 1800,
       stopDurationMs: 2600,
       layout: mode === 'bingo' ? 'board' : 'result',
     },
     entries,
-    drawn: [...drawn],
-    latestEntryId: latest?.entryId ?? null,
-    latestOrder: latest?.order ?? null,
-    // ルーレットは引いても母集団が減らない（本番と同じ扱い）。
-    remainingCount: mode === 'roulette' ? entries.length : entries.length - drawn.length,
+    drawn: [],
+    latestEntryId: null,
+    latestOrder: null,
+    remainingCount: entries.length,
     numberRange: mode === 'bingo' ? { min: DEMO_NUMBER_MIN, max: DEMO_NUMBER_MAX } : null,
     background: null,
   };
-}
-
-/**
- * 次の 1 件を選ぶ。
- *
- * `random` は 0 以上 1 未満を返す関数（ブラウザでは Math.random）。
- * **本番はこの経路を通らない。** 本番はサーバーが `node:crypto` の
- * randomInt で偏りなく引く。ここは見せるためだけの抽選なので、
- * 引数で受け取れるようにして、テストからは決め打ちの値を渡せるようにしている。
- */
-export function pickDemoEntry(
-  mode: DemoMode,
-  drawn: readonly DrawRecord[],
-  random: () => number,
-): StageDrawEntry | null {
-  const entries = demoEntries(mode);
-
-  if (mode === 'roulette') {
-    // 重みぶんの幅を持つ「くじ」を 1 本引く。広い扇ほど当たりやすい。
-    const total = entries.reduce((sum, entry) => sum + (entry.weight ?? 1), 0);
-    let ticket = random() * total;
-    for (const entry of entries) {
-      ticket -= entry.weight ?? 1;
-      if (ticket < 0) {
-        return entry;
-      }
-    }
-    return entries[entries.length - 1] ?? null;
-  }
-
-  const taken = new Set(drawn.map((record) => record.entryId));
-  const remaining = entries.filter((entry) => !taken.has(entry.id));
-  if (remaining.length === 0) {
-    return null;
-  }
-  return remaining[Math.min(remaining.length - 1, Math.floor(random() * remaining.length))] ?? null;
 }
