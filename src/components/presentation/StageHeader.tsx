@@ -18,6 +18,7 @@ export function StageHeader({
   totalQuestions,
   showTotalQuestions,
   participantCount,
+  showParticipants,
   status,
   stale,
 }: {
@@ -28,6 +29,13 @@ export function StageHeader({
   /** 「/ 全n問」を出すか。 */
   showTotalQuestions: boolean;
   participantCount: number;
+  /**
+   * 参加人数を出すか。
+   *
+   * 抽選会・ビンゴ・ルーレットは参加者が入らない催しなので、
+   * 出すと「参加 0人」とだけ書かれた帯になり、壊れているように見える。
+   */
+  showParticipants: boolean;
   status: RoomChannelStatus;
   /** 最新状態の取得に失敗している（表示は直前の状態のまま）。 */
   stale: boolean;
@@ -72,9 +80,11 @@ export function StageHeader({
         ) : null}
 
         <span className="whitespace-nowrap">{ROOM_PHASE_LABELS[phase]}</span>
-        <span className="font-bold whitespace-nowrap text-white/90">
-          参加 {formatCount(participantCount)}
-        </span>
+        {showParticipants ? (
+          <span className="font-bold whitespace-nowrap text-white/90">
+            参加 {formatCount(participantCount)}
+          </span>
+        ) : null}
       </div>
     </header>
   );

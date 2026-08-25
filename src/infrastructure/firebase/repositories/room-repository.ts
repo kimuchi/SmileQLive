@@ -223,6 +223,16 @@ export async function setJoinOpen(roomId: string, open: boolean): Promise<void> 
   await batch.commit();
 }
 
+/**
+ * 「出たもの一覧」の出し入れ。
+ *
+ * 見せ方だけなので `public/state` へは写さない（参加者には関係が無い）。
+ * stateVersion も上げない。上げると司会の二度押し防止が誤検知する。
+ */
+export async function setDrawHistoryOpen(roomId: string, open: boolean): Promise<void> {
+  await roomRef(roomId).update({ showDrawHistory: open, updatedAt: nowTimestamp() });
+}
+
 export async function listRooms(ownerId: string): Promise<RoomListItem[]> {
   const snapshot = await roomsCollection()
     .where('ownerId', '==', ownerId)

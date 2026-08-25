@@ -24,6 +24,23 @@ const SLOWEST_INTERVAL_MS = 700;
 /** 1 回ごとに間隔を伸ばす倍率。 */
 const SLOWDOWN_RATE = 1.1;
 
+/**
+ * 回し始めてから完全に止まるまでのおおよその時間 (ms)。
+ *
+ * 回す時間そのものより、**そのあとの減速のほうが長い**。
+ * 自動送りの間隔をここから決めないと、止まりきる前に次を回してしまい、
+ * 結果を見せる間が無くなる。
+ */
+export function spinTotalMs(intervalMs: number, durationMs: number): number {
+  let interval = Math.max(16, intervalMs);
+  let total = durationMs;
+  while (interval < SLOWEST_INTERVAL_MS) {
+    interval *= SLOWDOWN_RATE;
+    total += interval;
+  }
+  return Math.round(total);
+}
+
 export type DrawRouletteState = {
   /** 回している最中か。効果音の出し分けに使う。 */
   spinning: boolean;
@@ -155,9 +172,7 @@ export function useDrawRoulette(input: {
     };
   }, [durationMs, enabled, intervalMs, latestOrder]);
 
-  const display = spinning
-    ? (candidates.find((entry) => entry.id === shownId) ?? winner)
-    : winner;
+  const display = spinning ? (candidates.find((entry) => entry.id === shownId) ?? winner) : winner;
 
   return { spinning, display };
 }

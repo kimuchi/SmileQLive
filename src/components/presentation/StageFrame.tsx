@@ -19,6 +19,7 @@ export function StageFrame({
   children,
   className,
   backgroundUrl = null,
+  bottomInset = 0,
 }: {
   header?: ReactNode;
   footer?: ReactNode;
@@ -38,13 +39,24 @@ export function StageFrame({
    * 文字が読めなくならないよう、上から暗い膜を重ねる。
    */
   backgroundUrl?: string | null;
+  /**
+   * 画面の下に空けておく高さ (px)。
+   *
+   * デモの操作帯のように、下へ固定で置くものがあるときに使う。
+   * 0 のままだと 16:9 の画面が画面いっぱいに広がり、
+   * 下に重ねたものが盤面の最後の行を隠してしまう。
+   */
+  bottomInset?: number;
 }) {
   return (
-    <main className="stage-root flex min-h-dvh w-full items-center justify-center overflow-hidden">
+    <main
+      className="stage-root flex w-full items-center justify-center overflow-hidden"
+      style={{ minHeight: `calc(100dvh - ${bottomInset}px)` }}
+    >
       <div
         className="stage-scale relative aspect-video w-full"
         // 高さが足りないときは高さ基準で幅を決め、16:9 のまま収める。
-        style={{ width: 'min(100vw, calc(100dvh * 16 / 9))' }}
+        style={{ width: `min(100vw, calc((100dvh - ${bottomInset}px) * 16 / 9))` }}
       >
         {backgroundUrl ? (
           <div

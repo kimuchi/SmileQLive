@@ -78,7 +78,8 @@ export type HostConsoleProps = {
 /** 延長ボタンは秒数ごとに分かれるため、押した 1 つだけを処理中にできるようにする。 */
 type ExtendBusyKey = `extend-${number}`;
 
-type BusyKey = RoomAction | ExtendBusyKey | 'join-toggle' | 'rotate' | 'presentation' | null;
+type BusyKey =
+  RoomAction | ExtendBusyKey | 'join-toggle' | 'rotate' | 'presentation' | 'draw-history' | null;
 
 export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
   const { snapshot, error, status, clock, refresh } = useRoomSnapshot<StaffSnapshot>({
@@ -226,6 +227,28 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
     [refresh, roomId],
   );
 
+  /**
+   * 投影画面へ「出たもの一覧」を出す／しまう。
+   *
+   * 投影担当は別の端末にいることが多い。司会から切り替えられないと、
+   * 「一覧を出して」と口で頼むことになり、会場では伝わらない。
+   */
+  const handleToggleDrawHistory = useCallback(
+    async (open: boolean) => {
+      setBusy('draw-history');
+      setActionError(null);
+      try {
+        await apiPost(`/api/rooms/${roomId}/draw-history`, { open });
+        await refresh();
+      } catch (caught) {
+        setActionError(toUserErrorMessage(caught));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [refresh, roomId],
+  );
+
   const handleRotateJoinUrl = useCallback(async () => {
     setBusy('rotate');
     setActionError(null);
@@ -302,7 +325,10 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
 
   // 投影端末は開催中に落ちることがある。待機中に限らず常に再発行できるようにしておく。
   const presentationCard = (
-    <Card title="投影画面" description="会場のスクリーンへ映す画面を開きます。">
+    <Card
+      title="投影画面"
+      description="会場のスクリーンへ映す画面を開きます。リンクはそのまま人に渡せます。"
+    >
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <Button
@@ -331,7 +357,8 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
           </div>
         ) : (
           <p className="text-sm text-slate-600">
-            投影用リンクは一時的なものです。発行した端末・ブラウザで開いてください。
+            投影用リンクを発行すると、そのURLを別の端末や別の人へ渡せます。
+            渡された人はログイン無しで同じ投影画面を開けます（何人でも開けます）。
           </p>
         )}
       </div>
@@ -422,7 +449,10 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
               // busy には延長ボタン用のキーも入る。進行操作のときだけ渡す。
               busyAction={busy !== null && isRoomAction(busy) ? busy : null}
               busy={actionsBusy}
+              historyOpen={snapshot.showDrawHistory}
+              historyBusy={busy === 'draw-history'}
               onRunAction={handleDrawAction}
+              onToggleHistory={handleToggleDrawHistory}
             />
           ) : (
             <Alert variant="warning" title="引くものが入っていません">

@@ -72,6 +72,13 @@ export type StaffSnapshot = SnapshotBase & {
   /** 事前読込対象の画像 URL。 */
   preloadImageUrls: string[];
   /**
+   * 投影画面へ「出たもの一覧」を出すか。
+   *
+   * 司会画面から切り替える。投影担当が別の端末にいても、
+   * 司会が「一覧を出して」と口で頼まなくて済むようにするためのもの。
+   */
+  showDrawHistory: boolean;
+  /**
    * 参加用の二次元コードを進行中もずっと隅に出すか。
    * 途中から来た人がその場で入れるようにするための設定。
    */

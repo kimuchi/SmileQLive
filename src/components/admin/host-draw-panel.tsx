@@ -41,7 +41,11 @@ export type HostDrawPanelProps = {
   busyAction: RoomAction | null;
   /** ほかの欄も含めて処理中か。二重送信を防ぐため、その間は全ボタンを無効にする。 */
   busy: boolean;
+  /** 投影画面へ「出たもの一覧」を出しているか。 */
+  historyOpen: boolean;
+  historyBusy: boolean;
   onRunAction: (action: RoomAction) => void;
+  onToggleHistory: (open: boolean) => void;
 };
 
 /**
@@ -78,7 +82,10 @@ export function HostDrawPanel({
   availableActions,
   busyAction,
   busy,
+  historyOpen,
+  historyBusy,
   onRunAction,
+  onToggleHistory,
 }: HostDrawPanelProps) {
   const [pending, setPending] = useState<ConfirmAction | null>(null);
 
@@ -237,6 +244,23 @@ export function HostDrawPanel({
       <Card
         title={isLottery ? '当選者' : '出たもの'}
         description={`引いた順に並びます（${formatCount(history.length, unit)}）。`}
+        actions={
+          /*
+            投影画面へ同じ一覧を出す。
+            投影担当は別の端末にいることが多く、口で頼むと会場では伝わらない。
+          */
+          <Button
+            variant={historyOpen ? 'primary' : 'secondary'}
+            size="sm"
+            loading={historyBusy}
+            disabled={busy && !historyBusy}
+            onClick={() => {
+              onToggleHistory(!historyOpen);
+            }}
+          >
+            {historyOpen ? '投影から下げる' : '投影に出す'}
+          </Button>
+        }
       >
         {history.length === 0 ? (
           <p className="text-sm text-slate-600">

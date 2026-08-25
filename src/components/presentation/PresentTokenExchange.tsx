@@ -1,27 +1,30 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Button } from '@/components/shared/Button';
 import { FullScreenMessage } from '@/components/shared/FullScreenMessage';
+import { PresentScreen } from '@/components/presentation/PresentScreen';
 import { useEnsureAnonymousSession } from '@/hooks/use-anonymous-session';
 import { apiPost } from '@/lib/client/api-client';
 import { toUserErrorMessage } from '@/lib/client/error-text';
 
 /**
- * 別端末で投影を始めるための引き換え画面。
+ * 投影用リンクを開いたときの画面。
  *
  * - 投影担当にログインは求めない。**匿名認証 → セッションクッキー**を先に用意してから
  *   引き換え API を呼ぶ（引き換えはこの匿名ユーザーを presenter として登録する）。
- * - 投影用トークンは URL ではなく **リクエストボディ** で送る。
- *   ログ・Referer・解析へトークンを残さない（/present/* は Referrer-Policy: no-referrer）。
- * - 引き換えに成功したら投影画面へ replace 遷移し、URL からトークンを取り除く。
- *   戻るボタンでトークン付き URL へ戻れないようにする。
- * - 引き換えは 1 回だけ試す。二重に投げてリンクを無駄に消費しない。
+ * - **URL はこのまま動かさない。** アドレスバーの URL をそのまま人へ渡せば、
+ *   相手もログイン無しで同じ投影画面を開ける。
+ *   以前は引き換えたあと /present/{ルームID} へ移していたが、
+ *   その URL は本人しか開けないため、共有しようとすると相手が締め出された。
+ * - 引き換えは何人が開いても通る。1 回で使い切りにはしない。
+ * - トークンはリクエストボディで送る。/present/* は Referrer-Policy: no-referrer なので、
+ *   外部サイトへ URL が漏れることもない。
+ * - 引き換えは端末ごとに 1 回だけ試す。二重に投げない。
  */
 export function PresentTokenExchange({ token }: { token: string }) {
-  const router = useRouter();
   const ensureAnonymousSession = useEnsureAnonymousSession();
+  const [roomId, setRoomId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const requestedRef = useRef(false);
 
@@ -54,12 +57,12 @@ export function PresentTokenExchange({ token }: { token: string }) {
           setErrorMessage('投影用リンクを確認できませんでした');
           return;
         }
-        router.replace(`/present/${roomId}`);
+        setRoomId(roomId);
       } catch (caught) {
         setErrorMessage(toUserErrorMessage(caught));
       }
     })();
-  }, [router, token]);
+  }, [token]);
 
   if (errorMessage !== null) {
     return (
@@ -80,5 +83,9 @@ export function PresentTokenExchange({ token }: { token: string }) {
     );
   }
 
-  return <FullScreenMessage tone="stage" title="投影画面を準備しています" loading />;
+  if (roomId === null) {
+    return <FullScreenMessage tone="stage" title="投影画面を準備しています" loading />;
+  }
+
+  return <PresentScreen roomId={roomId} />;
 }

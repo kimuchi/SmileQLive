@@ -49,6 +49,7 @@ import {
 import type { CreateRoomInput } from '@/lib/validation/schemas';
 import {
   acceptsParticipants,
+  isDrawMode,
   removesDrawnEntries,
   roomModeOf,
   type RoomMode,
@@ -68,6 +69,7 @@ import {
   countParticipants,
   createPresentationLink,
   createRoom as createRoomDoc,
+  setDrawHistoryOpen as setDrawHistoryOpenDoc,
   getRoomMembers,
   listRooms as listRoomsForOwner,
   rotateJoinToken as rotateJoinTokenHash,
@@ -478,6 +480,7 @@ export async function getStaffSnapshot(
     availableActions: availableActions(phase, roomModeOf(room.mode)),
     preloadImageUrls: buildPreloadUrls(parts),
     alwaysShowJoinCode: snapshot.settings.alwaysShowJoinCode,
+    showDrawHistory: room.showDrawHistory === true,
   };
 
   if (audience !== 'host') {
@@ -794,6 +797,20 @@ export async function setJoinOpen(roomId: string, open: boolean): Promise<void> 
   await setJoinOpenDoc(roomId, open);
 
   logger.info('room.join_open_changed', { roomId, joinOpen: open });
+}
+
+/**
+ * 投影画面の「出たもの一覧」を出し入れする（司会のみ）。
+ *
+ * 同じ値を送っても成功として扱う（冪等）。会場で連打されても壊れない。
+ */
+export async function setDrawHistoryOpen(roomId: string, open: boolean): Promise<void> {
+  const { room } = await requireRoomMember(roomId, ['host']);
+  if (!isDrawMode(roomModeOf(room.mode))) {
+    throw new AppError('ROOM_MODE_MISMATCH');
+  }
+  await setDrawHistoryOpenDoc(roomId, open);
+  logger.info('room.draw_history_changed', { roomId, open });
 }
 
 /** 司会向けのルーム一覧。 */

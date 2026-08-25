@@ -49,6 +49,20 @@ export default async function AdminRoomNewPage({
           )
         }
         className="max-w-4xl"
+        actions={
+          /*
+            どんな投影になるのかを、ルームを作る前に見られるようにする。
+            ログインの要らない画面なので、そのまま人へ渡せる。
+          */
+          <a
+            href="/present/demo"
+            target="_blank"
+            rel="noreferrer"
+            className="text-brand-700 inline-flex min-h-12 items-center rounded-xl border border-slate-300 px-4 text-sm font-bold hover:underline"
+          >
+            投影のデモを見る
+          </a>
+        }
       >
         <RoomCreatePanel
           initialQuizId={parsed.success ? parsed.data : null}

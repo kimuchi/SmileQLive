@@ -282,6 +282,14 @@ export type RoomDoc = {
    * 集中することはない（参加登録と違い、ここは配列で持って良い）。
    */
   drawn: DrawRecord[];
+  /**
+   * 投影画面へ「出たもの一覧」を出しているか。
+   *
+   * 進行そのものではなく**見せ方**なので、フェーズとは別に持つ
+   * （一覧を出している間も、司会は引く操作を続けられる）。
+   * この項目が増える前に作られたルームには入っていない（読み側で false 扱い）。
+   */
+  showDrawHistory?: boolean;
   createdAt: FirestoreTimestamp;
   updatedAt: FirestoreTimestamp;
   finishedAt: FirestoreTimestamp | null;

@@ -39,7 +39,7 @@ import {
   remainingStageEntries,
   visibleDuringSpin,
 } from '@/domain/draw/draw-stage';
-import { isDrawMode } from '@/domain/room/room-mode';
+import { acceptsParticipants, isDrawMode } from '@/domain/room/room-mode';
 
 /**
  * 会場投影画面。
@@ -143,11 +143,25 @@ export function PresentScreen({ roomId }: { roomId: string }) {
     latestOrder: draw?.latestOrder ?? null,
   });
 
-  /** 引いたものの一覧を出しているか。 */
-  const [historyOpen, setHistoryOpen] = useState(false);
+  /*
+    引いたものの一覧を出しているか。
+
+    司会画面から切り替えられる（投影担当が別の端末にいても、口で頼まなくて済む）。
+    投影画面のボタンでもその場で開け閉めできるが、**司会が切り替えたらそちらに従う**。
+    そのために「どの司会の値に対する操作か」を一緒に覚えておき、
+    司会の値が変わったら投影側の操作を捨てる。
+  */
+  const hostHistoryOpen = snapshot?.showDrawHistory === true;
+  const [localHistory, setLocalHistory] = useState<{ hostValue: boolean; open: boolean } | null>(
+    null,
+  );
+  const historyOpen =
+    localHistory !== null && localHistory.hostValue === hostHistoryOpen
+      ? localHistory.open
+      : hostHistoryOpen;
   const toggleHistory = useCallback(() => {
-    setHistoryOpen((open) => !open);
-  }, []);
+    setLocalHistory({ hostValue: hostHistoryOpen, open: !historyOpen });
+  }, [historyOpen, hostHistoryOpen]);
 
   const handleLocked = useCallback(() => {
     void refresh();
@@ -264,7 +278,8 @@ export function PresentScreen({ roomId }: { roomId: string }) {
             }
           >
             <p className="max-w-xl text-sm text-white/60">
-              司会画面で発行した投影用リンクを開いているか確認してください。
+              司会画面で「投影用リンクを発行」して、そのURLを開いてください。
+              このページのURL（/present/…）は、そのままでは他の人が開けません。
             </p>
           </FullScreenMessage>
         ) : (
@@ -410,6 +425,8 @@ export function PresentScreen({ roomId }: { roomId: string }) {
             totalQuestions={snapshot.totalQuestions}
             showTotalQuestions={snapshot.showTotalQuestions}
             participantCount={snapshot.participantCount}
+            // 抽選会・ビンゴ・ルーレットは参加者が入らない。「参加 0人」を出さない。
+            showParticipants={acceptsParticipants(snapshot.mode)}
             status={status}
             stale={error !== null}
           />

@@ -16,6 +16,7 @@ import { availableActions, type RoomPhase } from '@/domain/room/state-machine';
  */
 
 const onRunAction = vi.fn<(action: string) => void>();
+const onToggleHistory = vi.fn<(open: boolean) => void>();
 
 function drawOf(overrides: Partial<StageDraw> = {}): StageDraw {
   const entries = [
@@ -52,7 +53,12 @@ function drawnTwice(overrides: Partial<StageDraw> = {}): StageDraw {
   });
 }
 
-function renderPanel(input: { mode: 'lottery' | 'bingo'; phase: RoomPhase; draw: StageDraw }) {
+function renderPanel(input: {
+  mode: 'lottery' | 'bingo';
+  phase: RoomPhase;
+  draw: StageDraw;
+  historyOpen?: boolean;
+}) {
   return render(
     <HostDrawPanel
       mode={input.mode}
@@ -61,12 +67,16 @@ function renderPanel(input: { mode: 'lottery' | 'bingo'; phase: RoomPhase; draw:
       availableActions={availableActions(input.phase, input.mode)}
       busyAction={null}
       busy={false}
+      historyOpen={input.historyOpen ?? false}
+      historyBusy={false}
       onRunAction={onRunAction}
+      onToggleHistory={onToggleHistory}
     />,
   );
 }
 
 beforeEach(() => {
+  onToggleHistory.mockReset();
   onRunAction.mockReset();
 });
 
@@ -194,5 +204,39 @@ describe('司会画面の抽選操作', () => {
 
     expect(screen.getByRole('button', { name: '抽選会を再開' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '抽選する' })).not.toBeInTheDocument();
+  });
+
+  it('投影へ一覧を出す／下げるを司会画面から切り替えられる', async () => {
+    const user = userEvent.setup();
+    /*
+      投影担当は別の端末にいることが多い。司会から切り替えられないと
+      「一覧を出して」と口で頼むことになり、会場では伝わらない。
+    */
+    const { rerender } = renderPanel({
+      mode: 'lottery',
+      phase: 'draw_revealed',
+      draw: drawnTwice(),
+    });
+
+    await user.click(screen.getByRole('button', { name: '投影に出す' }));
+    expect(onToggleHistory).toHaveBeenCalledWith(true);
+
+    rerender(
+      <HostDrawPanel
+        mode="lottery"
+        phase="draw_revealed"
+        draw={drawnTwice()}
+        availableActions={availableActions('draw_revealed', 'lottery')}
+        busyAction={null}
+        busy={false}
+        historyOpen
+        historyBusy={false}
+        onRunAction={onRunAction}
+        onToggleHistory={onToggleHistory}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '投影から下げる' }));
+    expect(onToggleHistory).toHaveBeenLastCalledWith(false);
   });
 });
