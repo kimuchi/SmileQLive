@@ -9,6 +9,7 @@ import { MyScorePanel } from '@/components/participant/MyScorePanel';
 import { NoticePanel } from '@/components/participant/NoticePanel';
 import { NumberAnswerForm } from '@/components/participant/NumberAnswerForm';
 import { ParticipantHeader } from '@/components/participant/ParticipantHeader';
+import { PollVotePanel } from '@/components/participant/PollVotePanel';
 import { QuestionCard } from '@/components/participant/QuestionCard';
 import { RevealPanel } from '@/components/participant/RevealPanel';
 import { Alert } from '@/components/shared/Alert';
@@ -36,6 +37,8 @@ import type { MyResultResponse, SubmitAnswerResponse } from '@/types/api';
  * - 「回答済み」にするのは成功応答を受け取ってから。通信エラーでは回答済みにしない。
  * - 締切の最終判定はサーバー / DB。カウントダウンは表示のための補正値にすぎない。
  * - 音・振動を一切扱わない（効果音は投影画面だけの責務）。
+ * - 投票のルームでは問題の代わりに投票の画面を出す。
+ *   投票では**票数も順位も届かない**（サーバーがそもそも送ってこない）。
  */
 
 /** 再送のために保持する送信内容。 */
@@ -301,7 +304,19 @@ export function PlayScreen({ roomId }: { roomId: string }) {
 
   let body: ReactNode;
 
-  if (phase === 'lobby') {
+  if (snapshot.poll !== null) {
+    // 投票のルーム。問題は無く、選択肢と自分の票だけが届く。
+    body = (
+      <PollVotePanel
+        roomId={roomId}
+        phase={phase}
+        poll={snapshot.poll}
+        myVote={snapshot.myVote}
+        result={snapshot.pollResult}
+        onVoted={() => void refresh()}
+      />
+    );
+  } else if (phase === 'lobby') {
     body = (
       <NoticePanel
         title="まもなく始まります"

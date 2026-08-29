@@ -12,6 +12,7 @@
 
 import type { BallotGroup, BallotOption, PollSettings, PollSnapshot } from '@/domain/poll/ballot';
 import { isRevealed, revealComplete, type RankedOption } from '@/domain/poll/tally';
+import type { PublicImage } from '@/domain/quiz/public-question';
 
 /** 参加者・投影が見る投票の状態。 */
 export type PollStage = {
@@ -24,6 +25,13 @@ export type PollStage = {
   voteCount: number;
   /** 参加している人数。 */
   participantCount: number;
+  /**
+   * 投影の背景に敷く画像。
+   *
+   * 設定に入っているのは保存参照だけなので、**署名 URL への解決はサーバーが行う**
+   * （期限付きの URL を用紙へ固めると、当日には切れている）。
+   */
+  background: PublicImage | null;
 };
 
 /** 発表済みの 1 順位。 */
@@ -77,7 +85,12 @@ export type PollTallyRow = {
  */
 export function pollStageOf(
   snapshot: PollSnapshot,
-  counts: { voteCount: number; participantCount: number },
+  counts: {
+    voteCount: number;
+    participantCount: number;
+    /** 解決済みの背景画像。無ければ既定の背景。 */
+    background?: PublicImage | null;
+  },
 ): PollStage {
   return {
     title: snapshot.title,
@@ -87,6 +100,7 @@ export function pollStageOf(
     settings: snapshot.settings,
     voteCount: counts.voteCount,
     participantCount: counts.participantCount,
+    background: counts.background ?? null,
   };
 }
 

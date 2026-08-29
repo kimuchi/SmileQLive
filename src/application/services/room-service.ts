@@ -41,7 +41,12 @@ import {
 } from '@/domain/room/state-machine';
 import { buildSnapshotForQuiz } from '@/application/services/quiz-service';
 import { buildDrawSnapshot } from '@/application/services/draw-list-service';
-import { buildPollSnapshot, getMyVote, rankFor, readTally } from '@/application/services/poll-service';
+import {
+  buildPollSnapshot,
+  getMyVote,
+  rankFor,
+  readTally,
+} from '@/application/services/poll-service';
 import {
   pollResultOf,
   pollStageOf,
@@ -512,7 +517,7 @@ export async function getStaffSnapshot(
   // 抽選会・ビンゴの状態。クイズのルームでは作らない。
   const draw = await buildStageDraw(room);
   // 投票の状態。投票のルームでのみ作る。
-  const pollViews = buildPollViews(room, participantCount);
+  const pollViews = await buildPollViews(room, participantCount, { includeBackground: true });
 
   /**
    * 参加 URL。
@@ -638,10 +643,11 @@ async function buildStageDraw(room: RoomDoc): Promise<StageDraw | null> {
  * 票数はルームの voteCount を読む（数え直さない）。
  * 参加者は全員が同時に取りに来るので、そのたびに集計クエリを走らせない。
  */
-function buildPollViews(
+async function buildPollViews(
   room: RoomDoc,
   participantCount: number,
-): { stage: PollStage | null; result: PollResult | null; rows: PollTallyRow[] | null } {
+  options: { includeBackground?: boolean } = {},
+): Promise<{ stage: PollStage | null; result: PollResult | null; rows: PollTallyRow[] | null }> {
   const pollSnapshot = room.pollSnapshot;
   if (!pollSnapshot) {
     return { stage: null, result: null, rows: null };
@@ -650,6 +656,15 @@ function buildPollViews(
   const stage = pollStageOf(pollSnapshot, {
     voteCount: room.voteCount ?? 0,
     participantCount,
+    /*
+      背景は**ここで初めて署名 URL へ解決する**（用紙には保存参照しか入っていない）。
+
+      敷くのは投影だけなので、参加者向けには解決しない。
+      解決には保存先への往復が要り、全員が同時に取りに来る場面で人数ぶん走ってしまう。
+    */
+    background: options.includeBackground
+      ? await resolveStageBackground(pollSnapshot.settings.backgroundAssetId)
+      : null,
   });
 
   // 締め切るまで集計は無い。受付中に順位を作ると、途中経過が漏れる経路ができる。
@@ -700,7 +715,7 @@ export async function getParticipantSnapshot(roomId: string): Promise<Participan
   const reveal = revealed && resolvedQuestion ? buildRevealInfo(resolvedQuestion) : null;
 
   // 投票のルームだけ。自分が入れた票は自分にだけ返す。
-  const pollViews = buildPollViews(room, participantCount);
+  const pollViews = await buildPollViews(room, participantCount);
   const myVote = pollViews.stage ? await getMyVote(roomId, member.id) : null;
 
   let myResult: ParticipantSnapshot['myResult'] = null;

@@ -12,19 +12,20 @@ import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import { CopyButton } from '@/components/admin/copy-button';
 import { HostBreakdownPanel } from '@/components/admin/host-breakdown-panel';
 import { HostDrawPanel } from '@/components/admin/host-draw-panel';
+import { HostPollPanel } from '@/components/admin/host-poll-panel';
 import { JoinUrlPanel } from '@/components/admin/join-url-panel';
 import { ParticipantList } from '@/components/admin/participant-list';
 import { recallJoinUrl, rememberJoinUrl } from '@/components/admin/join-url-store';
 import { drawUnit } from '@/domain/draw/draw-stage';
 import type { QuestionType } from '@/domain/quiz/question';
-import { ROOM_MODE_LABELS, isDrawMode } from '@/domain/room/room-mode';
+import { ROOM_MODE_LABELS, isDrawMode, isPollMode } from '@/domain/room/room-mode';
 import type { StaffSnapshot } from '@/domain/room/snapshot';
 import {
   EXTEND_SECONDS_PRESETS,
-  ROOM_ACTION_LABELS,
   ROOM_PHASE_LABELS,
   isRoomAction,
   nextStep,
+  roomActionLabel,
   type RoomAction,
 } from '@/domain/room/state-machine';
 import { useCountdown } from '@/hooks/use-countdown';
@@ -46,10 +47,12 @@ import type { PresentationLinkResponse, RotateJoinTokenResponse } from '@/types/
 /**
  * 司会進行画面。
  *
- * クイズ・抽選会・ビンゴ・ルーレットの 4 モードを 1 つの画面で扱う。
+ * クイズ・抽選会・ビンゴ・ルーレット・投票の 5 モードを 1 つの画面で扱う。
  * 抽選会・ビンゴには参加者も問題も無いため、クイズ用の表示
  * （問題一覧・回答済み人数・集計・参加者一覧・参加URL）は出さず、
  * 抽選の操作（host-draw-panel.tsx）へ置き換える。
+ * 投票には参加者が来るので参加URLは出し、問題まわりを投票の操作
+ * （host-poll-panel.tsx）へ置き換える。
  *
  * 守っている約束:
  * - ルームコードは存在しない。参加導線は二次元コード（参加URL）だけを案内する。
@@ -143,6 +146,8 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
             mode: snapshot.mode,
             nextQuestionPosition: nextQuestion?.position ?? null,
             remainingDrawCount: snapshot.draw?.remainingCount ?? 0,
+            revealDepth: snapshot.poll?.settings.revealDepth ?? 1,
+            revealedCount: snapshot.pollResult?.revealedCount ?? 0,
           })
         : null,
     [nextQuestion?.position, snapshot],
@@ -321,7 +326,9 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
   const isLobby = snapshot.phase === 'lobby';
   // 抽選会・ビンゴには参加者も問題も無い。クイズ用の表示をまとめて外すための判定。
   const isDraw = isDrawMode(snapshot.mode);
+  const isPoll = isPollMode(snapshot.mode);
   const draw = snapshot.draw;
+  const poll = snapshot.poll;
 
   // 投影端末は開催中に落ちることがある。待機中に限らず常に再発行できるようにしておく。
   const presentationCard = (
@@ -379,8 +386,8 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
               <Badge variant="brand" size="md">
                 {ROOM_PHASE_LABELS[snapshot.phase]}
               </Badge>
-              {isDraw ? (
-                // 抽選会とビンゴは同じ画面で進めるため、どちらの催しかを添える。
+              {isDraw || isPoll ? (
+                // 抽選会・ビンゴ・投票は問題数が無いので、どの催しかを添える。
                 <Badge size="md">{ROOM_MODE_LABELS[snapshot.mode]}</Badge>
               ) : (
                 <span>
@@ -400,6 +407,9 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
                 <Stat label="引いた" value={formatCount(draw.drawn.length, drawUnit(draw.kind))} />
                 <Stat label="残り" value={formatCount(draw.remainingCount, drawUnit(draw.kind))} />
               </>
+            ) : null}
+            {isPoll ? (
+              <Stat label="投票" value={formatCount(snapshot.poll?.voteCount ?? 0, '票')} />
             ) : null}
             {isDraw ? null : (
               <>
@@ -463,7 +473,27 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
         </>
       ) : null}
 
-      {/* 進行操作（クイズ） */}
+      {/* 投票の進行 */}
+      {isPoll ? (
+        poll !== null ? (
+          <HostPollPanel
+            roomId={roomId}
+            phase={snapshot.phase}
+            poll={poll}
+            result={snapshot.pollResult}
+            tally={snapshot.pollTally ?? null}
+            availableActions={snapshot.availableActions}
+            busy={actionsBusy}
+            onChanged={() => void refresh()}
+          />
+        ) : (
+          <Alert variant="warning" title="投票の内容が入っていません">
+            このルームには投票用紙が固められていません。ルーム一覧から作り直してください。
+          </Alert>
+        )
+      ) : null}
+
+      {/* 進行操作（クイズ・投票） */}
       {isDraw ? null : (
         <Card title="進行操作" description="ふつうはこの大きなボタンを押していくだけで進みます。">
           {step !== null ? (
@@ -496,8 +526,10 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
           ) : (
             <p className="text-sm text-slate-600">
               {snapshot.phase === 'finished'
-                ? 'クイズは終了しています。下の「クイズを再開」から続きを再開できます。'
-                : '進められる操作がありません。クイズに問題が登録されているか確認してください。'}
+                ? '終了しています。下の「再開」から続きを再開できます。'
+                : isPoll
+                  ? '進められる操作がありません。'
+                  : '進められる操作がありません。クイズに問題が登録されているか確認してください。'}
             </p>
           )}
 
@@ -540,7 +572,7 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
                         setConfirmFinish(true);
                       }}
                     >
-                      {ROOM_ACTION_LABELS[action]}
+                      {roomActionLabel(action, snapshot.mode)}
                     </Button>
                   );
                 }
@@ -553,7 +585,7 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
                     disabled={actionsBusy && busy !== action}
                     onClick={() => void runAction(action)}
                   >
-                    {ROOM_ACTION_LABELS[action]}
+                    {roomActionLabel(action, snapshot.mode)}
                   </Button>
                 );
               })}
@@ -641,8 +673,13 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
         </Card>
       )}
 
-      {/* 待機中の準備（クイズ） */}
-      {isLobby && !isDraw ? (
+      {/*
+        待機中の準備（クイズ・投票）。
+
+        投票では**受付中もここを出す**。途中から来た人がその場で入れるよう、
+        二次元コードを進行中も手元に置いておく必要がある。
+      */}
+      {(isLobby || (isPoll && snapshot.phase === 'poll_open')) && !isDraw ? (
         <>
           <Card
             title="参加用の二次元コード"
@@ -695,6 +732,7 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
             <ParticipantList participants={snapshot.participants ?? []} />
           </Card>
 
+          {isPoll ? null : (
           <Card title="このクイズの問題">
             {outline.length === 0 ? (
               <p className="text-sm text-slate-600">問題がありません。</p>
@@ -714,6 +752,7 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
               </ol>
             )}
           </Card>
+          )}
         </>
       ) : null}
 
@@ -743,10 +782,13 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
         </Card>
       ) : null}
 
-      {/* 抽選会・ビンゴでは投影画面の欄を上へ出しているので、ここでは重ねない。 */}
-      {!isLobby && !isDraw ? presentationCard : null}
+      {/*
+        抽選会・ビンゴでは投影画面の欄を上へ出しているので、ここでは重ねない。
+        投票の受付中も上の準備欄に出ているので重ねない。
+      */}
+      {!isLobby && !isDraw && !(isPoll && snapshot.phase === 'poll_open') ? presentationCard : null}
 
-      {!isLobby && !isDraw ? (
+      {!isLobby && !isDraw && !isPoll ? (
         <Card title="回答の集計">
           <HostBreakdownPanel
             breakdown={snapshot.breakdown}
@@ -807,11 +849,13 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
 
       {/* 抽選会・ビンゴの再開は host-draw-panel が出す（上のバーからルーム一覧へ戻れる）。 */}
       {snapshot.phase === 'finished' && !isDraw ? (
-        <Card title="クイズは終了しました">
+        <Card title={isPoll ? '投票は終了しました' : 'クイズは終了しました'}>
           <p className="text-sm text-slate-700">お疲れさまでした。</p>
           <p className="mt-3 text-sm text-slate-700">
             誤って終了した場合や続きを行う場合は、ここから再開できます。
-            <strong className="font-bold">得点と回答はそのまま残ります。</strong>
+            <strong className="font-bold">
+              {isPoll ? '投票と集計はそのまま残ります。' : '得点と回答はそのまま残ります。'}
+            </strong>
             参加者は同じ二次元コードのまま戻ってこられます。
           </p>
           <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -821,13 +865,16 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
               disabled={actionsBusy && busy !== 'reopen_room'}
               onClick={() => void runAction('reopen_room')}
             >
-              {ROOM_ACTION_LABELS.reopen_room}
+              {roomActionLabel('reopen_room', snapshot.mode)}
             </Button>
             <Link href="/admin/rooms" className="text-brand-700 font-bold hover:underline">
               ルーム一覧へ
             </Link>
-            <Link href="/admin/quizzes" className="text-brand-700 font-bold hover:underline">
-              クイズ一覧へ戻る
+            <Link
+              href={isPoll ? '/admin/poll-ballots' : '/admin/quizzes'}
+              className="text-brand-700 font-bold hover:underline"
+            >
+              {isPoll ? '投票用紙一覧へ戻る' : 'クイズ一覧へ戻る'}
             </Link>
           </div>
         </Card>
@@ -835,12 +882,13 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
 
       <ConfirmDialog
         open={confirmFinish}
-        title="クイズを終了しますか？"
+        title={isPoll ? '投票を終了しますか？' : 'クイズを終了しますか？'}
         description={
           <>
-            <p>終了すると出題を続けられなくなり、参加者の画面は結果表示へ切り替わります。</p>
+            <p>終了すると進行を続けられなくなり、参加者の画面は結果表示へ切り替わります。</p>
             <p className="mt-2">
-              終了したあとでも、この画面の「クイズを再開」から続きを再開できます（得点は残ります）。
+              終了したあとでも、この画面の「再開」から続きを再開できます
+              {isPoll ? '（投票と集計は残ります）' : '（得点は残ります）'}。
             </p>
           </>
         }
