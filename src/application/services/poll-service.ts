@@ -203,7 +203,8 @@ export function applyTallyEdits(
 ): PollTally {
   const byId = new Map(edits.map((edit) => [edit.optionId, edit.counts]));
   const merged: PollTally = {
-    voterCount: typeof voterCount === 'number' ? Math.max(0, Math.round(voterCount)) : current.voterCount,
+    voterCount:
+      typeof voterCount === 'number' ? Math.max(0, Math.round(voterCount)) : current.voterCount,
     entries: snapshot.options.map((option) => ({
       optionId: option.id,
       counts:
@@ -334,7 +335,9 @@ export async function clearPollVotes(roomId: string): Promise<number> {
     throw new AppError('ROOM_MODE_MISMATCH');
   }
   if (room.phase !== 'poll_open' && room.phase !== 'poll_closed') {
-    throw new AppError('POLL_NOT_OPEN', { details: { phase: room.phase, reason: 'not_clearable' } });
+    throw new AppError('POLL_NOT_OPEN', {
+      details: { phase: room.phase, reason: 'not_clearable' },
+    });
   }
 
   const removed = await clearVotes(roomId);

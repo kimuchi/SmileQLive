@@ -198,11 +198,7 @@ export function optionsOfGroup(
 export type BallotValidation = { ok: true } | { ok: false; reason: BallotRejectReason };
 
 export type BallotRejectReason =
-  | 'empty'
-  | 'too_many'
-  | 'duplicate'
-  | 'unknown_option'
-  | 'orphan_option';
+  'empty' | 'too_many' | 'duplicate' | 'unknown_option' | 'orphan_option';
 
 export function validateChoices(
   snapshot: PollSnapshot,

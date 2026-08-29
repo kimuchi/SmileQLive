@@ -49,7 +49,10 @@ export type UploadedAsset = MediaUploadResponse['asset'];
  * サーバーはこの ID で所有者を確かめるため、どちらなのかを取り違えると
  * 「クイズが見つかりません」で弾かれる。型で選ばせて取り違えを防ぐ。
  */
-export type MediaScope = { kind: 'quiz'; quizId: string } | { kind: 'drawList'; listId: string };
+export type MediaScope =
+  | { kind: 'quiz'; quizId: string }
+  | { kind: 'drawList'; listId: string }
+  | { kind: 'pollBallot'; ballotId: string };
 
 export async function uploadAdminImage(input: {
   file: File;
@@ -82,6 +85,8 @@ export async function uploadAdminImage(input: {
   form.append('file', input.file);
   if (input.scope.kind === 'quiz') {
     form.append('quizId', input.scope.quizId);
+  } else if (input.scope.kind === 'pollBallot') {
+    form.append('ballotId', input.scope.ballotId);
   } else {
     form.append('drawListId', input.scope.listId);
   }

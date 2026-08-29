@@ -100,6 +100,29 @@ const RECOMMENDED = [
     file: 'trumpet1.mp3',
     page: 'https://soundeffect-lab.info/sound/anime/',
   },
+  {
+    // 200 人が一斉に押す場面で鳴る。長い素材だと重なって鳴りっぱなしになる。
+    name: 'poll-vote',
+    purpose: '投票が 1 票入った瞬間',
+    label: '決定ボタンを押す',
+    file: 'decision1.mp3',
+    page: 'https://soundeffect-lab.info/sound/button/',
+  },
+  {
+    // 順位が出るまで繰り返す。draw-spin と同じ理由で、途中で速くなる素材は避ける。
+    name: 'poll-drumroll',
+    purpose: '投票結果を出すまでのため',
+    label: 'ティンパニロール（ドドドド）',
+    file: 'tympani-roll1.mp3',
+    page: 'https://soundeffect-lab.info/sound/anime/',
+  },
+  {
+    name: 'poll-result',
+    purpose: '投票結果の順位が出た瞬間',
+    label: 'ジャーン',
+    file: 'jaan1.mp3',
+    page: 'https://soundeffect-lab.info/sound/anime/',
+  },
 ];
 
 /** 音声ファイルかどうかを先頭バイトで確かめる（拡張子を信用しない）。 */

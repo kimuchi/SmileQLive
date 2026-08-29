@@ -10,12 +10,7 @@
  * ここはドメイン層。Firestore にも React にも依存しない。
  */
 
-import type {
-  BallotGroup,
-  BallotOption,
-  PollSettings,
-  PollSnapshot,
-} from '@/domain/poll/ballot';
+import type { BallotGroup, BallotOption, PollSettings, PollSnapshot } from '@/domain/poll/ballot';
 import { isRevealed, revealComplete, type RankedOption } from '@/domain/poll/tally';
 
 /** 参加者・投影が見る投票の状態。 */

@@ -15,13 +15,21 @@ import { cn } from '@/lib/client/cn';
  * 参加はすべて二次元コード（参加URL）から行う。
  */
 
-export type AdminHeaderNav = 'quizzes' | 'draw-lists' | 'rooms' | 'sounds' | 'none';
+export type AdminHeaderNav =
+  | 'quizzes'
+  | 'draw-lists'
+  | 'poll-ballots'
+  | 'rooms'
+  | 'sounds'
+  | 'none';
 
 const NAV_ITEMS: ReadonlyArray<{ key: AdminHeaderNav; href: string; label: string }> = [
   { key: 'quizzes', href: '/admin/quizzes', label: 'クイズ一覧' },
   // 抽選会・ビンゴで引く名簿。当日に貼り付けるのでは間に合わないため、
   // クイズと同じ高さに置いて事前に整えられるようにする。
   { key: 'draw-lists', href: '/admin/draw-lists', label: '抽選リスト' },
+  // 投票の選択肢。抽選リストと同じく当日には間に合わないので、事前に整える場所を並べて置く。
+  { key: 'poll-ballots', href: '/admin/poll-ballots', label: '投票用紙' },
   // 司会画面へ戻る導線。ルーム作成直後の画面を離れても進行へ復帰できるようにする。
   { key: 'rooms', href: '/admin/rooms', label: 'ルーム一覧' },
   // 会場で鳴る音の差し替え。デプロイし直さずに変えられる場所であることが要なので、

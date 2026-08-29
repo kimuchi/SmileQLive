@@ -462,6 +462,81 @@ const SOUNDS = {
     });
     return samples;
   },
+
+  /**
+   * 投票が 1 票入った瞬間: 会場へ「入った」とだけ伝える。
+   *
+   * **短く、小さく。** 200 人が一斉に押す場面で鳴るため、
+   * 長い音だと重なって鳴りっぱなしになり、会場の話し声を消してしまう。
+   */
+  'poll-vote': () => {
+    const samples = createSamples(0.24);
+    addTone(samples, {
+      startSec: 0,
+      durationSec: 0.2,
+      frequency: NOTES.E6,
+      gain: 0.32,
+      attackSec: 0.003,
+      decay: 18,
+      overtone: 0.25,
+    });
+    return samples;
+  },
+
+  /**
+   * 順位を出すまでのためる音: 出すまでの間ずっと繰り返す。
+   *
+   * **長さを 1 秒ちょうどにする。** draw-spin と同じ理由で、
+   * 長さがずれると継ぎ目で拍が崩れる。
+   * ドラムロールらしく低めの打点を細かく並べ、4 打ごとに強くする。
+   */
+  'poll-drumroll': () => {
+    const seconds = 1;
+    const samples = createSamples(seconds);
+    const beats = 24;
+    const interval = seconds / beats;
+
+    for (let beat = 0; beat < beats; beat += 1) {
+      const accent = beat % 4 === 0;
+      addTone(samples, {
+        startSec: beat * interval,
+        durationSec: interval * 0.9,
+        frequency: accent ? NOTES.G4 : NOTES.E4,
+        gain: accent ? 0.6 : 0.34,
+        attackSec: 0.001,
+        decay: 34,
+        overtone: 0.7,
+      });
+    }
+    return samples;
+  },
+
+  /**
+   * 順位が出た瞬間: ためる音を止めた直後に鳴らす。
+   *
+   * draw-win と同じく**頭で決める**（順に駆け上がると名前より遅れて聞こえる）。
+   * 1 位だけは fanfare を鳴らすので、ここは 3 位・2 位でも重すぎない長さにする。
+   */
+  'poll-result': () => {
+    const samples = createSamples(1.5);
+    addTone(samples, {
+      startSec: 0,
+      durationSec: 0.16,
+      frequency: NOTES.C5,
+      endFrequency: NOTES.G5,
+      gain: 0.65,
+      attackSec: 0.004,
+      decay: 6,
+    });
+    for (const [frequency, gain] of [
+      [NOTES.G5, 0.7],
+      [NOTES.C6, 0.6],
+      [NOTES.E6, 0.45],
+    ]) {
+      addTone(samples, { startSec: 0.14, durationSec: 1.3, frequency, gain, decay: 2.4 });
+    }
+    return samples;
+  },
 };
 
 // ---------------------------------------------------------------------------

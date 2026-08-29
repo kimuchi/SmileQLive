@@ -21,6 +21,7 @@ import {
 import type { PublishIssue } from '@/domain/quiz/publish-validation';
 import {
   isDrawMode,
+  isPollMode,
   ROOM_MODES,
   ROOM_MODE_DESCRIPTIONS,
   ROOM_MODE_LABELS,
@@ -31,6 +32,7 @@ import { formatCount } from '@/lib/format';
 import type {
   CreateRoomResponse,
   DrawListsResponse,
+  PollBallotsResponse,
   QuizListItem,
   QuizListResponse,
 } from '@/types/api';
@@ -45,6 +47,7 @@ import type {
  *   sessionStorage へ一時保管して司会画面へ引き継ぐ。
  * - 抽選会・ビンゴ: 参加者のスマートフォンを使わないため、参加人数の上限も参加 URL も出さない。
  *   代わりに司会画面と投影画面への導線を出す。
+ * - 投票: 参加者はスマートフォンから投票するので、クイズと同じく参加 URL が出る。
  * - ルームコードは発行しない。参加は二次元コードの URL 直行のみ。
  */
 
@@ -60,10 +63,29 @@ const MAX_PARTICIPANTS_DEFAULT = '500';
  */
 type DrawListItem = DrawListsResponse['lists'][number];
 
+/** 投票用紙一覧の 1 件。抽選リストと同じく、応答の型から取り出す。 */
+type PollBallotItem = PollBallotsResponse['ballots'][number];
+
 /** POST /api/rooms の本文。モードによって要るものが違う。 */
 type CreateRoomRequest =
   | { mode: 'quiz'; quizId: string; maxParticipants: number }
-  | { mode: Exclude<RoomMode, 'quiz'>; drawListId: string };
+  | { mode: 'poll'; ballotId: string; maxParticipants: number }
+  | { mode: Exclude<RoomMode, 'quiz' | 'poll'>; drawListId: string };
+
+/** 参加人数の上限。全角で入力された数字も受け取る（会場の PC は日本語入力のままのことが多い）。 */
+function readMaxParticipants(value: string): { value: number } | { error: string } {
+  const normalized = value.normalize('NFKC').trim();
+  if (!/^\d+$/.test(normalized)) {
+    return { error: '人数を数字で入力してください' };
+  }
+  const parsed = Number.parseInt(normalized, 10);
+  if (parsed < MAX_PARTICIPANTS_MIN || parsed > MAX_PARTICIPANTS_MAX) {
+    return {
+      error: `参加人数の上限は${MAX_PARTICIPANTS_MIN}〜${MAX_PARTICIPANTS_MAX}で入力してください`,
+    };
+  }
+  return { value: parsed };
+}
 
 const MODE_OPTIONS = ROOM_MODES.map((mode) => ({
   value: mode,
@@ -86,6 +108,9 @@ export function RoomCreatePanel({ initialQuizId, initialMode }: RoomCreatePanelP
   const [drawLoadError, setDrawLoadError] = useState<unknown>(null);
   const [selectedQuizId, setSelectedQuizId] = useState(initialQuizId ?? '');
   const [selectedDrawListId, setSelectedDrawListId] = useState('');
+  const [ballots, setBallots] = useState<PollBallotItem[] | null>(null);
+  const [ballotLoadError, setBallotLoadError] = useState<unknown>(null);
+  const [selectedBallotId, setSelectedBallotId] = useState('');
   const [maxParticipants, setMaxParticipants] = useState(MAX_PARTICIPANTS_DEFAULT);
   const [maxParticipantsError, setMaxParticipantsError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -97,6 +122,7 @@ export function RoomCreatePanel({ initialQuizId, initialMode }: RoomCreatePanelP
   /** 1 つずつ引くモードのときだけ値が入る。drawKindsForMode へ渡すために絞っておく。 */
   // 抽選リストを使うモード（抽選会・ビンゴ・ルーレット）。クイズと投票は使わない。
   const drawMode: DrawRoomMode | null = isDrawMode(mode) ? (mode as DrawRoomMode) : null;
+  const pollMode = isPollMode(mode);
 
   // 同期的な setState を含めない（effect から呼ぶため）。
   const load = useCallback(async () => {
@@ -119,11 +145,30 @@ export function RoomCreatePanel({ initialQuizId, initialMode }: RoomCreatePanelP
     }
   }, []);
 
+  const loadBallots = useCallback(async () => {
+    try {
+      const response = await apiGet<PollBallotsResponse>('/api/admin/poll-ballots');
+      setBallots(response.ballots);
+      setBallotLoadError(null);
+    } catch (caught) {
+      setBallotLoadError(caught);
+    }
+  }, []);
+
   useEffect(() => {
     // マウント時の初回取得。
     // eslint-disable-next-line react-hooks/set-state-in-effect -- クライアント側での初回取得のため
     void load();
   }, [load]);
+
+  useEffect(() => {
+    // 投票を選んだときだけ読む。クイズだけを開く人に余分な取得をさせない。
+    if (!pollMode) {
+      return;
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- クライアント側での初回取得のため
+    void loadBallots();
+  }, [pollMode, loadBallots]);
 
   /** 抽選リストが要るモードか。抽選会とビンゴで同じ一覧を使うので、切り替えでは取り直さない。 */
   const needsDrawLists = drawMode !== null;
@@ -170,6 +215,28 @@ export function RoomCreatePanel({ initialQuizId, initialMode }: RoomCreatePanelP
     });
   }, [drawLists, drawMode]);
 
+  const ballotOptions = useMemo(
+    () =>
+      (ballots ?? []).map((ballot) => {
+        // 選択肢が 1 件も無い用紙ではルームを作れない（サーバー側でも弾かれる）。
+        // 黙って消すと「作ったはずの用紙が無い」と見えるので、理由を添えて残す。
+        const usable = ballot.optionCount > 0;
+        return {
+          value: ballot.id,
+          label: usable
+            ? `${ballot.title}｜${formatCount(ballot.optionCount, '件')}｜${ballot.rankDepth}位まで`
+            : `${ballot.title}｜選択肢がありません`,
+          disabled: !usable,
+        };
+      }),
+    [ballots],
+  );
+
+  const usableBallotCount = useMemo(
+    () => ballotOptions.filter((option) => !option.disabled).length,
+    [ballotOptions],
+  );
+
   const usableDrawCount = useMemo(
     () => drawOptions.filter((option) => !option.disabled).length,
     [drawOptions],
@@ -190,29 +257,34 @@ export function RoomCreatePanel({ initialQuizId, initialMode }: RoomCreatePanelP
     setMaxParticipantsError(null);
     // 抽選会で使える名簿はビンゴでは使えない。選び直してもらう。
     setSelectedDrawListId('');
+    setSelectedBallotId('');
   }, []);
 
   const handleCreate = useCallback(async () => {
     let body: CreateRoomRequest;
 
-    if (drawMode === null) {
+    if (pollMode) {
+      if (selectedBallotId.length === 0) {
+        setCreateError('投票用紙を選んでください');
+        return;
+      }
+      const parsed = readMaxParticipants(maxParticipants);
+      if ('error' in parsed) {
+        setMaxParticipantsError(parsed.error);
+        return;
+      }
+      body = { mode: 'poll', ballotId: selectedBallotId, maxParticipants: parsed.value };
+    } else if (drawMode === null) {
       if (selectedQuizId.length === 0) {
         setCreateError('クイズを選んでください');
         return;
       }
-      const normalized = maxParticipants.normalize('NFKC').trim();
-      if (!/^\d+$/.test(normalized)) {
-        setMaxParticipantsError('人数を数字で入力してください');
+      const parsed = readMaxParticipants(maxParticipants);
+      if ('error' in parsed) {
+        setMaxParticipantsError(parsed.error);
         return;
       }
-      const parsed = Number.parseInt(normalized, 10);
-      if (parsed < MAX_PARTICIPANTS_MIN || parsed > MAX_PARTICIPANTS_MAX) {
-        setMaxParticipantsError(
-          `参加人数の上限は${MAX_PARTICIPANTS_MIN}〜${MAX_PARTICIPANTS_MAX}で入力してください`,
-        );
-        return;
-      }
-      body = { mode: 'quiz', quizId: selectedQuizId, maxParticipants: parsed };
+      body = { mode: 'quiz', quizId: selectedQuizId, maxParticipants: parsed.value };
     } else {
       if (selectedDrawListId.length === 0) {
         setCreateError('抽選リストを選んでください');
@@ -247,7 +319,7 @@ export function RoomCreatePanel({ initialQuizId, initialMode }: RoomCreatePanelP
     } finally {
       setCreating(false);
     }
-  }, [drawMode, maxParticipants, selectedDrawListId, selectedQuizId]);
+  }, [drawMode, maxParticipants, pollMode, selectedBallotId, selectedDrawListId, selectedQuizId]);
 
   if (created !== null) {
     const createdMode = created.mode;
@@ -257,7 +329,7 @@ export function RoomCreatePanel({ initialQuizId, initialMode }: RoomCreatePanelP
           「{created.quizTitle}」の進行を始められます。
         </Alert>
 
-        {createdMode === 'quiz' ? (
+        {created.joinUrl ? (
           <Card
             title="参加用の二次元コード"
             description="会場のスクリーンや掲示物でこの二次元コードを提示してください。"
@@ -293,11 +365,19 @@ export function RoomCreatePanel({ initialQuizId, initialMode }: RoomCreatePanelP
                 クイズ一覧へ戻る
               </Link>
             ) : null}
+            {createdMode === 'poll' ? (
+              <Link href="/admin/poll-ballots" className="text-brand-700 font-bold hover:underline">
+                投票用紙一覧へ戻る
+              </Link>
+            ) : null}
           </div>
-          {createdMode === 'quiz' ? (
+          {created.joinUrl ? (
             <p className="mt-3 text-sm text-slate-600">
               参加URLはこの画面を離れると再表示できません。必要なら今のうちにコピーしてください
               （失った場合は司会画面から再発行できます）。
+              {createdMode === 'poll'
+                ? '投影画面にも同じ二次元コードが出るので、会場ではそちらを見てもらえます。'
+                : ''}
             </p>
           ) : (
             <p className="mt-3 text-sm text-slate-600">
@@ -378,6 +458,86 @@ export function RoomCreatePanel({ initialQuizId, initialMode }: RoomCreatePanelP
             </Button>
             <p className="mt-2 text-xs text-slate-600">
               作成すると参加用の二次元コードが表示されます。
+            </p>
+          </div>
+        </div>
+      </Card>
+    );
+  };
+
+  /** 投票の入力欄。投票用紙と、参加人数の上限を選ぶ。 */
+  const renderPollSection = () => {
+    if (ballots === null) {
+      return (
+        <Card>
+          {ballotLoadError !== null ? (
+            <ErrorMessage error={ballotLoadError} onRetry={() => void loadBallots()} />
+          ) : (
+            <div className="flex items-center gap-3 text-slate-600">
+              <Spinner />
+              <span>読み込んでいます</span>
+            </div>
+          )}
+        </Card>
+      );
+    }
+
+    if (usableBallotCount === 0) {
+      return (
+        <Card title="使える投票用紙がありません">
+          <p className="text-sm text-slate-700">
+            {ballots.length === 0
+              ? '投票の選択肢をまとめた「投票用紙」がまだありません。先に作ってください。'
+              : '選択肢が 1 件も入っていない用紙しかありません。選択肢を入れてから、ルームを作成してください。'}
+          </p>
+          <p className="mt-3">
+            <Link
+              href="/admin/poll-ballots/new"
+              className="text-brand-700 font-bold hover:underline"
+            >
+              投票用紙を作る
+            </Link>
+          </p>
+        </Card>
+      );
+    }
+
+    return (
+      <Card title="ルームの設定">
+        <div className="flex flex-col gap-4">
+          <Select
+            label="使用する投票用紙"
+            required
+            placeholder="投票用紙を選んでください"
+            options={ballotOptions}
+            value={selectedBallotId}
+            hint="選んだ用紙の内容を、作成した時点でルームへ写し取ります。"
+            onChange={(event) => {
+              setSelectedBallotId(event.currentTarget.value);
+            }}
+          />
+
+          <TextInput
+            label="参加人数の上限"
+            inputMode="numeric"
+            autoComplete="off"
+            value={maxParticipants}
+            error={maxParticipantsError ?? undefined}
+            hint={`${MAX_PARTICIPANTS_MIN}〜${MAX_PARTICIPANTS_MAX}人。1台につき1票なので、投票できる人数の上限にもなります。`}
+            onChange={(event) => {
+              setMaxParticipants(event.currentTarget.value);
+              if (maxParticipantsError !== null) {
+                setMaxParticipantsError(null);
+              }
+            }}
+          />
+
+          <div>
+            <Button size="lg" loading={creating} onClick={() => void handleCreate()}>
+              ルームを作成する
+            </Button>
+            <p className="mt-2 text-xs text-slate-600">
+              作成すると参加用の二次元コードが表示されます。投影画面にも同じものが出ます。
             </p>
           </div>
         </div>
@@ -478,7 +638,11 @@ export function RoomCreatePanel({ initialQuizId, initialMode }: RoomCreatePanelP
         />
       </Card>
 
-      {drawMode === null ? renderQuizSection() : renderDrawSection()}
+      {pollMode
+        ? renderPollSection()
+        : drawMode === null
+          ? renderQuizSection()
+          : renderDrawSection()}
     </div>
   );
 }
