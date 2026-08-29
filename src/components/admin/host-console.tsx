@@ -146,7 +146,9 @@ export function HostConsole({ roomId, quizTitle, outline }: HostConsoleProps) {
             mode: snapshot.mode,
             nextQuestionPosition: nextQuestion?.position ?? null,
             remainingDrawCount: snapshot.draw?.remainingCount ?? 0,
-            revealDepth: snapshot.poll?.settings.revealDepth ?? 1,
+            // 選択肢の数で頭打ちにした値（サーバーが入れている）。
+            revealDepth:
+              snapshot.pollResult?.revealDepth ?? snapshot.poll?.settings.revealDepth ?? 1,
             revealedCount: snapshot.pollResult?.revealedCount ?? 0,
           })
         : null,

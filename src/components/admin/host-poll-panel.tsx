@@ -81,7 +81,8 @@ export function HostPollPanel({
   const [clearing, setClearing] = useState(false);
 
   const rankDepth = poll.settings.rankDepth;
-  const revealDepth = poll.settings.revealDepth;
+  // 選択肢の数で頭打ちにした値を使う（用紙の設定そのままではない）。
+  const revealDepth = result?.revealDepth ?? poll.settings.revealDepth;
   const revealedCount = result?.revealedCount ?? 0;
   const editable = phase === 'poll_closed';
 

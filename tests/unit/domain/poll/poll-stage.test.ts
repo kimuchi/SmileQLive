@@ -111,15 +111,31 @@ describe('発表用の結果', () => {
   });
 });
 
+describe('選択肢より多い順位は発表しない', () => {
+  it('2 件しか無い用紙で「3位まで」と決めても 2 位から出る', () => {
+    // そのまま 3 位から出すと、司会が押したのに投影へ何も出ない。
+    const twoOptions: PollSnapshot = {
+      ...snapshot,
+      options: snapshot.options.slice(0, 2),
+    };
+    const ids = twoOptions.options.map((option) => option.id);
+    const rows = rankOptions(tallyVotes(ids, 1, [['a'], ['a'], ['b']]), ids, twoOptions.settings);
+
+    const first = pollResultOf(twoOptions, rows, 1);
+    expect(first.revealDepth).toBe(2);
+    expect(first.entries.map((entry) => entry.rank)).toEqual([2]);
+
+    const second = pollResultOf(twoOptions, rows, 2);
+    expect(second.entries.map((entry) => entry.rank)).toEqual([2, 1]);
+    expect(second.complete).toBe(true);
+  });
+});
+
 describe('司会が確かめる表', () => {
   it('全順位ぶん、点数の高い順に並ぶ', () => {
     const rows = pollTallyRowsOf(snapshot, ranked().ranked);
     expect(rows.map((row) => row.rank)).toEqual([1, 2, 3]);
-    expect(rows.map((row) => row.label)).toEqual([
-      '営業部 ダンス',
-      '開発部 コント',
-      '大阪 漫才',
-    ]);
+    expect(rows.map((row) => row.label)).toEqual(['営業部 ダンス', '開発部 コント', '大阪 漫才']);
     expect(rows.map((row) => row.totalVotes)).toEqual([3, 2, 1]);
   });
 });

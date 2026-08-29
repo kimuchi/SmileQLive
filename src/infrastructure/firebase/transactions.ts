@@ -43,6 +43,7 @@ import { countAnswers } from '@/infrastructure/firebase/repositories/room-reposi
 import { pickWeighted, remainingEntries, type DrawRecord } from '@/domain/draw/draw-list';
 import { acceptsParticipants, removesDrawnEntries, roomModeOf } from '@/domain/room/room-mode';
 import { tallyVotes } from '@/domain/poll/tally';
+import { effectiveRevealDepth } from '@/domain/poll/ballot';
 import { judgeNumberAnswer, toDecimalRule } from '@/domain/answer/number-judgement';
 import { findSnapshotQuestion, type QuizSnapshot } from '@/domain/quiz/quiz-snapshot';
 import type { Question } from '@/domain/quiz/question';
@@ -405,11 +406,14 @@ async function applyTransition(
       break;
     }
     case 'reveal_next': {
-      const settings = room.pollSnapshot?.settings;
-      if (!settings) {
+      const ballot = room.pollSnapshot;
+      if (!ballot) {
         throw new AppError('ROOM_MODE_MISMATCH');
       }
-      if (revealComplete(settings.revealDepth, revealedCount)) {
+      // 選択肢の数で頭打ちにする。投影が使う数と同じでないと
+      //「押したのに何も出ない」まま出し切ったことにならない。
+      const depth = effectiveRevealDepth(ballot.settings, ballot.options.length);
+      if (revealComplete(depth, revealedCount)) {
         throw new AppError('POLL_REVEAL_DONE');
       }
       answerDeadlineAt = null;

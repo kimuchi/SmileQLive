@@ -162,6 +162,17 @@ export function pollSettingsOf(value: Partial<PollSettings> | null | undefined):
 }
 
 /**
+ * 実際に発表できる順位の数。
+ *
+ * 選択肢が 2 件しか無い用紙で「3位まで発表」と決めても、3 位は存在しない。
+ * そのまま出すと、司会が「3位を発表」を押したのに投影へ何も出ない。
+ * 選択肢の数で頭打ちにして、司会画面・投影・サーバーの三者で同じ数を使う。
+ */
+export function effectiveRevealDepth(settings: PollSettings, optionCount: number): number {
+  return clampRevealDepth(Math.min(settings.revealDepth, Math.max(1, optionCount)));
+}
+
+/**
  * ルームへ固める投票用紙。
  *
  * クイズの quizSnapshot と同じ考え方で、**ルームを作った瞬間の内容を写し取る**。

@@ -10,6 +10,7 @@
  * ここはドメイン層。Firestore にも React にも依存しない。
  */
 
+import { effectiveRevealDepth } from '@/domain/poll/ballot';
 import type { BallotGroup, BallotOption, PollSettings, PollSnapshot } from '@/domain/poll/ballot';
 import { isRevealed, revealComplete, type RankedOption } from '@/domain/poll/tally';
 import type { PublicImage } from '@/domain/quiz/public-question';
@@ -50,7 +51,13 @@ export type PollRevealEntry = {
 
 /** 投影・司会へ渡す結果。 */
 export type PollResult = {
-  /** 何位まで発表するか。 */
+  /**
+   * 何位まで発表するか。
+   *
+   * **選択肢の数で頭打ちにした値**。用紙の設定そのままではない
+   * （2 件しか無い用紙で「3位まで」と決めても 3 位は存在しない）。
+   * 司会画面もこの値を使う。三者で数が食い違うと「押したのに何も出ない」が起きる。
+   */
   revealDepth: number;
   /** すでに出した順位の数。 */
   revealedCount: number;
@@ -123,7 +130,8 @@ export function pollResultOf(
   ranked: readonly RankedOption[],
   revealedCount: number,
 ): PollResult {
-  const revealDepth = snapshot.settings.revealDepth;
+  // 選択肢の数で頭打ちにする（2 件の用紙で「3位まで」と決めても 3 位は無い）。
+  const revealDepth = effectiveRevealDepth(snapshot.settings, snapshot.options.length);
   const { options, groups } = labelsOf(snapshot);
 
   const entries = ranked
