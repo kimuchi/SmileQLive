@@ -57,10 +57,19 @@ drawLists/{listId}                  ★ 作った本人だけ読める（名簿�
     └─ entries/{entryId}
            position / label / imageAssetId（item のみ）/ weight（weighted のみ）
 
+pollBallots/{ballotId}              ★ 作った本人だけ読める（発表前の候補一覧）
+    投票の選択肢。structure は flat / nested。
+    groups / options はドキュメントへ埋め込む（200 件 × 60 文字でも 1MB に遠い）。
+    settings: 何位まで選ぶか・順位ごとの点数・何位まで発表するか・背景画像。
+
 rooms/{roomId}                      ★ 司会者のみ読める（正解を含む）
-    mode: quiz | lottery | bingo | roulette（作成時に決めて変えない）
+    mode: quiz | lottery | bingo | roulette | poll（作成時に決めて変えない）
     quizSnapshot（正解・解説・正解画像を含む開催時点の固定コピー）
     drawSnapshot（抽選会・ビンゴのみ。開催時点の抽選リストの固定コピー）
+    pollSnapshot（投票のみ。開催時点の投票用紙の固定コピー）
+    pollTally（締め切った時点で凍らせた集計。司会だけが直せる）
+    revealedCount（発表済みの順位の数。下の順位から数える）
+    voteCount（投票した人数。票と同じ書き込みで 1 増やす）
     drawn: [{ order, entryId }]（引いた順。order がそのまま当選順位）
     joinTokenHash / phase / stateVersion / currentQuestionId / answerDeadlineAt ...
     │
@@ -81,6 +90,10 @@ rooms/{roomId}                      ★ 司会者のみ読める（正解を含�
     │      answerType / choiceId / numberRaw / numberNormalized
     │      answeredAt / elapsedMs / isCorrect / pointsAwarded
     │
+    ├─ votes/{participantId}        ★ 決定的ID = 1 台につき 1 票
+    │      choices（選んだ順の選択肢 ID。choices[0] が 1 位）
+    │      ※ 本人と司会しか読めない。他人の票が読めると投票にならない
+    │
     └─ events/{stateVersion}        状態変更の監査ログ
 
 presentationLinks/{linkId}
@@ -93,9 +106,9 @@ presentationLinks/{linkId}
 `parseQuizSnapshot()` の呼び出し元も多くあります。
 ここを null 許容にすると、読み取り経路のすべてに分岐が増えて壊しやすくなります。
 
-そこで抽選会・ビンゴのルームでも「問題 0 問のクイズ」を必ず入れています
-（`title` は抽選リストの名前）。既存の読み取り経路はそのまま素通りします。
-抽選の中身は別に `drawSnapshot` が持ちます。
+そこで抽選会・ビンゴ・投票のルームでも「問題 0 問のクイズ」を必ず入れています
+（`title` は抽選リスト・投票用紙の名前）。既存の読み取り経路はそのまま素通りします。
+抽選の中身は `drawSnapshot`、投票の中身は `pollSnapshot` が別に持ちます。
 
 ### なぜ名簿を参加者・投影担当に読ませないか
 
@@ -103,6 +116,25 @@ presentationLinks/{linkId}
 `drawLists/**` は**作った本人だけ**が読めます（Security Rules）。
 投影に必要な内容は、Cloud Run が `rooms/{roomId}.drawSnapshot` から
 必要なぶんだけ組み立てて配ります。
+
+### なぜ投票の集計を「凍らせて」から直せるようにするか
+
+締め切った時点の票を数えて `pollTally` へ固めます。以後、票は増えません。
+そのあと司会が票数を直せます（紙の投票と合わせる会も、明らかな異常値を外したい会もある）。
+
+**直せるのは票数だけで、点数と順位は毎回そこから計算し直します。**
+点数を直接いじれるようにすると、票数と食い違ったまま発表されてしまいます。
+
+**投票の記録（`votes/**`）そのものは消しません。** 直すのは「発表に使う集計」だけなので、
+いつでも投票の記録から数え直せます。
+
+### なぜ 1 票を `create` で書くか
+
+`votes/{participantId}` は**ドキュメント ID が参加者 ID**です。
+`create` で書くので、二度目は Firestore が弾きます（1 台につき 1 票）。
+
+「読んでから無ければ書く」にすると、同じ端末から同時に 2 回送られたときに
+両方が通りえます。回答の `{questionId}__{participantId}` と同じ考え方です。
 
 ### なぜ `rooms/{roomId}` を直接購読させないか
 
