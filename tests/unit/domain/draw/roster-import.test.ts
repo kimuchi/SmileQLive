@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  describeRosterImport,
-  detectDelimiter,
-  parseDelimitedText,
-  parseRosterText,
-} from '@/domain/draw/roster-import';
+import { describeRosterImport, parseRosterText } from '@/domain/draw/roster-import';
+import { detectDelimiter, parseDelimitedText } from '@/domain/text/delimited';
 import { DRAW_LABEL_MAX_LENGTH } from '@/domain/draw/draw-list';
 
 /**

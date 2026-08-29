@@ -11,6 +11,7 @@ import { Select } from '@/components/shared/Select';
 import { Spinner } from '@/components/shared/Spinner';
 import { TextInput } from '@/components/shared/TextInput';
 import { ImageField } from '@/components/admin/image-field';
+import { PollImportPanel } from '@/components/admin/poll-import-panel';
 import { useAutosave } from '@/components/admin/use-autosave';
 import {
   BALLOT_GROUP_MAX_COUNT,
@@ -28,6 +29,7 @@ import {
   rankLabel,
   type BallotStructure,
 } from '@/domain/poll/ballot';
+import type { BallotImportResult } from '@/domain/poll/ballot-import';
 import { DRAW_FONT_SIZE_MAX, DRAW_FONT_SIZE_MIN } from '@/domain/draw/draw-list';
 import { apiGet, apiPatch } from '@/lib/client/api-client';
 import { toUserErrorMessage } from '@/lib/client/error-text';
@@ -299,6 +301,51 @@ export function PollBallotEditor({ ballotId }: PollBallotEditorProps) {
     [markListDirty],
   );
 
+  /**
+   * 取り込んだ内容を編集中の一覧へ入れる。
+   *
+   * ここではサーバーへ送らない。「区分と選択肢を保存する」を押すまで手元に置く。
+   * 取り違えたまま保存されるのを防ぐため、ほかの編集と同じ扱いにする。
+   *
+   * 区分は**名前で照合**する。同じ名前の区分がすでにあれば、その ID へつなぐ
+   * （足すたびに同じ名前の区分が増えると、参加者の画面で選びづらくなる）。
+   */
+  const handleImport = useCallback(
+    (result: BallotImportResult, mode: 'replace' | 'append') => {
+      const baseGroups = mode === 'append' ? groups : [];
+      const baseOptions = mode === 'append' ? options : [];
+
+      const idByGroupLabel = new Map(baseGroups.map((group) => [group.label.trim(), group.id]));
+      const nextGroups = [...baseGroups];
+
+      for (const label of result.groups) {
+        if (idByGroupLabel.has(label)) {
+          continue;
+        }
+        const id = crypto.randomUUID();
+        idByGroupLabel.set(label, id);
+        nextGroups.push({ id, label });
+      }
+
+      const nextOptions = [
+        ...baseOptions,
+        ...result.options.map((option) => ({
+          id: crypto.randomUUID(),
+          label: option.label,
+          note: option.note ?? '',
+          groupId:
+            option.groupLabel === null ? null : (idByGroupLabel.get(option.groupLabel) ?? null),
+        })),
+      ];
+
+      setGroups(nextGroups);
+      setOptions(nextOptions);
+      setListError(null);
+      markListDirty();
+    },
+    [groups, markListDirty, options],
+  );
+
   const handleSaveList = useCallback(async () => {
     const structure = settings?.structure ?? 'flat';
 
@@ -531,6 +578,17 @@ export function PollBallotEditor({ ballotId }: PollBallotEditorProps) {
             onAltChange={setBackgroundAlt}
           />
         </div>
+      </Card>
+
+      <Card
+        title="表計算ソフトから取り込む"
+        description="出し物の一覧をコピーして貼るか、CSVファイルを読み込めます。"
+      >
+        <PollImportPanel
+          structure={settings.structure}
+          currentOptionCount={options.length}
+          onImport={handleImport}
+        />
       </Card>
 
       {nested ? (
