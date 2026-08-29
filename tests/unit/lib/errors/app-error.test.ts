@@ -161,3 +161,50 @@ describe('toAppError', () => {
     expect(toAppError(undefined).code).toBe('INTERNAL_ERROR');
   });
 });
+
+/**
+ * 索引がまだ使えないとき。
+ *
+ * 新しい一覧を足して索引を反映したあと、構築が終わるまで必ずここを通る。
+ * 「処理に失敗しました」に丸めると、待てば直るのか壊れているのかが分からない。
+ */
+describe('Firestore の索引が使えないとき', () => {
+  /** Firestore Admin SDK が投げる形（gRPC の code と本文）。 */
+  function firestoreError(code: number | string, message: string): Error {
+    return Object.assign(new Error(message), { code });
+  }
+
+  it('索引が無い・構築中は待てば直ると伝える', () => {
+    for (const message of [
+      '9 FAILED_PRECONDITION: The query requires an index. You can create it here: https://...',
+      '9 FAILED_PRECONDITION: The query requires an index. That index is currently building and cannot be used yet.',
+    ]) {
+      const converted = toAppError(firestoreError(9, message));
+      expect(converted.code).toBe('INDEX_NOT_READY');
+      expect(converted.status).toBe(503);
+      expect(converted.userMessage).toContain('数分おいて');
+      // 索引の URL など内部の手掛かりは利用者へ出さない（ログには cause で残る）。
+      expect(converted.userMessage).not.toContain('index');
+    }
+  });
+
+  it('Web SDK の文字列コードでも同じに扱う', () => {
+    const converted = toAppError(
+      firestoreError('failed-precondition', 'The query requires an index.'),
+    );
+    expect(converted.code).toBe('INDEX_NOT_READY');
+  });
+
+  it('索引と関係ない FAILED_PRECONDITION は畳み込まない', () => {
+    // 9 は他の理由でも返る。待っても直らないものを「待てば直る」と言わない。
+    const converted = toAppError(
+      firestoreError(9, '9 FAILED_PRECONDITION: The database does not exist'),
+    );
+    expect(converted.code).toBe('INTERNAL_ERROR');
+  });
+
+  it('本文が同じでも別のコードなら畳み込まない', () => {
+    const converted = toAppError(firestoreError(7, 'The query requires an index.'));
+    expect(converted.code).toBe('INTERNAL_ERROR');
+  });
+});
