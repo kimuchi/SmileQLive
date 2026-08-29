@@ -181,7 +181,10 @@ describe.skipIf(!available)('投票モードの進行', () => {
   }
 
   /** 用紙から投票のルームを作り、受付を開いて参加者を入れる。 */
-  async function openPollRoom(voters: string[], settings: { rankDepth?: number; points?: number[] } = {}) {
+  async function openPollRoom(
+    voters: string[],
+    settings: { rankDepth?: number; points?: number[] } = {},
+  ) {
     const { ballotId, optionIds } = await seedBallot(settings);
     const { createRoom } = await import('@/application/services/room-service');
 
@@ -223,18 +226,27 @@ describe.skipIf(!available)('投票モードの進行', () => {
     const { Timestamp } = await import('firebase-admin/firestore');
     const now = Timestamp.now();
     const ballotId = crypto.randomUUID();
-    await getDb().collection('pollBallots').doc(ballotId).set({
-      id: ballotId,
-      ownerId: OWNER_UID,
-      title: '空の用紙',
-      structure: 'flat',
-      groups: [],
-      options: [],
-      settings: { rankDepth: 1, points: [1], revealDepth: 3, resultFontSize: 160, backgroundAssetId: null },
-      optionCount: 0,
-      createdAt: now,
-      updatedAt: now,
-    });
+    await getDb()
+      .collection('pollBallots')
+      .doc(ballotId)
+      .set({
+        id: ballotId,
+        ownerId: OWNER_UID,
+        title: '空の用紙',
+        structure: 'flat',
+        groups: [],
+        options: [],
+        settings: {
+          rankDepth: 1,
+          points: [1],
+          revealDepth: 3,
+          resultFontSize: 160,
+          backgroundAssetId: null,
+        },
+        optionCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      });
 
     currentUid = OWNER_UID;
     const { createRoom } = await import('@/application/services/room-service');
@@ -329,11 +341,7 @@ describe.skipIf(!available)('投票モードの進行', () => {
     const { editPollTally } = await import('@/application/services/poll-service');
 
     // 紙の投票を 10 票ぶん足す。
-    await editPollTally(
-      roomId,
-      [{ optionId: optionIds[2]!, counts: [10, 0, 0] }],
-      12,
-    );
+    await editPollTally(roomId, [{ optionId: optionIds[2]!, counts: [10, 0, 0] }], 12);
 
     const { getStaffSnapshot } = await import('@/application/services/room-service');
     const snapshot = await getStaffSnapshot(roomId, 'host');
@@ -358,61 +366,61 @@ describe.skipIf(!available)('投票モードの進行', () => {
     await act(roomId, 'close_poll');
 
     currentUid = OWNER_UID;
-    const { editPollTally, recountPollTally } = await import(
-      '@/application/services/poll-service'
-    );
+    const { editPollTally, recountPollTally } = await import('@/application/services/poll-service');
 
     await editPollTally(roomId, [{ optionId: optionIds[0]!, counts: [999] }]);
     const recounted = await recountPollTally(roomId);
 
     // 投票の記録そのものは消していないので、いつでも戻せる。
-    expect(
-      recounted.entries.find((entry) => entry.optionId === optionIds[0])?.counts,
-    ).toEqual([2]);
+    expect(recounted.entries.find((entry) => entry.optionId === optionIds[0])?.counts).toEqual([2]);
     expect(recounted.voterCount).toBe(2);
   });
 
-  it('発表は下の順位から 1 つずつ、出していない順位は投影へ渡さない', { timeout: 60_000 }, async () => {
-    const { roomId, optionIds } = await openPollRoom(['a1', 'a2', 'a3', 'a4', 'a5', 'a6']);
-    // 3票 / 2票 / 1票 → 1位=0番, 2位=1番, 3位=2番。
-    await vote(roomId, 'a1', [optionIds[0]!]);
-    await vote(roomId, 'a2', [optionIds[0]!]);
-    await vote(roomId, 'a3', [optionIds[0]!]);
-    await vote(roomId, 'a4', [optionIds[1]!]);
-    await vote(roomId, 'a5', [optionIds[1]!]);
-    await vote(roomId, 'a6', [optionIds[2]!]);
+  it(
+    '発表は下の順位から 1 つずつ、出していない順位は投影へ渡さない',
+    { timeout: 60_000 },
+    async () => {
+      const { roomId, optionIds } = await openPollRoom(['a1', 'a2', 'a3', 'a4', 'a5', 'a6']);
+      // 3票 / 2票 / 1票 → 1位=0番, 2位=1番, 3位=2番。
+      await vote(roomId, 'a1', [optionIds[0]!]);
+      await vote(roomId, 'a2', [optionIds[0]!]);
+      await vote(roomId, 'a3', [optionIds[0]!]);
+      await vote(roomId, 'a4', [optionIds[1]!]);
+      await vote(roomId, 'a5', [optionIds[1]!]);
+      await vote(roomId, 'a6', [optionIds[2]!]);
 
-    await act(roomId, 'close_poll');
-    await act(roomId, 'start_reveal');
+      await act(roomId, 'close_poll');
+      await act(roomId, 'start_reveal');
 
-    const { getStaffSnapshot } = await import('@/application/services/room-service');
-    currentUid = OWNER_UID;
+      const { getStaffSnapshot } = await import('@/application/services/room-service');
+      currentUid = OWNER_UID;
 
-    // 発表を始めた直後はまだ何も出さない。
-    let presenter = await getStaffSnapshot(roomId, 'presenter');
-    expect(presenter.pollResult?.entries).toEqual([]);
-    // 投影担当には全順位の表を渡さない（会場のスクリーンに映りうる）。
-    expect(presenter.pollTally).toBeUndefined();
+      // 発表を始めた直後はまだ何も出さない。
+      let presenter = await getStaffSnapshot(roomId, 'presenter');
+      expect(presenter.pollResult?.entries).toEqual([]);
+      // 投影担当には全順位の表を渡さない（会場のスクリーンに映りうる）。
+      expect(presenter.pollTally).toBeUndefined();
 
-    await act(roomId, 'reveal_next');
-    presenter = await getStaffSnapshot(roomId, 'presenter');
-    expect(presenter.pollResult?.entries.map((entry) => entry.rank)).toEqual([3]);
-    // 1 位の名前はまだどこにも入っていない。
-    expect(JSON.stringify(presenter.pollResult)).not.toContain('出し物1');
+      await act(roomId, 'reveal_next');
+      presenter = await getStaffSnapshot(roomId, 'presenter');
+      expect(presenter.pollResult?.entries.map((entry) => entry.rank)).toEqual([3]);
+      // 1 位の名前はまだどこにも入っていない。
+      expect(JSON.stringify(presenter.pollResult)).not.toContain('出し物1');
 
-    await act(roomId, 'reveal_next');
-    presenter = await getStaffSnapshot(roomId, 'presenter');
-    expect(presenter.pollResult?.entries.map((entry) => entry.rank)).toEqual([3, 2]);
+      await act(roomId, 'reveal_next');
+      presenter = await getStaffSnapshot(roomId, 'presenter');
+      expect(presenter.pollResult?.entries.map((entry) => entry.rank)).toEqual([3, 2]);
 
-    await act(roomId, 'reveal_next');
-    presenter = await getStaffSnapshot(roomId, 'presenter');
-    expect(presenter.pollResult?.entries.map((entry) => entry.rank)).toEqual([3, 2, 1]);
-    expect(presenter.pollResult?.complete).toBe(true);
-    expect(presenter.pollResult?.entries.at(-1)?.label).toBe('出し物1');
+      await act(roomId, 'reveal_next');
+      presenter = await getStaffSnapshot(roomId, 'presenter');
+      expect(presenter.pollResult?.entries.map((entry) => entry.rank)).toEqual([3, 2, 1]);
+      expect(presenter.pollResult?.complete).toBe(true);
+      expect(presenter.pollResult?.entries.at(-1)?.label).toBe('出し物1');
 
-    // 出しきったあとに押しても進まない。
-    await expect(act(roomId, 'reveal_next')).rejects.toMatchObject({ code: 'POLL_REVEAL_DONE' });
-  });
+      // 出しきったあとに押しても進まない。
+      await expect(act(roomId, 'reveal_next')).rejects.toMatchObject({ code: 'POLL_REVEAL_DONE' });
+    },
+  );
 
   it('締切の押し間違いからは戻せるが、発表を始めたら戻せない', { timeout: 60_000 }, async () => {
     const { roomId, optionIds } = await openPollRoom(['b1']);
@@ -437,6 +445,29 @@ describe.skipIf(!available)('投票モードの進行', () => {
 
     room = await fetchRoomDoc(roomId);
     expect(room.phase).toBe('poll_revealing');
+  });
+
+  it('表示用の人数が書けなくても投票は成立する', { timeout: 60_000 }, async () => {
+    /*
+      会場の全員が同時に押すと `rooms/{id}` が混み合う。
+      そこで票の書き込みと人数の加算を分けてある。
+      人数の側が落ちても、票は入っていなければならない。
+    */
+    const { roomId, optionIds } = await openPollRoom(['d1']);
+    const repository = await import('@/infrastructure/firebase/repositories/poll-repository');
+
+    currentUid = 'd1';
+    await repository.insertVote(roomId, 'd1', [optionIds[0]!]);
+
+    // 票は入っているが、表示用の人数はまだ 0 のまま。
+    expect((await fetchRoomDoc(roomId)).voteCount ?? 0).toBe(0);
+    expect(await repository.findVote(roomId, 'd1')).not.toBeNull();
+
+    // 締め切ると実際の票を数え直して上書きするので、ずれは残らない。
+    await act(roomId, 'close_poll');
+    const room = await fetchRoomDoc(roomId);
+    expect(room.voteCount).toBe(1);
+    expect(room.pollTally?.voterCount).toBe(1);
   });
 
   it('練習の票を捨てて本番を始められる', { timeout: 60_000 }, async () => {

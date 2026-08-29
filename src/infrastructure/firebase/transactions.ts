@@ -211,6 +211,13 @@ async function applyTransition(
   */
   let pollTally = room.pollTally ?? null;
   let revealedCount = room.revealedCount ?? 0;
+  /*
+    投票した人数の表示値。
+
+    1 票ごとの加算は混雑を避けるため取りこぼしうる（poll-repository の bumpVoteCount）。
+    締め切るときに実際の票を数えて上書きするので、ずれは残らない。
+  */
+  let voteCount = room.voteCount ?? 0;
 
   // 公開してよい回答数。締切・正解発表では必ず正確な値を書く（§3.4）。
   const publicSnapshot = await tx.get(publicStateRef(roomId));
@@ -376,6 +383,7 @@ async function applyTransition(
         snapshotPoll.settings.rankDepth,
         votes.docs.map((doc) => doc.data().choices),
       );
+      voteCount = votes.size;
       revealedCount = 0;
       break;
     }
@@ -429,6 +437,7 @@ async function applyTransition(
     drawn,
     pollTally,
     revealedCount,
+    voteCount,
     currentQuestionId,
     currentQuestionPosition,
     // 延長はフェーズを変えないので「いつこのフェーズに入ったか」も動かさない。

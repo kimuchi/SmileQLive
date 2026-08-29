@@ -208,29 +208,20 @@ export async function deletePollBallot(ballotId: string): Promise<void> {
  * 判定は「読んでから書く」ではなく **`create` の失敗**で行う。
  * 読んでから書くと、同時に 2 回送られたときに両方が通りうる。
  *
- * 票と一緒にルームの `voteCount` を 1 増やす。
- * まとめて書くので、票だけ増えて人数が据え置かれることは起きない
- * （二度目の投票は `create` が落ち、この書き込みごと通らない）。
+ * **票だけを書く。** 表示用の人数はここに混ぜない（bumpVoteCount を参照）。
  */
 export async function insertVote(
   roomId: string,
   participantId: string,
   choices: readonly string[],
 ): Promise<void> {
-  const now = nowTimestamp();
-  const batch = getDb().batch();
-  batch.create(voteRef(roomId, participantId), {
-    roomId,
-    participantId,
-    choices: [...choices],
-    createdAt: now,
-  });
-  batch.update(roomRef(roomId), {
-    voteCount: FieldValue.increment(1),
-    updatedAt: now,
-  });
   try {
-    await batch.commit();
+    await voteRef(roomId, participantId).create({
+      roomId,
+      participantId,
+      choices: [...choices],
+      createdAt: nowTimestamp(),
+    });
   } catch (error) {
     const code = (error as { code?: unknown }).code;
     // 6 / ALREADY_EXISTS = すでに同じ ID のドキュメントがある＝投票済み。
@@ -238,6 +229,27 @@ export async function insertVote(
       throw new AppError('ALREADY_VOTED', { cause: error });
     }
     throw error;
+  }
+}
+
+/**
+ * 投票した人数の表示値を 1 増やす。
+ *
+ * **票の書き込みとは分ける。** 同じ書き込みにまとめると、
+ * 会場の全員が同時に押したときに `rooms/{id}` が混み合い、
+ * 表示用の数字のせいで**投票そのものが弾かれる**。
+ * 参加人数（bumpParticipantCount）と同じ考え方で、失敗しても投票は成立している。
+ *
+ * ずれても締め切った時点で実際の票を数え直して上書きするので、残らない。
+ */
+export async function bumpVoteCount(roomId: string): Promise<void> {
+  try {
+    await roomRef(roomId).update({
+      voteCount: FieldValue.increment(1),
+      updatedAt: nowTimestamp(),
+    });
+  } catch {
+    // 表示のための更新。失敗しても投票そのものは成立している。
   }
 }
 

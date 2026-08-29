@@ -31,6 +31,7 @@ import {
   type RankedOption,
 } from '@/domain/poll/tally';
 import {
+  bumpVoteCount,
   clearVotes,
   createPollBallot as createBallotDoc,
   deletePollBallot as deleteBallotDoc,
@@ -251,7 +252,14 @@ export async function submitVote(
 
   assertChoicesAllowed(snapshot, optionIds);
   await insertVote(roomId, member.id, optionIds);
-  // 投影の「◯人投票済み」を動かす。間引かれた回は何も書かない。
+
+  /*
+    ここから先は表示のための更新。**失敗しても投票は成立している。**
+
+    票の書き込みと分けているのは、会場の全員が同時に押したときに
+    表示用の数字のせいで投票そのものが弾かれないようにするため。
+  */
+  await bumpVoteCount(roomId);
   await publishVoteProgress(roomId);
 
   logger.info('poll.voted', { roomId, choiceCount: optionIds.length });
