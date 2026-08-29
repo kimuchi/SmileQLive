@@ -127,6 +127,17 @@ service cloud.firestore {
     }
 
     // -------------------------------------------------------------------------
+    // pollBallots — 投票の選択肢。作った本人だけ
+    //
+    // 発表前の候補一覧そのものなので、参加者にも投影担当にも読ませない
+    // （参加者が投票に使う内容は Cloud Run 経由で配る）。
+    // -------------------------------------------------------------------------
+    match /pollBallots/{ballotId} {
+      allow read: if isStaffUser() && resource.data.ownerId == uid();
+      allow write: if false;
+    }
+
+    // -------------------------------------------------------------------------
     // rooms — quizSnapshot（正解を含む）があるため所有者のみ
     // -------------------------------------------------------------------------
     match /rooms/{roomId} {
@@ -158,6 +169,18 @@ service cloud.firestore {
       match /answers/{answerId} {
         allow read: if (isSignedIn() && resource.data.participantId == uid())
           || isRoomOwner(roomId);
+        allow write: if false;
+      }
+
+      /*
+        投票: 自分の 1 票だけ。司会は全件見られる。
+
+        ドキュメント ID が参加者 ID なので、自分の uid の行だけを許可する。
+        **他人の票は読ませない。** 誰が何に入れたかが分かると投票にならない。
+        票数の途中経過も、ここを全件読めれば数えられてしまう。
+      */
+      match /votes/{participantId} {
+        allow read: if (isSignedIn() && participantId == uid()) || isRoomOwner(roomId);
         allow write: if false;
       }
 

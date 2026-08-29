@@ -41,6 +41,15 @@ import {
 } from '@/domain/room/state-machine';
 import { buildSnapshotForQuiz } from '@/application/services/quiz-service';
 import { buildDrawSnapshot } from '@/application/services/draw-list-service';
+import { buildPollSnapshot, getMyVote, rankFor, readTally } from '@/application/services/poll-service';
+import {
+  pollResultOf,
+  pollStageOf,
+  pollTallyRowsOf,
+  type PollResult,
+  type PollStage,
+  type PollTallyRow,
+} from '@/domain/poll/poll-stage';
 import type { StageDraw } from '@/domain/draw/draw-stage';
 import {
   resolveDrawEntryMedia,
@@ -213,7 +222,13 @@ function collectImageUrls(question: Question, includeReveal: boolean): string[] 
 
 export async function createRoom(input: CreateRoomInput): Promise<CreateRoomResponse> {
   const mode: RoomMode = input.mode ?? 'quiz';
-  return mode === 'quiz' ? createQuizRoom(input) : createDrawRoom(input, mode);
+  if (mode === 'quiz') {
+    return createQuizRoom(input);
+  }
+  if (mode === 'poll') {
+    return createPollRoom(input);
+  }
+  return createDrawRoom(input, mode);
 }
 
 async function createQuizRoom(input: CreateRoomInput): Promise<CreateRoomResponse> {
@@ -262,6 +277,61 @@ async function createQuizRoom(input: CreateRoomInput): Promise<CreateRoomRespons
 }
 
 /**
+ * 投票のルームを作る。
+ *
+ * 参加者はスマホから投票するので、**参加受付を開いて参加 URL を返す**
+ * （クイズと同じ扱い）。投影画面が二次元コードを出す。
+ */
+async function createPollRoom(input: CreateRoomInput): Promise<CreateRoomResponse> {
+  const ballotId = input.ballotId;
+  if (!ballotId) {
+    throw new AppError('VALIDATION_FAILED', { details: { reason: 'ballot_id_required' } });
+  }
+
+  const { user } = await requireHostUser();
+  const pollSnapshot = await buildPollSnapshot(ballotId);
+  const { token, tokenHash } = createJoinToken();
+
+  const room = await createRoomDoc({
+    ownerId: user.uid,
+    mode: 'poll',
+    quizId: null,
+    joinTokenHash: tokenHash,
+    joinToken: token,
+    // 投票のルームでも「問題 0 問のクイズ」を入れる（読み取り経路の分岐を増やさない）。
+    quizSnapshot: {
+      quizId: '',
+      title: pollSnapshot.title,
+      settings: {
+        showLeaderboard: false,
+        showTotalQuestions: false,
+        showQuestionBeforeOpen: false,
+        // 投票は途中から来た人も入れたほうがよいので、二次元コードを出し続ける。
+        alwaysShowJoinCode: true,
+        soundTheme: 'default',
+        leaderboardSize: 0,
+      },
+      questions: [],
+    },
+    drawSnapshot: null,
+    pollSnapshot,
+    maxParticipants: input.maxParticipants ?? DEFAULT_MAX_PARTICIPANTS,
+    joinOpen: true,
+  });
+
+  const baseUrl = await currentBaseUrl();
+  logger.info('room.created', { roomId: room.id, mode: 'poll', userId: user.uid });
+
+  return {
+    roomId: room.id,
+    mode: 'poll',
+    joinUrl: buildJoinUrl(baseUrl, token),
+    joinToken: token,
+    quizTitle: pollSnapshot.title,
+  };
+}
+
+/**
  * 抽選会・ビンゴのルームを作る。
  *
  * 参加者は来ないので**参加受付を開かず、参加 URL も返さない**。
@@ -270,7 +340,7 @@ async function createQuizRoom(input: CreateRoomInput): Promise<CreateRoomRespons
  */
 async function createDrawRoom(
   input: CreateRoomInput,
-  mode: Exclude<RoomMode, 'quiz'>,
+  mode: Exclude<RoomMode, 'quiz' | 'poll'>,
 ): Promise<CreateRoomResponse> {
   const drawListId = input.drawListId;
   if (!drawListId) {
@@ -441,6 +511,8 @@ export async function getStaffSnapshot(
 
   // 抽選会・ビンゴの状態。クイズのルームでは作らない。
   const draw = await buildStageDraw(room);
+  // 投票の状態。投票のルームでのみ作る。
+  const pollViews = buildPollViews(room, participantCount);
 
   /**
    * 参加 URL。
@@ -481,10 +553,12 @@ export async function getStaffSnapshot(
     preloadImageUrls: buildPreloadUrls(parts),
     alwaysShowJoinCode: snapshot.settings.alwaysShowJoinCode,
     showDrawHistory: room.showDrawHistory === true,
+    poll: pollViews.stage,
+    pollResult: pollViews.result,
   };
 
   if (audience !== 'host') {
-    // 投影担当へ渡すのは参加 URL まで。参加者一覧は渡さない。
+    // 投影担当へ渡すのは参加 URL まで。参加者一覧も、まだ出していない順位も渡さない。
     return { ...base, joinUrl };
   }
 
@@ -493,6 +567,8 @@ export async function getStaffSnapshot(
   return {
     ...base,
     joinUrl,
+    // 全順位を見てよいのは司会だけ。確かめて直すのが仕事なので。
+    pollTally: pollViews.rows,
     participants: members.map((entry) => ({
       participantId: entry.id,
       nickname: entry.nickname ?? '参加者',
@@ -551,6 +627,45 @@ async function buildStageDraw(room: RoomDoc): Promise<StageDraw | null> {
   };
 }
 
+/**
+ * 投票の状態を、画面が使える形へ作る。
+ *
+ * 3 つ返すが、**渡してよい相手が違う**。
+ *   stage  … 参加者・投影・司会。選択肢と人数だけで、票数も順位も入っていない。
+ *   result … 参加者・投影・司会。**発表した順位まで**。
+ *   rows   … 司会だけ。全順位。投影へ渡すと会場のスクリーンに映りうる。
+ *
+ * 票数はルームの voteCount を読む（数え直さない）。
+ * 参加者は全員が同時に取りに来るので、そのたびに集計クエリを走らせない。
+ */
+function buildPollViews(
+  room: RoomDoc,
+  participantCount: number,
+): { stage: PollStage | null; result: PollResult | null; rows: PollTallyRow[] | null } {
+  const pollSnapshot = room.pollSnapshot;
+  if (!pollSnapshot) {
+    return { stage: null, result: null, rows: null };
+  }
+
+  const stage = pollStageOf(pollSnapshot, {
+    voteCount: room.voteCount ?? 0,
+    participantCount,
+  });
+
+  // 締め切るまで集計は無い。受付中に順位を作ると、途中経過が漏れる経路ができる。
+  if (!room.pollTally) {
+    return { stage, result: null, rows: null };
+  }
+
+  const tally = readTally(pollSnapshot, room.pollTally);
+  const ranked = rankFor(pollSnapshot, tally);
+  return {
+    stage,
+    result: pollResultOf(pollSnapshot, ranked, room.revealedCount ?? 0),
+    rows: pollTallyRowsOf(pollSnapshot, ranked),
+  };
+}
+
 export async function getParticipantSnapshot(roomId: string): Promise<ParticipantSnapshot> {
   const { member, room } = await requireParticipant(roomId);
   // 在席時刻は「オンライン人数」の表示にしか使わない。
@@ -583,6 +698,10 @@ export async function getParticipantSnapshot(roomId: string): Promise<Participan
     : null;
 
   const reveal = revealed && resolvedQuestion ? buildRevealInfo(resolvedQuestion) : null;
+
+  // 投票のルームだけ。自分が入れた票は自分にだけ返す。
+  const pollViews = buildPollViews(room, participantCount);
+  const myVote = pollViews.stage ? await getMyVote(roomId, member.id) : null;
 
   let myResult: ParticipantSnapshot['myResult'] = null;
   let leaderboard: RankedParticipant[] | null = null;
@@ -632,6 +751,9 @@ export async function getParticipantSnapshot(roomId: string): Promise<Participan
     myResult,
     leaderboard,
     joinOpen: room.joinOpen,
+    poll: pollViews.stage,
+    myVote,
+    pollResult: pollViews.result,
   };
 }
 

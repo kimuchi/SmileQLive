@@ -33,6 +33,17 @@ import {
   STOP_DURATION_MIN_MS,
 } from '@/domain/draw/draw-list';
 import { MEDIA_USAGES } from '@/domain/media/image-policy';
+import {
+  BALLOT_GROUP_MAX_COUNT,
+  BALLOT_LABEL_MAX_LENGTH,
+  BALLOT_OPTION_MAX_COUNT,
+  BALLOT_STRUCTURES,
+  RANK_DEPTH_MAX,
+  RANK_DEPTH_MIN,
+  RANK_POINTS_MAX,
+  RANK_POINTS_MIN,
+  REVEAL_DEPTH_MAX,
+} from '@/domain/poll/ballot';
 
 /**
  * すべての API 入力はここで定義した Zod スキーマで検証する。
@@ -228,21 +239,105 @@ export const importDrawEntriesSchema = z.object({
  * `mode` を省略したときはクイズとして扱う（既存の呼び出しをそのまま通すため）。
  * クイズなら quizId、抽選会・ビンゴなら drawListId が要る。
  */
+// ---------------------------------------------------------------------------
+// 投票
+// ---------------------------------------------------------------------------
+
+export const pollSettingsSchema = z
+  .object({
+    rankDepth: z.int().min(RANK_DEPTH_MIN).max(RANK_DEPTH_MAX),
+    /** 順位ごとの点数。`points[0]` が 1 位ぶん。長さは rankDepth に合わせて読み直す。 */
+    points: z.array(z.int().min(RANK_POINTS_MIN).max(RANK_POINTS_MAX)).max(RANK_DEPTH_MAX),
+    revealDepth: z.int().min(1).max(REVEAL_DEPTH_MAX),
+    resultFontSize: z.int().min(DRAW_FONT_SIZE_MIN).max(DRAW_FONT_SIZE_MAX),
+    backgroundAssetId: uuidSchema.nullable(),
+  })
+  .partial();
+
+export const createPollBallotSchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  structure: z.enum(BALLOT_STRUCTURES),
+});
+
+export const updatePollBallotSchema = z.object({
+  title: z.string().trim().min(1).max(120).optional(),
+  structure: z.enum(BALLOT_STRUCTURES).optional(),
+  groups: z
+    .array(
+      z.object({
+        id: uuidSchema,
+        label: z.string().trim().min(1).max(BALLOT_LABEL_MAX_LENGTH),
+      }),
+    )
+    .max(BALLOT_GROUP_MAX_COUNT)
+    .optional(),
+  options: z
+    .array(
+      z.object({
+        id: uuidSchema,
+        label: z.string().trim().min(1).max(BALLOT_LABEL_MAX_LENGTH),
+        groupId: uuidSchema.nullable().optional(),
+        note: z.string().trim().max(BALLOT_LABEL_MAX_LENGTH).nullable().optional(),
+      }),
+    )
+    .max(BALLOT_OPTION_MAX_COUNT)
+    .optional(),
+  settings: pollSettingsSchema.optional(),
+});
+
+/**
+ * 1 票。選んだ順に選択肢 ID を並べる（`choices[0]` が 1 位）。
+ *
+ * 何件まで受け付けるかは用紙の rankDepth 次第なので、ここでは上限だけ見る。
+ * 中身の照合（用紙にある選択肢か・重複していないか）はサービス層で行う。
+ */
+export const submitVoteSchema = z.object({
+  choices: z.array(uuidSchema).min(1).max(RANK_DEPTH_MAX),
+});
+
+/**
+ * 司会が直した票数。
+ *
+ * **点数は受け取らない。** 票数から計算し直す
+ * （直接いじれると、票数と食い違ったまま発表されうる）。
+ */
+export const editPollTallySchema = z.object({
+  entries: z
+    .array(
+      z.object({
+        optionId: uuidSchema,
+        counts: z.array(z.int().min(0).max(1_000_000)).max(RANK_DEPTH_MAX),
+      }),
+    )
+    .max(BALLOT_OPTION_MAX_COUNT),
+  /** 投票した人数。紙の票を足したときに直す。省略すると据え置き。 */
+  voterCount: z.int().min(0).max(1_000_000).optional(),
+});
+
 export const createRoomSchema = z
   .object({
     mode: z.enum(ROOM_MODES).optional(),
     quizId: uuidSchema.optional(),
     drawListId: uuidSchema.optional(),
+    ballotId: uuidSchema.optional(),
     maxParticipants: z.int().min(2).max(1000).optional(),
   })
   .refine((value) => ((value.mode ?? 'quiz') === 'quiz' ? value.quizId !== undefined : true), {
     message: 'クイズを選んでください',
     path: ['quizId'],
   })
-  .refine((value) => ((value.mode ?? 'quiz') === 'quiz' ? true : value.drawListId !== undefined), {
-    message: '抽選リストを選んでください',
-    path: ['drawListId'],
-  });
+  .refine((value) => ((value.mode ?? 'quiz') === 'poll' ? value.ballotId !== undefined : true), {
+    message: '投票用紙を選んでください',
+    path: ['ballotId'],
+  })
+  .refine(
+    (value) => {
+      const mode = value.mode ?? 'quiz';
+      // 抽選リストが要るのは抽選会・ビンゴ・ルーレットだけ。
+      return mode === 'quiz' || mode === 'poll' ? true : value.drawListId !== undefined;
+    },
+    { message: '抽選リストを選んでください', path: ['drawListId'] },
+  );
 
 export const roomActionSchema = z
   .object({
@@ -295,3 +390,7 @@ export type CreateDrawListInput = z.infer<typeof createDrawListSchema>;
 export type UpdateDrawListInput = z.infer<typeof updateDrawListSchema>;
 export type ReplaceDrawEntriesInput = z.infer<typeof replaceDrawEntriesSchema>;
 export type ImportDrawEntriesInput = z.infer<typeof importDrawEntriesSchema>;
+export type CreatePollBallotInput = z.infer<typeof createPollBallotSchema>;
+export type UpdatePollBallotInput = z.infer<typeof updatePollBallotSchema>;
+export type SubmitVoteInput = z.infer<typeof submitVoteSchema>;
+export type EditPollTallyInput = z.infer<typeof editPollTallySchema>;

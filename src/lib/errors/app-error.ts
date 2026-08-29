@@ -99,6 +99,16 @@ export const APP_ERROR_DEFINITIONS = {
   },
   SOUND_NOT_FOUND: { status: 404, message: '効果音が見つかりません' },
 
+  // 投票
+  POLL_BALLOT_NOT_FOUND: { status: 404, message: '投票用紙が見つかりません' },
+  POLL_BALLOT_EMPTY: { status: 409, message: '投票用紙に選択肢がありません' },
+  POLL_NOT_OPEN: { status: 409, message: 'いまは投票を受け付けていません' },
+  /** 1 端末につき 1 票。二度目はここで止まる。 */
+  ALREADY_VOTED: { status: 409, message: 'すでに投票済みです' },
+  POLL_CHOICE_INVALID: { status: 422, message: '選んだ内容を確認してください' },
+  POLL_TALLY_NOT_READY: { status: 409, message: '投票を締め切ってから操作してください' },
+  POLL_REVEAL_DONE: { status: 409, message: 'すべての順位を発表しました' },
+
   // 共通
   VALIDATION_FAILED: { status: 400, message: '入力内容を確認してください' },
   RATE_LIMITED: { status: 429, message: '操作が多すぎます。しばらく待ってから再度お試しください' },

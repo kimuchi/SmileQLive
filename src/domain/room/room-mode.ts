@@ -10,7 +10,7 @@
  * 保存されていなければクイズとして扱う（移行作業を要らなくするため）。
  */
 
-export const ROOM_MODES = ['quiz', 'lottery', 'bingo', 'roulette'] as const;
+export const ROOM_MODES = ['quiz', 'lottery', 'bingo', 'roulette', 'poll'] as const;
 
 export type RoomMode = (typeof ROOM_MODES)[number];
 
@@ -19,6 +19,7 @@ export const ROOM_MODE_LABELS: Record<RoomMode, string> = {
   lottery: '抽選会',
   bingo: 'ビンゴ',
   roulette: 'ルーレット',
+  poll: '投票',
 };
 
 /** 管理画面でモードを選ぶときの説明。 */
@@ -27,6 +28,7 @@ export const ROOM_MODE_DESCRIPTIONS: Record<RoomMode, string> = {
   lottery: '名簿から当選者を 1 人ずつ引きます。参加者のスマホは使いません。',
   bingo: '数字や景品を 1 つずつ引きます。ビンゴカードは紙で配ります。',
   roulette: '重みを付けた項目を円盤に並べ、回して止めます。同じ項目が何度でも出ます。',
+  poll: '参加者がスマホで投票します。1端末につき1票。集計を確かめてから結果を発表できます。',
 };
 
 export function isRoomMode(value: string): value is RoomMode {
@@ -67,9 +69,15 @@ export function removesDrawnEntries(mode: RoomMode): boolean {
 /**
  * 参加者が加わるモードか。
  *
- * 抽選会とビンゴは名簿・紙のカードで進めるため、参加者はスマホを使わない。
+ * 抽選会・ビンゴ・ルーレットは名簿や紙のカードで進めるため、参加者はスマホを使わない。
  * ルーム作成時に参加受付を開かず、参加 URL も発行しない。
+ * クイズと投票は参加者が自分の端末から操作するので、参加 URL を出す。
  */
 export function acceptsParticipants(mode: RoomMode): boolean {
-  return mode === 'quiz';
+  return mode === 'quiz' || mode === 'poll';
+}
+
+/** 投票のモードか。 */
+export function isPollMode(mode: RoomMode): boolean {
+  return mode === 'poll';
 }

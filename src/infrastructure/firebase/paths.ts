@@ -41,6 +41,8 @@ import {
   type RoomPublicStateDoc,
   type RoomStaffProgressDoc,
   type SoundSettingsDoc,
+  type PollBallotDoc,
+  type VoteDoc,
 } from '@/types/firestore';
 
 // ---------------------------------------------------------------------------
@@ -68,6 +70,8 @@ const quizConverter = docConverter<QuizDoc>();
 const questionConverter = docConverter<QuestionDoc>();
 const mediaAssetConverter = docConverter<MediaAssetDoc>();
 const soundSettingsConverter = docConverter<SoundSettingsDoc>();
+const pollBallotConverter = docConverter<PollBallotDoc>();
+const voteConverter = docConverter<VoteDoc>();
 const drawListConverter = docConverter<DrawListDoc>();
 const drawListEntryConverter = docConverter<DrawListEntryDoc>();
 const roomConverter = docConverter<RoomDoc>();
@@ -148,6 +152,18 @@ export function soundSettingsRef(ownerId: string): DocumentReference<SoundSettin
 }
 
 // ---------------------------------------------------------------------------
+// pollBallots（投票用紙。司会者のみ読める）
+// ---------------------------------------------------------------------------
+
+export function pollBallotsCollection(): CollectionReference<PollBallotDoc> {
+  return getDb().collection(COLLECTIONS.pollBallots).withConverter(pollBallotConverter);
+}
+
+export function pollBallotRef(ballotId: string): DocumentReference<PollBallotDoc> {
+  return pollBallotsCollection().doc(ballotId);
+}
+
+// ---------------------------------------------------------------------------
 // drawLists（抽選会の名簿・ビンゴの球。司会者のみ読める）
 // ---------------------------------------------------------------------------
 
@@ -185,6 +201,26 @@ export function roomsCollection(): CollectionReference<RoomDoc> {
 export function roomRef(roomId: string): DocumentReference<RoomDoc> {
   return roomsCollection().doc(roomId);
 }
+
+// ---------------------------------------------------------------------------
+// rooms/{roomId}/votes（投票。1 参加者 1 件）
+// ---------------------------------------------------------------------------
+
+export function votesCollection(roomId: string): CollectionReference<VoteDoc> {
+  return roomsCollection().doc(roomId).collection(COLLECTIONS.votes).withConverter(voteConverter);
+}
+
+/**
+ * 1 人ぶんの投票。
+ *
+ * **ドキュメント ID を参加者 ID にする。** `create` で書けば、
+ * 二度目の投票は Firestore が弾く。1 端末につき 1 票がこれで決まり、
+ * 同時に 2 回送られても片方しか通らない。
+ */
+export function voteRef(roomId: string, participantId: string): DocumentReference<VoteDoc> {
+  return votesCollection(roomId).doc(participantId);
+}
+
 
 /**
  * `rooms/{roomId}/public/state`

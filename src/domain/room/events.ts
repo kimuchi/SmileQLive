@@ -31,6 +31,10 @@ export const PUBLIC_EVENT_TYPES = [
   // ルーレットが回り始めた（当たりはまだ決まっていない）。
   'draw.spinning',
   'draw.revealed',
+  // 投票
+  'poll.opened',
+  'poll.closed',
+  'poll.revealing',
   'room.finished',
 ] as const;
 export type PublicEventType = (typeof PUBLIC_EVENT_TYPES)[number];
@@ -111,6 +115,12 @@ export function publicEventTypeForPhase(phase: RoomPhase): PublicEventType {
       return 'draw.spinning';
     case 'draw_revealed':
       return 'draw.revealed';
+    case 'poll_open':
+      return 'poll.opened';
+    case 'poll_closed':
+      return 'poll.closed';
+    case 'poll_revealing':
+      return 'poll.revealing';
     case 'finished':
       return 'room.finished';
   }

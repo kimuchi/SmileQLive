@@ -135,6 +135,15 @@ export default async function run(report, ctx) {
     readDoc(presenter, 'drawLists', IDS.drawList, 'entries', IDS.drawEntry)(),
   );
 
+  // 投票用紙は発表前の候補一覧そのもの。参加者・投影担当は読めない
+  // （参加者が投票に使う内容は Cloud Run 経由でだけ届く）。
+  await report.denied('匿名参加者が pollBallots を読む', () =>
+    readDoc(participant, 'pollBallots', IDS.pollBallot)(),
+  );
+  await report.denied('投影担当が pollBallots を読む', () =>
+    readDoc(presenter, 'pollBallots', IDS.pollBallot)(),
+  );
+
   // -------------------------------------------------------------------------
   report.section('2. 公開状態 rooms/{roomId}/public/state');
   // -------------------------------------------------------------------------
@@ -248,6 +257,31 @@ export default async function run(report, ctx) {
   );
 
   // -------------------------------------------------------------------------
+  report.section('5b. votes — 自分の 1 票だけ（司会は全件）');
+  // -------------------------------------------------------------------------
+  // 他人の票が読めると、投票の秘密が崩れるだけでなく、
+  // 受付中に全件を数えて途中経過を作れてしまう。
+
+  await report.allowed('参加者が自分の votes を読む', () =>
+    readDoc(participant, 'rooms', IDS.room, 'votes', participant.uid)(),
+  );
+  await report.denied('参加者が他人の votes を読む（誰が何に入れたか漏れる）', () =>
+    readDoc(participant, 'rooms', IDS.room, 'votes', otherParticipant.uid)(),
+  );
+  await report.denied('参加者が votes を一覧する（途中経過を数えられる）', () =>
+    listCollection(participant, 'rooms', IDS.room, 'votes')(),
+  );
+  await report.denied('投影担当が votes を一覧する', () =>
+    listCollection(presenter, 'rooms', IDS.room, 'votes')(),
+  );
+  await report.denied('投影担当が参加者の votes を読む', () =>
+    readDoc(presenter, 'rooms', IDS.room, 'votes', participant.uid)(),
+  );
+  await report.allowed('司会者が votes を一覧する', () =>
+    listCollection(host, 'rooms', IDS.room, 'votes')(),
+  );
+
+  // -------------------------------------------------------------------------
   report.section('6. events — 監査ログは司会のみ');
   // -------------------------------------------------------------------------
 
@@ -283,6 +317,9 @@ export default async function run(report, ctx) {
   await report.allowed('司会者が自分の drawLists を読む', () =>
     readDoc(host, 'drawLists', IDS.drawList)(),
   );
+  await report.allowed('司会者が自分の pollBallots を読む', () =>
+    readDoc(host, 'pollBallots', IDS.pollBallot)(),
+  );
   await report.allowed('司会者が自分の drawLists の中身を読む', () =>
     readDoc(host, 'drawLists', IDS.drawList, 'entries', IDS.drawEntry)(),
   );
@@ -292,6 +329,9 @@ export default async function run(report, ctx) {
 
   await report.denied('別の司会者が他人の rooms/{roomId} を読む', () =>
     readDoc(otherHost, 'rooms', IDS.room)(),
+  );
+  await report.denied('別の司会者が他人の pollBallots を読む', () =>
+    readDoc(otherHost, 'pollBallots', IDS.pollBallot)(),
   );
   await report.denied('別の司会者が他人の drawLists を読む', () =>
     readDoc(otherHost, 'drawLists', IDS.drawList)(),
@@ -389,6 +429,15 @@ export default async function run(report, ctx) {
           { totalPoints: 999_999 },
           { merge: true },
         ),
+    },
+    {
+      label: '自分の votes を新規作成する（投票の直接書き込み）',
+      run: () =>
+        setDoc(doc(client.db, 'rooms', IDS.room, 'votes', client.uid ?? 'anonymous'), {
+          roomId: IDS.room,
+          participantId: client.uid ?? 'anonymous',
+          choices: [IDS.pollOption],
+        }),
     },
     {
       label: '自分の answers を新規作成する（回答の直接書き込み）',

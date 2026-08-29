@@ -13,9 +13,14 @@ import { TextInput } from '@/components/shared/TextInput';
 import { JoinUrlPanel } from '@/components/admin/join-url-panel';
 import { PublishIssueList, parsePublishIssues } from '@/components/admin/publish-issue-list';
 import { rememberJoinUrl } from '@/components/admin/join-url-store';
-import { DRAW_LIST_KIND_LABELS, drawKindsForMode } from '@/domain/draw/draw-list';
+import {
+  DRAW_LIST_KIND_LABELS,
+  drawKindsForMode,
+  type DrawRoomMode,
+} from '@/domain/draw/draw-list';
 import type { PublishIssue } from '@/domain/quiz/publish-validation';
 import {
+  isDrawMode,
   ROOM_MODES,
   ROOM_MODE_DESCRIPTIONS,
   ROOM_MODE_LABELS,
@@ -90,7 +95,8 @@ export function RoomCreatePanel({ initialQuizId, initialMode }: RoomCreatePanelP
   const [created, setCreated] = useState<CreateRoomResponse | null>(null);
 
   /** 1 つずつ引くモードのときだけ値が入る。drawKindsForMode へ渡すために絞っておく。 */
-  const drawMode = mode === 'quiz' ? null : mode;
+  // 抽選リストを使うモード（抽選会・ビンゴ・ルーレット）。クイズと投票は使わない。
+  const drawMode: DrawRoomMode | null = isDrawMode(mode) ? (mode as DrawRoomMode) : null;
 
   // 同期的な setState を含めない（effect から呼ぶため）。
   const load = useCallback(async () => {

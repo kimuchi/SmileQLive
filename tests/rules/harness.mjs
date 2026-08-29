@@ -212,6 +212,8 @@ export const IDS = {
   presentationLink: 'link-rules-1',
   drawList: 'draw-list-rules-1',
   drawEntry: 'draw-entry-rules-1',
+  pollBallot: 'poll-ballot-rules-1',
+  pollOption: 'poll-option-rules-1',
 };
 
 /** `${questionId}__${participantId}`（src/types/firestore.ts の answerDocId と同じ規則）。 */
@@ -403,6 +405,37 @@ async function seed(adminDb, roles) {
       updatedAt: now,
     });
 
+  // 投票用紙（発表前の候補一覧。所有者以外は読めてはいけない）。
+  await adminDb
+    .collection('pollBallots')
+    .doc(IDS.pollBallot)
+    .set({
+      id: IDS.pollBallot,
+      ownerId: roles.host.uid,
+      title: '出し物コンテスト',
+      structure: 'flat',
+      groups: [],
+      options: [
+        {
+          id: IDS.pollOption,
+          position: 1,
+          label: '営業部 ダンス',
+          groupId: null,
+          note: null,
+        },
+      ],
+      settings: {
+        rankDepth: 1,
+        points: [1],
+        revealDepth: 3,
+        resultFontSize: 160,
+        backgroundAssetId: null,
+      },
+      optionCount: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+
   // ルーム本体（quizSnapshot に正解が入る）。
   const roomRef = adminDb.collection('rooms').doc(IDS.room);
   await roomRef.set({
@@ -521,6 +554,21 @@ async function seed(adminDb, roles) {
         isCorrect: true,
         pointsAwarded: 1000,
       });
+  }
+
+  /*
+    投票（誰が何に入れたか）。本人と司会だけが読めること。
+
+    他人の票を読めると、投票の秘密が崩れるだけでなく、
+    受付中に全件を数えて途中経過を作れてしまう。
+  */
+  for (const participant of [roles.participant, roles.otherParticipant]) {
+    await roomRef.collection('votes').doc(participant.uid).set({
+      roomId: IDS.room,
+      participantId: participant.uid,
+      choices: [IDS.pollOption],
+      createdAt: now,
+    });
   }
 
   await roomRef.collection('events').doc('3').set({

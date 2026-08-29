@@ -10,6 +10,11 @@ import type {
   AdminDrawList,
   DrawListSummary,
 } from '@/infrastructure/firebase/repositories/draw-list-repository';
+import type {
+  AdminPollBallot,
+  PollBallotSummary,
+} from '@/infrastructure/firebase/repositories/poll-repository';
+import type { PollTallyRow } from '@/domain/poll/poll-stage';
 
 /**
  * HTTP API のレスポンス契約。
@@ -270,3 +275,30 @@ export type DrawListImportResponse = {
   list: AdminDrawList;
   imported: DrawImportSummary;
 };
+
+// ---------------------------------------------------------------------------
+// 投票
+// ---------------------------------------------------------------------------
+
+export type PollBallotsResponse = { ballots: PollBallotSummary[] };
+export type PollBallotDetailResponse = { ballot: AdminPollBallot };
+
+/**
+ * 投票を受け付けたときの応答。
+ *
+ * **票数も順位も返さない。** 返すのは「受け付けた事実」と自分が入れた中身だけ。
+ * 途中経過が見えると、あとの人の投票が引っぱられる。
+ */
+export type SubmitVoteResponse = {
+  accepted: true;
+  choices: string[];
+};
+
+/** 司会が集計を直したあとの表（全順位）。 */
+export type PollTallyResponse = {
+  rows: PollTallyRow[];
+  voterCount: number;
+};
+
+/** 投票をすべて捨てたときの応答。 */
+export type PollVotesClearedResponse = { cleared: number };

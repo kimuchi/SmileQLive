@@ -12,13 +12,18 @@
  * 抽選会・ビンゴ（1 つずつ引くモード）:
  *   LOBBY → DRAW_READY ⇄ DRAW_REVEALED → FINISHED
  *
+ * 投票:
+ *   LOBBY → POLL_OPEN → POLL_CLOSED → POLL_REVEALING → FINISHED
+ *   締め切った時点で集計を凍らせ、司会が確かめて（必要なら直して）から発表する。
+ *   POLL_CLOSED からは POLL_OPEN へ戻せる（締切の押し間違いから復帰できる）。
+ *
  * すべての状態変更で state_version を 1 増やし、司会 API は expectedVersion を検証する。
  * **同じフェーズ名を両方のモードで使い回さない。** 使い回すと
  * 「クイズのつもりの操作が抽選のルームで通る」事故が起きる。
  * どの操作が出せるかは availableActions(phase, mode) が決める。
  */
 
-import type { RoomMode } from '@/domain/room/room-mode';
+import { isDrawMode, type RoomMode } from '@/domain/room/room-mode';
 
 export const ROOM_PHASES = [
   'lobby',
@@ -33,6 +38,13 @@ export const ROOM_PHASES = [
   // ルーレットだけ。回っている最中（まだ当たりは決まっていない）。
   'draw_spinning',
   'draw_revealed',
+  // 投票
+  /** 投票を受け付けている。 */
+  'poll_open',
+  /** 締め切った。集計を確かめ、必要なら直す。まだ結果は出さない。 */
+  'poll_closed',
+  /** 結果発表中。下の順位から 1 つずつ出す。 */
+  'poll_revealing',
   'finished',
 ] as const;
 
@@ -55,6 +67,12 @@ export const ROOM_ACTIONS = [
   'continue_draw',
   'undo_draw',
   'reset_draws',
+  // 投票
+  'open_poll',
+  'close_poll',
+  'reopen_poll',
+  'start_reveal',
+  'reveal_next',
   // 共通
   'finish_room',
   'reopen_room',
@@ -90,6 +108,17 @@ const ALLOWED_FROM: Record<RoomAction, readonly RoomPhase[]> = {
   // 全部戻して最初から。GAS 版の「当選リセット」に相当。
   reset_draws: ['draw_ready', 'draw_spinning', 'draw_revealed'],
 
+  // --- 投票 ---
+  open_poll: ['lobby'],
+  // 締め切った時点で集計を凍らせる。ここから先、票は増えない。
+  close_poll: ['poll_open'],
+  // 締切の押し間違いから戻す。**発表を始めたあとは戻せない**
+  // （結果を見てから投票できてしまう）。
+  reopen_poll: ['poll_closed'],
+  start_reveal: ['poll_closed'],
+  // 次の順位を出す。下の順位から 1 つずつ。
+  reveal_next: ['poll_revealing'],
+
   finish_room: [
     'lobby',
     'answer_revealed',
@@ -98,6 +127,9 @@ const ALLOWED_FROM: Record<RoomAction, readonly RoomPhase[]> = {
     'draw_ready',
     'draw_spinning',
     'draw_revealed',
+    'poll_open',
+    'poll_closed',
+    'poll_revealing',
   ],
   // 終了からの復帰。ここだけが finished から出る唯一の道。
   reopen_room: ['finished'],
@@ -123,6 +155,13 @@ const RESULT_PHASE: Record<RoomAction, RoomPhase> = {
   undo_draw: 'draw_ready',
   reset_draws: 'draw_ready',
 
+  open_poll: 'poll_open',
+  close_poll: 'poll_closed',
+  reopen_poll: 'poll_open',
+  start_reveal: 'poll_revealing',
+  // 順位を 1 つ出してもフェーズは変わらない（出した数だけが増える）。
+  reveal_next: 'poll_revealing',
+
   finish_room: 'finished',
   // 1 問も出していない場合の戻り先。出題済みなら nextPhase() が scoreboard を返す。
   reopen_room: 'lobby',
@@ -143,6 +182,11 @@ const REQUIRES_QUESTION_ID: Record<RoomAction, boolean> = {
   continue_draw: false,
   undo_draw: false,
   reset_draws: false,
+  open_poll: false,
+  close_poll: false,
+  reopen_poll: false,
+  start_reveal: false,
+  reveal_next: false,
   finish_room: false,
   reopen_room: false,
 };
@@ -164,8 +208,13 @@ const ACTION_MODES: Record<RoomAction, readonly RoomMode[]> = {
   continue_draw: ['lottery', 'bingo', 'roulette'],
   undo_draw: ['lottery', 'bingo', 'roulette'],
   reset_draws: ['lottery', 'bingo', 'roulette'],
-  finish_room: ['quiz', 'lottery', 'bingo', 'roulette'],
-  reopen_room: ['quiz', 'lottery', 'bingo', 'roulette'],
+  open_poll: ['poll'],
+  close_poll: ['poll'],
+  reopen_poll: ['poll'],
+  start_reveal: ['poll'],
+  reveal_next: ['poll'],
+  finish_room: ['quiz', 'lottery', 'bingo', 'roulette', 'poll'],
+  reopen_room: ['quiz', 'lottery', 'bingo', 'roulette', 'poll'],
 };
 
 export function actionAllowedInMode(action: RoomAction, mode: RoomMode): boolean {
@@ -328,6 +377,58 @@ function nextDrawStep(
   }
 }
 
+/**
+ * 投票の「次の一手」。
+ *
+ * 受付 → 締切 → （集計を確かめる）→ 発表 → 順位を出す → 終了、と一本道で進む。
+ * 締め切ったあとすぐ発表へ進む大きなボタンは出すが、
+ * **票数を直す操作は別の欄に置く**（誤って発表を始めないため）。
+ */
+function nextPollStep(
+  phase: RoomPhase,
+  mode: RoomMode,
+  revealDepth: number,
+  revealedCount: number,
+): NextStep | null {
+  const finish: NextStep = {
+    action: 'finish_room',
+    label: roomActionLabel('finish_room', mode),
+    questionPosition: null,
+  };
+
+  switch (phase) {
+    case 'lobby':
+      return { action: 'open_poll', label: '投票をはじめる', questionPosition: null };
+    case 'poll_open':
+      return { action: 'close_poll', label: '投票を締め切る', questionPosition: null };
+    case 'poll_closed':
+      return { action: 'start_reveal', label: '結果発表をはじめる', questionPosition: null };
+    case 'poll_revealing':
+      if (revealComplete(revealDepth, revealedCount)) {
+        return finish;
+      }
+      return {
+        action: 'reveal_next',
+        label: `${nextRevealRank(revealDepth, revealedCount)}位を発表`,
+        questionPosition: null,
+      };
+    case 'finished':
+      return null;
+    default:
+      return null;
+  }
+}
+
+/** 次に出す順位。3 位まで発表する会なら 3 → 2 → 1 の順。 */
+export function nextRevealRank(revealDepth: number, revealedCount: number): number {
+  return Math.max(1, revealDepth - revealedCount);
+}
+
+/** 発表しきったか。 */
+export function revealComplete(revealDepth: number, revealedCount: number): boolean {
+  return revealedCount >= Math.max(1, revealDepth);
+}
+
 export function nextStep(input: {
   phase: RoomPhase;
   /** 省略時はクイズ。 */
@@ -336,12 +437,21 @@ export function nextStep(input: {
   nextQuestionPosition: number | null;
   /** 抽選会・ビンゴ: まだ引いていない件数。 */
   remainingDrawCount?: number;
+  /** 投票: 何位まで発表するか。 */
+  revealDepth?: number;
+  /** 投票: すでに出した順位の数。 */
+  revealedCount?: number;
 }): NextStep | null {
   const { phase, nextQuestionPosition } = input;
   const mode = input.mode ?? 'quiz';
 
-  if (mode === 'lottery' || mode === 'bingo') {
+  // 抽選会・ビンゴ・ルーレットはまとめて 1 つずつ引く進行。
+  if (isDrawMode(mode)) {
     return nextDrawStep(phase, mode, input.remainingDrawCount ?? 0);
+  }
+
+  if (mode === 'poll') {
+    return nextPollStep(phase, mode, input.revealDepth ?? 1, input.revealedCount ?? 0);
   }
 
   const showNextQuestion = (): NextStep | null =>
@@ -398,6 +508,9 @@ export const ROOM_PHASE_LABELS: Record<RoomPhase, string> = {
   draw_ready: '抽選待ち',
   draw_spinning: '回転中',
   draw_revealed: '結果表示中',
+  poll_open: '投票受付中',
+  poll_closed: '締切・集計確認',
+  poll_revealing: '結果発表中',
   finished: '終了',
 };
 
@@ -415,6 +528,11 @@ export const ROOM_ACTION_LABELS: Record<RoomAction, string> = {
   continue_draw: '次へ',
   undo_draw: '直前の1件を取り消す',
   reset_draws: '最初からやり直す',
+  open_poll: '投票をはじめる',
+  close_poll: '投票を締め切る',
+  reopen_poll: '投票受付へ戻す',
+  start_reveal: '結果発表をはじめる',
+  reveal_next: '次の順位を出す',
   finish_room: '終了する',
   reopen_room: '再開する',
 };
@@ -458,6 +576,10 @@ const MODE_ACTION_LABELS: Partial<Record<RoomMode, Partial<Record<RoomAction, st
     reset_draws: '結果をリセット',
     finish_room: 'ルーレットを終了',
     reopen_room: 'ルーレットを再開',
+  },
+  poll: {
+    finish_room: '投票を終了',
+    reopen_room: '投票を再開',
   },
 };
 
