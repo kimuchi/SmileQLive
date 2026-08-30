@@ -5,6 +5,8 @@ import 'server-only';
  *
  * 原則:
  * - 参加は QR の URL 直行のみ。ルームコード入力の導線は作らない。
+ * - 投票のルームでは**名前を聞かない**。二次元コードを読んだらそのまま投票させる。
+ *   表示名はサーバーが割り当てる（createAutoNickname）。
  * - トークンはログ・エラー・解析へ出さない（route-helpers の redactPath が経路を潰す）。
  * - 参加者行の作成・人数上限・ニックネーム重複は
  *   `infrastructure/firebase/transactions.ts` の registerParticipant() が
@@ -22,6 +24,8 @@ import {
 } from '@/infrastructure/firebase/repositories/room-repository';
 import { registerParticipant as registerParticipantTx } from '@/infrastructure/firebase/transactions';
 import { parseQuizSnapshot } from '@/application/services/quiz-snapshot-codec';
+import { isPollMode, roomModeOf } from '@/domain/room/room-mode';
+import { createAutoNickname } from '@/lib/participant/auto-nickname';
 import { hashToken, isPlausibleToken } from '@/lib/crypto/tokens';
 import { verifyCaptchaIfConfigured, isCaptchaConfigured } from '@/lib/http/captcha';
 import { checkRateLimit, clientIpFromRequest, clientKeyFromRequest } from '@/lib/http/rate-limit';
@@ -32,6 +36,9 @@ import type { RoomDoc } from '@/types/firestore';
 
 /** ニックネーム候補の最大試行数。 */
 const NICKNAME_SUGGESTION_LIMIT = 99;
+
+/** 割り当てた表示名がぶつかったときに引き直す回数。 */
+const AUTO_NICKNAME_ATTEMPTS = 3;
 
 /**
  * 同じ回線からの参加登録の上限（60 秒あたり）。
@@ -90,6 +97,8 @@ export async function resolveJoinToken(token: string): Promise<JoinResolveRespon
   return {
     roomId: room.id,
     quizTitle: snapshot.title,
+    // 画面はこれを見て、名前を聞くかどうかと案内の文言を決める。
+    mode: roomModeOf(room.mode),
     joinOpen: room.joinOpen && room.phase !== 'finished',
     // participantCount は参加登録トランザクションで加算した確定値。
     // 参加者ごとに集計クエリを走らせない。
@@ -135,17 +144,28 @@ export async function registerParticipant(
 
   await verifyCaptchaIfConfigured(input.captchaToken, clientIpFromRequest(request));
 
-  const parsedNickname = nicknameSchema.safeParse(input.nickname);
-  if (!parsedNickname.success) {
-    throw new AppError('NICKNAME_INVALID');
+  // 投票では名前を聞かない。送られてきても使わない。
+  // 「投票のときは名前を入れずにすぐ投票できる」を画面任せにすると、
+  // 古い画面や作られたリクエストで名前付きの参加者が混ざる。ここで決める。
+  const namesParticipants = !isPollMode(roomModeOf(room.mode));
+
+  let nickname: string | null = null;
+  if (namesParticipants) {
+    const parsedNickname = nicknameSchema.safeParse(input.nickname);
+    if (!parsedNickname.success) {
+      throw new AppError('NICKNAME_INVALID');
+    }
+    nickname = parsedNickname.data;
   }
-  const nickname = parsedNickname.data;
 
   const user = await ensureAuthSession();
 
   // 参加者行の作成・人数上限・重複判定はトランザクションが担う。
   // 再訪（同じ端末・同じ匿名ユーザー）なら既存の行がそのまま返る。
-  const registered = await registerParticipantTx(room.id, user.uid, nickname);
+  const registered =
+    nickname !== null
+      ? await registerParticipantTx(room.id, user.uid, nickname)
+      : await registerWithAutoNickname(room.id, user.uid);
 
   if (!registered.alreadyJoined) {
     logger.info('join.registered', {
@@ -160,6 +180,29 @@ export async function registerParticipant(
     participantId: registered.participantId,
     nickname: registered.nickname,
   };
+}
+
+/**
+ * 名前を聞かずに参加者を作る（投票モード）。
+ *
+ * 表示名は乱数で決めるので、まず衝突しない。それでも
+ * **ルームの中でニックネームは一意**という決まりは崩さないでおきたいので、
+ * ぶつかったら黙って引き直す。名前は本人にも見せないため、
+ * ここで利用者を待たせて選び直させる意味がない。
+ */
+async function registerWithAutoNickname(roomId: string, uid: string) {
+  for (let attempt = 1; attempt <= AUTO_NICKNAME_ATTEMPTS; attempt += 1) {
+    try {
+      return await registerParticipantTx(roomId, uid, createAutoNickname());
+    } catch (error) {
+      const collided = error instanceof AppError && error.code === 'NICKNAME_TAKEN';
+      if (!collided || attempt === AUTO_NICKNAME_ATTEMPTS) {
+        throw error;
+      }
+    }
+  }
+  // ループは必ず return か throw で抜ける。型のためだけの行。
+  throw new AppError('INTERNAL_ERROR');
 }
 
 /**

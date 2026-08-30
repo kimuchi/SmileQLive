@@ -9,6 +9,7 @@ import { Card } from '@/components/shared/Card';
 import { ErrorMessage } from '@/components/shared/ErrorMessage';
 import { FullScreenMessage } from '@/components/shared/FullScreenMessage';
 import { TextInput } from '@/components/shared/TextInput';
+import { isPollMode, ROOM_MODE_LABELS, type RoomMode } from '@/domain/room/room-mode';
 import { useEnsureAnonymousSession } from '@/hooks/use-anonymous-session';
 import { ApiClientError, apiGet, apiPost } from '@/lib/client/api-client';
 import { formatCount } from '@/lib/format';
@@ -22,6 +23,12 @@ import type { JoinRegisterResponse, JoinResolveResponse } from '@/types/api';
  * - 参加トークンは props で受け取り、API のパスにしか使わない。画面へ出さない。
  * - 登録に成功したら replace 遷移で URL からトークンを取り除く。
  * - 音・振動を一切扱わない。
+ *
+ * **投票のルームでは名前を聞かない。** 読み込んだらその場で参加登録し、
+ * 投票画面まで送る。会場で 200 人にニックネームを打たせると、
+ * 打ち終わるまでの数十秒がまるごと待ち時間になるうえ、
+ * 投票では名前をどこにも出さない（順位表が無い）ので聞く意味がない。
+ * 表示名はサーバーが割り当てる。
  */
 
 const NICKNAME_MAX_LENGTH = 20;
@@ -34,24 +41,43 @@ const INVALID_LINK_DESCRIPTION =
 /** 参加できない理由の表示（受付終了・満員など）。 */
 type BlockedNotice = { title: string; description: string };
 
-const BLOCKED_NOTICES: Record<string, BlockedNotice> = {
-  ROOM_FULL: {
-    title: '参加人数が上限に達しました',
-    description: '恐れ入りますが、会場スタッフへお知らせください',
-  },
-  JOIN_CLOSED: {
-    title: 'このクイズは参加受付を終了しています',
-    description: 'すでにクイズが始まっている可能性があります。会場スタッフへお知らせください',
-  },
-  ROOM_FINISHED: {
-    title: 'このクイズはすでに終了しています',
-    description: 'ご参加ありがとうございました',
-  },
-};
+/** 参加を諦めてもらう必要があるエラー。文言はモードで変わるので、コードだけ覚える。 */
+const BLOCKED_CODES = ['ROOM_FULL', 'JOIN_CLOSED', 'ROOM_FINISHED'];
+
+/**
+ * 参加できない理由の文言。
+ *
+ * 「このクイズは終了しています」と投票の参加者へ出すと、
+ * 別の催しの二次元コードを読んだのかと思わせてしまう。モードの呼び名を使う。
+ */
+function blockedNotices(mode: RoomMode): Record<string, BlockedNotice> {
+  const label = ROOM_MODE_LABELS[mode];
+  return {
+    ROOM_FULL: {
+      title: '参加人数が上限に達しました',
+      description: '恐れ入りますが、会場スタッフへお知らせください',
+    },
+    JOIN_CLOSED: {
+      title: `この${label}は参加受付を終了しています`,
+      description: `すでに${label}が始まっている可能性があります。会場スタッフへお知らせください`,
+    },
+    ROOM_FINISHED: {
+      title: `この${label}はすでに終了しています`,
+      description: 'ご参加ありがとうございました',
+    },
+  };
+}
+
+/** 遷移先の呼び名。 */
+function playScreenLabel(mode: RoomMode): string {
+  return isPollMode(mode) ? '投票画面' : 'クイズ画面';
+}
 
 type LoadState =
   | { kind: 'loading' }
-  | { kind: 'redirecting' }
+  /** 名前を聞かないルームで、読み込んだ流れのまま参加登録している最中。 */
+  | { kind: 'joining'; mode: RoomMode }
+  | { kind: 'redirecting'; mode: RoomMode }
   | { kind: 'invalid' }
   | { kind: 'failed'; error: unknown }
   | { kind: 'ready'; info: JoinResolveResponse };
@@ -78,6 +104,11 @@ function normalizeNickname(value: string): string {
   return value.normalize('NFKC').trim();
 }
 
+/** いま参加を受け付けているか（受付終了・満員でないか）。 */
+function acceptingNow(info: JoinResolveResponse): boolean {
+  return info.joinOpen && info.participantCount < info.maxParticipants;
+}
+
 export function JoinScreen({ joinToken }: { joinToken: string }) {
   const router = useRouter();
   const ensureAnonymousSession = useEnsureAnonymousSession();
@@ -88,15 +119,78 @@ export function JoinScreen({ joinToken }: { joinToken: string }) {
   const [nickname, setNickname] = useState('');
   const [nicknameError, setNicknameError] = useState<string | null>(null);
   const [suggestedNickname, setSuggestedNickname] = useState<string | null>(null);
-  const [blocked, setBlocked] = useState<BlockedNotice | null>(null);
+  const [blockedCode, setBlockedCode] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<unknown>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  /**
+   * 名前を聞かない参加登録を、もう始めたか。
+   *
+   * 下の副作用は**書き込みを伴う**。読み込みだけなら二度走っても困らないが、
+   * 参加登録は送るたびにレート制限を食う。親の再描画などで副作用が
+   * もう一度走っても送り直さないよう、開始したことをここに残す。
+   * 戻すのは「もう一度試す」を押したときだけ。
+   */
+  const autoJoinStartedRef = useRef(false);
 
   // 購読し直さずに最新の関数を使うための参照。
   const ensureSessionRef = useRef(ensureAnonymousSession);
   useEffect(() => {
     ensureSessionRef.current = ensureAnonymousSession;
   }, [ensureAnonymousSession]);
+
+  const handleRegisterError = useCallback((error: unknown) => {
+    if (isInvalidLinkError(error)) {
+      setState({ kind: 'invalid' });
+      return;
+    }
+
+    if (error instanceof ApiClientError) {
+      if (error.code === 'NICKNAME_TAKEN') {
+        setNicknameError('同じ名前がすでに使われています。別の名前にしてください');
+        setSuggestedNickname(readSuggestedNickname(error.details));
+        return;
+      }
+      if (error.code === 'NICKNAME_INVALID') {
+        setNicknameError('ニックネームは1〜20文字で入力してください');
+        return;
+      }
+      if (BLOCKED_CODES.includes(error.code)) {
+        setBlockedCode(error.code);
+        return;
+      }
+    }
+
+    setSubmitError(error);
+  }, []);
+
+  /**
+   * 名前を聞かずに参加する（投票）。
+   *
+   * 失敗しても入り口は残す。電波が悪くて一度落ちただけのことがあるので、
+   * ロビーへ戻して押し直せるようにする（二重登録にはならない。
+   * 同じ匿名利用者なら既存の参加者行がそのまま返る）。
+   */
+  const joinWithoutNickname = useCallback(
+    async (info: JoinResolveResponse) => {
+      setSubmitError(null);
+      setSubmitting(true);
+      try {
+        await ensureSessionRef.current();
+        const registered = await apiPost<JoinRegisterResponse>(
+          `/api/join/${encodeURIComponent(joinToken)}/register`,
+          {},
+        );
+        setState({ kind: 'redirecting', mode: info.mode });
+        router.replace(`/play/${registered.roomId}`);
+      } catch (caught) {
+        setSubmitting(false);
+        setState({ kind: 'ready', info });
+        handleRegisterError(caught);
+      }
+    },
+    [handleRegisterError, joinToken, router],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -122,8 +216,20 @@ export function JoinScreen({ joinToken }: { joinToken: string }) {
         }
         if (info.alreadyJoinedNickname !== null) {
           // 再訪・再読込。同じ参加者として進行画面へ戻す（URL からトークンを外す）。
-          setState({ kind: 'redirecting' });
+          setState({ kind: 'redirecting', mode: info.mode });
           router.replace(`/play/${info.roomId}`);
+          return;
+        }
+
+        if (isPollMode(info.mode) && acceptingNow(info)) {
+          // 投票では名前を聞かない。読み込んだ流れのまま参加登録して投票画面へ送る。
+          // 受付終了・満員のときだけロビーへ止めて理由を出す。
+          if (autoJoinStartedRef.current) {
+            return;
+          }
+          autoJoinStartedRef.current = true;
+          setState({ kind: 'joining', mode: info.mode });
+          await joinWithoutNickname(info);
           return;
         }
 
@@ -146,7 +252,7 @@ export function JoinScreen({ joinToken }: { joinToken: string }) {
           if (cancelled || recheck.alreadyJoinedNickname === null) {
             return;
           }
-          setState({ kind: 'redirecting' });
+          setState({ kind: 'redirecting', mode: recheck.mode });
           router.replace(`/play/${recheck.roomId}`);
         } catch {
           // 確かめ直しに失敗しても、ニックネーム入力からの参加は続けられる。
@@ -165,37 +271,12 @@ export function JoinScreen({ joinToken }: { joinToken: string }) {
     return () => {
       cancelled = true;
     };
-  }, [joinToken, router, reloadKey]);
+  }, [joinToken, joinWithoutNickname, router, reloadKey]);
 
   const handleReload = useCallback(() => {
+    autoJoinStartedRef.current = false;
     setState({ kind: 'loading' });
     setReloadKey((previous) => previous + 1);
-  }, []);
-
-  const handleRegisterError = useCallback((error: unknown) => {
-    if (isInvalidLinkError(error)) {
-      setState({ kind: 'invalid' });
-      return;
-    }
-
-    if (error instanceof ApiClientError) {
-      if (error.code === 'NICKNAME_TAKEN') {
-        setNicknameError('同じ名前がすでに使われています。別の名前にしてください');
-        setSuggestedNickname(readSuggestedNickname(error.details));
-        return;
-      }
-      if (error.code === 'NICKNAME_INVALID') {
-        setNicknameError('ニックネームは1〜20文字で入力してください');
-        return;
-      }
-      const notice = BLOCKED_NOTICES[error.code];
-      if (notice) {
-        setBlocked(notice);
-        return;
-      }
-    }
-
-    setSubmitError(error);
   }, []);
 
   const handleSubmit = useCallback(
@@ -228,7 +309,10 @@ export function JoinScreen({ joinToken }: { joinToken: string }) {
           { nickname: normalized },
         );
         // 成功。URL から参加トークンを消すため replace で遷移する（戻る操作でも復帰しない）。
-        setState({ kind: 'redirecting' });
+        setState((previous) => ({
+          kind: 'redirecting',
+          mode: previous.kind === 'ready' ? previous.info.mode : 'quiz',
+        }));
         router.replace(`/play/${registered.roomId}`);
       } catch (caught) {
         setSubmitting(false);
@@ -242,8 +326,18 @@ export function JoinScreen({ joinToken }: { joinToken: string }) {
     return <FullScreenMessage title="読み込んでいます" loading tone="info" />;
   }
 
+  if (state.kind === 'joining') {
+    return <FullScreenMessage title="参加しています" loading tone="info" />;
+  }
+
   if (state.kind === 'redirecting') {
-    return <FullScreenMessage title="クイズ画面へ移動しています" loading tone="info" />;
+    return (
+      <FullScreenMessage
+        title={`${playScreenLabel(state.mode)}へ移動しています`}
+        loading
+        tone="info"
+      />
+    );
   }
 
   if (state.kind === 'invalid') {
@@ -273,14 +367,12 @@ export function JoinScreen({ joinToken }: { joinToken: string }) {
 
   const { info } = state;
   const isFull = info.participantCount >= info.maxParticipants;
+  const notices = blockedNotices(info.mode);
   const notice =
-    blocked ??
-    (!info.joinOpen
-      ? BLOCKED_NOTICES.JOIN_CLOSED
-      : isFull
-        ? BLOCKED_NOTICES.ROOM_FULL
-        : undefined) ??
+    (blockedCode !== null ? notices[blockedCode] : undefined) ??
+    (!info.joinOpen ? notices.JOIN_CLOSED : isFull ? notices.ROOM_FULL : undefined) ??
     null;
+  const asksNickname = !isPollMode(info.mode);
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-5 px-4 py-8">
@@ -303,7 +395,7 @@ export function JoinScreen({ joinToken }: { joinToken: string }) {
           <Alert variant="warning" title={notice.title} className="mt-4">
             {notice.description}
           </Alert>
-        ) : (
+        ) : asksNickname ? (
           <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-4" noValidate>
             <TextInput
               label="ニックネーム"
@@ -346,6 +438,23 @@ export function JoinScreen({ joinToken }: { joinToken: string }) {
               参加する
             </Button>
           </form>
+        ) : (
+          // 名前を聞かないルーム。ふつうは読み込んだ流れで自動的に通り過ぎる場所で、
+          // ここが見えているのは登録に失敗したとき。押し直せるようにしておく。
+          <div className="mt-4 flex flex-col gap-4">
+            <p className="text-sm text-slate-600">お名前の入力は要りません。</p>
+
+            {submitError !== null ? <ErrorMessage error={submitError} /> : null}
+
+            <Button
+              size="lg"
+              fullWidth
+              loading={submitting}
+              onClick={() => void joinWithoutNickname(info)}
+            >
+              投票にすすむ
+            </Button>
+          </div>
         )}
       </Card>
 

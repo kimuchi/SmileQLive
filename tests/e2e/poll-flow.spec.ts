@@ -138,11 +138,18 @@ function watchForLeaks(page: Page, secrets: readonly string[]) {
   return { leaks, stop: () => (watching = false) };
 }
 
-async function joinAsParticipant(page: Page, joinUrl: string, nickname: string): Promise<void> {
+/**
+ * 参加 URL を開く。**名前は聞かれない。**
+ *
+ * 投票では二次元コードを読んだ流れのまま投票画面まで進む。
+ * 会場で 200 人にニックネームを打たせると、打ち終わるまでの数十秒が
+ * まるごと待ち時間になるためで、ここが崩れると当日いちばん詰まる。
+ */
+async function joinAsParticipant(page: Page, joinUrl: string): Promise<void> {
   await page.goto(joinUrl);
-  await page.getByLabel('ニックネーム').fill(nickname);
-  await page.getByRole('button', { name: '参加する' }).click();
   await page.waitForURL(/\/play\//);
+  // 入力欄を一度も出さずに通り過ぎたこと。
+  await expect(page.getByLabel('ニックネーム')).toHaveCount(0);
 }
 
 /** 投票して送る。押した順が順位になる。 */
@@ -259,10 +266,10 @@ test.describe('投票モードの通しテスト', () => {
       // ---------------------------------------------------------------------
       // 参加者が投票する
       // ---------------------------------------------------------------------
-      await test.step('3 名が参加して投票する', async () => {
-        await joinAsParticipant(pageA, joinUrl, 'さくら');
-        await joinAsParticipant(pageB, joinUrl, 'たろう');
-        await joinAsParticipant(pageC, joinUrl, 'はなこ');
+      await test.step('3 名が名前を入れずに参加して投票する', async () => {
+        await joinAsParticipant(pageA, joinUrl);
+        await joinAsParticipant(pageB, joinUrl);
+        await joinAsParticipant(pageC, joinUrl);
 
         // 1位 営業部 / 2位 開発部 / 3位 総務部
         await vote(pageA, [OPTION_LABELS[0], OPTION_LABELS[1], OPTION_LABELS[2]]);

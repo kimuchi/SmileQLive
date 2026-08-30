@@ -172,6 +172,13 @@ export type RoomListResponse = { rooms: RoomListItem[] };
 export type JoinResolveResponse = {
   roomId: string;
   quizTitle: string;
+  /**
+   * ルームのモード。
+   *
+   * 参加画面の文言（「このクイズは…」／「この投票は…」）と、
+   * ニックネームを聞くかどうかの分岐に使う。投票では名前を聞かない。
+   */
+  mode: RoomMode;
   joinOpen: boolean;
   participantCount: number;
   maxParticipants: number;

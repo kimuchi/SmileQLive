@@ -419,7 +419,8 @@ export function PlayScreen({ roomId }: { roomId: string }) {
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col gap-4 px-4 pt-4 pb-10">
       <ParticipantHeader
         quizTitle={snapshot.quizTitle}
-        nickname={snapshot.participant.nickname}
+        // 投票では名前を聞いていない（割り当てた表示名を本人へ見せても意味がない）。
+        nickname={snapshot.poll !== null ? null : snapshot.participant.nickname}
         phase={phase}
         questionPosition={snapshot.currentQuestionPosition}
         totalQuestions={snapshot.totalQuestions}

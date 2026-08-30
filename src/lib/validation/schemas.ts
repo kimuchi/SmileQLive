@@ -359,8 +359,15 @@ export const roomActionSchema = z
 // 参加者
 // ---------------------------------------------------------------------------
 
+/**
+ * 参加登録。
+ *
+ * **ニックネームは任意。** 投票のルームでは名前を聞かずに参加させるため、
+ * 画面は本文を空で送ってくる。名前が要るかどうかはモードで決まるので、
+ * ここでは形だけを見て、必須かどうかは join-service が判断する。
+ */
 export const registerParticipantSchema = z.object({
-  nickname: nicknameSchema,
+  nickname: nicknameSchema.optional(),
   captchaToken: z.string().max(4096).optional(),
 });
 
