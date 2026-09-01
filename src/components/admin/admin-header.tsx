@@ -34,7 +34,7 @@ const NAV_ITEMS: ReadonlyArray<{ key: AdminHeaderNav; href: string; label: strin
   { key: 'rooms', href: '/admin/rooms', label: 'ルーム一覧' },
   // 会場で鳴る音の差し替え。デプロイし直さずに変えられる場所であることが要なので、
   // スクリプトの中ではなくここに導線を置く。
-  { key: 'sounds', href: '/admin/sounds', label: '効果音' },
+  { key: 'sounds', href: '/sounds', label: '効果音' },
 ];
 
 export type AdminHeaderProps = {

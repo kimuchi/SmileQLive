@@ -124,6 +124,7 @@ npm run seed:demo                         # 動作確認用のデモクイズ（
 - **[docs/OPERATIONS.md](docs/OPERATIONS.md)** — 会場運用・監視・費用調整
 - **[docs/DRAW_MODES.md](docs/DRAW_MODES.md)** — 抽選会・ビンゴ・ルーレットの進め方
 - **[docs/POLL_MODE.md](docs/POLL_MODE.md)** — 投票モードの進め方
+- **[docs/ROULETTE.md](docs/ROULETTE.md)** — URL だけで回すルーレット（ログイン不要・`/roulette`）
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — 設計方針とディレクトリ構成
 - **[docs/E2E.md](docs/E2E.md)** — E2E テストの実行方法
 

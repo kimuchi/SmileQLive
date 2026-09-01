@@ -3,9 +3,12 @@ import 'server-only';
 /**
  * `soundSettings/{ownerId}` — 差し替えた効果音。
  *
- * - 呼び出す前に所有者の確認を済ませること（Admin SDK は Security Rules を迂回する）。
- * - 1 人 1 ドキュメント。9 音ぶんをまとめて持つので、読むのも書くのも 1 件で済む。
- * - **配信 ID (publicId) から引く経路**もここが持つ。投影画面は uid を知らないため。
+ * - **いまはシステム全体で 1 件**（`soundSettings/system`）。
+ *   会場で音を差し替えるのに、司会者ごとに設定が分かれていると
+ *   「誰のアカウントで入れた音か」を追わないと直せなくなる。
+ *   ドキュメント ID は所有者を表す形のまま残してあるが、置くのは 1 件だけ。
+ * - 1 ドキュメントに全部の音をまとめて持つので、読むのも書くのも 1 件で済む。
+ * - **配信 ID (publicId) から引く経路**もここが持つ。投影画面は ID を知らないため。
  */
 
 import { randomUUID } from 'node:crypto';
@@ -40,10 +43,10 @@ function toSettings(doc: SoundSettingsDoc): SoundSettings {
 }
 
 /**
- * 司会者の設定を読む。まだ 1 度も差し替えていなければ null。
+ * 設定を読む。まだ 1 度も差し替えていなければ null。
  *
  * **読むだけでドキュメントを作らない。** 作ってしまうと、
- * 一度も設定を開いていない司会者ぶんの空ドキュメントが溜まる。
+ * 一度も設定を開いていないぶんの空ドキュメントが溜まる。
  */
 export async function getSoundSettings(ownerId: string): Promise<SoundSettings | null> {
   const snapshot = await soundSettingsRef(ownerId).get();
@@ -85,6 +88,53 @@ export async function putSoundOverride(
   await ref.set(next);
 
   return { settings: toSettings(next), replaced: current?.sounds?.[name] ?? null };
+}
+
+/**
+ * 司会者ごとに置かれていた古い設定を 1 件だけ拾う。
+ *
+ * 効果音は以前**司会者ごと**に持っていた。システム全体の 1 件へまとめるとき、
+ * 既に入れてある音が消えると会場でいきなり既定音に戻る。
+ * それを避けるため、まとめ先が空のときだけここで拾って引き継ぐ。
+ *
+ * 拾うのは 1 件だけ。複数人が入れていたら、いちばん新しいものを採る。
+ */
+export async function findLegacySoundSettings(
+  excludeOwnerId: string,
+): Promise<SoundSettings | null> {
+  // 件数はたかだか司会者の人数。並べ替えの索引を足してまで絞る対象ではない。
+  const snapshot = await soundSettingsCollection().limit(20).get();
+  const candidates = snapshot.docs
+    .map((doc) => doc.data())
+    .filter((doc) => doc.ownerId !== excludeOwnerId && Object.keys(doc.sounds ?? {}).length > 0)
+    .sort((left, right) => (right.updatedAt?.toMillis() ?? 0) - (left.updatedAt?.toMillis() ?? 0));
+
+  const found = candidates[0];
+  return found ? toSettings(found) : null;
+}
+
+/**
+ * 引き継いだ設定を書き、引き継ぎ元を消す。
+ *
+ * **元を消すのは配信 ID を重複させないため。** 配信 ID から設定を引く経路
+ * (`getSoundSettingsByPublicId`) は 1 件しか見ないので、同じ配信 ID の
+ * ドキュメントが 2 つあると、あとで差し替えた音ではなく古い方が返ることがある。
+ * 音の実体（Cloud Storage）は各設定が置き場所を持っているので、消しても鳴らなくならない。
+ */
+export async function adoptSoundSettings(
+  ownerId: string,
+  source: SoundSettings,
+): Promise<SoundSettings> {
+  const next: SoundSettingsDoc = {
+    ownerId,
+    // 配信 ID を引き継ぐ。既に開いている投影画面の音の URL をそのまま生かす。
+    publicId: source.publicId,
+    sounds: source.sounds,
+    updatedAt: nowTimestamp(),
+  };
+  await soundSettingsRef(ownerId).set(next);
+  await soundSettingsRef(source.ownerId).delete();
+  return toSettings(next);
 }
 
 /**

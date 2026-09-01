@@ -36,9 +36,12 @@ profiles/{uid}
 mediaAssets/{assetId}
     画像メタデータ（WebP へ変換済みのもののみ）。
 
-soundSettings/{ownerId}             ★ 作った本人だけ読める
-    差し替えた効果音。9 音ぶんを 1 ドキュメントにまとめて持つ
+soundSettings/system                ★ クライアントからは読めない
+    差し替えた効果音。**システム全体で 1 件**（ドキュメント ID は固定の "system"）。
+    全部の音を 1 ドキュメントにまとめて持つ
     （投影が読む一覧を作るとき、1 件読むだけで済ませるため）。
+    以前は司会者ごと（soundSettings/{uid}）だった。まとめ先が空のときだけ、
+    残っている古い設定を 1 件引き継いで元を消す（application/services/sound-service.ts）。
     publicId: 配信経路 /api/sounds/{publicId}/{name} に使う推測できない ID。
     sounds: { <音の名前>: { assetId, bucket, objectPath, mimeType, ... } }
     入っていない音は同梱の既定音が鳴る。

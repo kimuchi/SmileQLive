@@ -311,9 +311,6 @@ export default async function run(report, ctx) {
   await report.allowed('司会者が自分の mediaAssets を読む', () =>
     readDoc(host, 'mediaAssets', IDS.asset)(),
   );
-  await report.allowed('司会者が自分の soundSettings を読む', () =>
-    readDoc(host, 'soundSettings', host.uid)(),
-  );
   await report.allowed('司会者が自分の drawLists を読む', () =>
     readDoc(host, 'drawLists', IDS.drawList)(),
   );
@@ -335,6 +332,11 @@ export default async function run(report, ctx) {
   );
   await report.denied('別の司会者が他人の drawLists を読む', () =>
     readDoc(otherHost, 'drawLists', IDS.drawList)(),
+  );
+  // 効果音の設定はシステム全体で 1 件になり、読み書きは Cloud Run 経由だけになった。
+  // 司会者本人であってもブラウザからは引けない（配信 ID が入っているため）。
+  await report.denied('司会者でも soundSettings を読めない', () =>
+    readDoc(host, 'soundSettings', 'system')(),
   );
   await report.denied('別の司会者が他人の soundSettings を読む', () =>
     readDoc(otherHost, 'soundSettings', host.uid)(),

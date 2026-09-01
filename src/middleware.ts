@@ -18,8 +18,14 @@ import { SESSION_COOKIE_NAME } from '@/lib/auth/shared';
 
 const LOGIN_PATH = '/admin/login';
 
-/** ログイン不要で到達できる管理系パス。 */
-const PUBLIC_ADMIN_PATHS = ['/admin/login', '/admin/auth'];
+/**
+ * ログイン不要で到達できる管理系パス。
+ *
+ * `/admin/sounds` は `/sounds` へ転送するだけの入れ物。
+ * 効果音の設定はログイン無しで開ける場所へ移したので、
+ * ここを塞ぐと古いブックマークがログイン画面で行き止まりになる。
+ */
+const PUBLIC_ADMIN_PATHS = ['/admin/login', '/admin/auth', '/admin/sounds'];
 
 function requiresHostSession(pathname: string): boolean {
   if (PUBLIC_ADMIN_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`))) {
