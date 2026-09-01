@@ -5,30 +5,40 @@
  * サーバーに何も保存しないので、**この URL が保存先**になる。
  * 貼っておけば来年も同じ盤面が開けるし、他の人へそのまま渡せる。
  *
- * 形は配布されているルーレット（exe.tanidaiz.com/roulette.php）と**同じ**にする。
+ * 形は配布されているルーレット（exe.tanidaiz.com/roulette.php）に**合わせてある**。
  *
  *   {
  *     "name": ["山田", "田中"],
  *     "ratio": [1, 2],
  *     "show_characters_value": true,
- *     "decel_value": 0.008
+ *     "decel_value": 0.008,
+ *
+ *     // ここから下はこの画面だけの項目。あちらは無視する。
+ *     "speed_value": 720,
+ *     "stop_seconds": 5,
+ *     "background_url": "https://example.com/bg.jpg"
  *   }
  *
  * 揃えている理由は、すでに配られている URL をそのまま開けるようにするため。
  * 会場で「去年の URL がある」と言われたときに、作り直さずに済む。
- * 逆にこちらで書き出した URL をあちらへ貼っても開ける。
+ * 逆にこちらで書き出した URL をあちらへ貼っても開ける
+ * （`decel_value` は、こちらの速さと止まる秒数から換算して書き出している）。
  *
  * **外から来た文字列として扱う。** 長さ・型・件数をすべて検査し、
  * 壊れていても例外を投げずに「読めなかった」を返す。
  * 会場で URL が壊れていたときに、白い画面ではなく編集欄を出したい。
  */
 
+import { decelValueFor, stopSecondsFromDecel } from '@/domain/roulette/spin';
 import {
-  clampDecel,
+  clampSpeed,
+  clampStopSeconds,
   clampWeight,
+  normalizeBackgroundUrl,
   normalizeLabel,
-  ROULETTE_DECEL_DEFAULT,
   ROULETTE_ITEM_MAX_COUNT,
+  ROULETTE_SPEED_DEFAULT,
+  ROULETTE_STOP_SECONDS_DEFAULT,
   type RouletteConfig,
   type RouletteItem,
 } from '@/domain/roulette/wheel';
@@ -45,12 +55,19 @@ export const ROULETTE_QUERY_KEY = 'json';
  */
 export const ROULETTE_JSON_MAX_LENGTH = 64 * 1024;
 
-/** 配布サイトと同じ形。読むときだけ使う。 */
+/** URL に載せる形。 */
 type RouletteJson = {
   name: string[];
   ratio: number[];
   show_characters_value: boolean;
+  /** 配布サイト互換。こちらの速さと止まる秒数から換算して書き出す。 */
   decel_value: number;
+  /** 回っている間の速さ（度/秒）。 */
+  speed_value: number;
+  /** ストップを押してから止まるまでの秒数。 */
+  stop_seconds: number;
+  /** 背景画像の URL。無ければ入れない。 */
+  background_url?: string;
 };
 
 export type RouletteParseResult =
@@ -131,6 +148,8 @@ export function parseRouletteJson(
     return { ok: false, reason: 'invalid' };
   }
 
+  const spinSpeed = clampSpeed(toNumber(record.speed_value) ?? ROULETTE_SPEED_DEFAULT);
+
   return {
     ok: true,
     truncated,
@@ -138,25 +157,58 @@ export function parseRouletteJson(
       items,
       // 指定が無ければ出す。文字の無い盤面は「壊れている」ように見える。
       showLabels: record.show_characters_value !== false,
-      decel: clampDecel(toNumber(record.decel_value) ?? ROULETTE_DECEL_DEFAULT),
+      spinSpeed,
+      stopSeconds: readStopSeconds(record, spinSpeed),
+      backgroundUrl: normalizeBackgroundUrl(record.background_url),
     },
   };
 }
 
 /**
- * いまの盤面を配布サイトと同じ JSON にする。
+ * 止まるまでの秒数を読む。
+ *
+ * こちらで書き出した URL には `stop_seconds` が入っている。
+ * 配布サイトから来た URL には `decel_value` しか無いので、
+ * **この画面の速さでその減速をかけたら何秒で止まるか**へ読み替える。
+ * 数字は違っても「速く止まる設定は速く止まる」という感じは保たれる。
+ */
+function readStopSeconds(record: Partial<RouletteJson>, spinSpeed: number): number {
+  const explicit = toNumber(record.stop_seconds);
+  if (explicit !== null) {
+    return clampStopSeconds(explicit);
+  }
+  const decel = toNumber(record.decel_value);
+  if (decel !== null && decel > 0) {
+    return clampStopSeconds(stopSecondsFromDecel(decel, spinSpeed));
+  }
+  return ROULETTE_STOP_SECONDS_DEFAULT;
+}
+
+/**
+ * いまの盤面を URL に載せる形にする。
  *
  * 名前が空の項目は入れない。空の扇が載った URL を配ってしまわないため。
+ * 背景が手元のファイル（`blob:`）のときは載せない。**渡した相手には開けないため**で、
+ * 載せると「送ったのに背景が出ない」という分かりにくい壊れ方になる。
  */
 export function toRouletteJson(config: RouletteConfig): string {
   const items = config.items
     .map((item) => ({ ...item, label: normalizeLabel(item.label) }))
     .filter((item) => item.label.length > 0);
+
+  const background = config.backgroundUrl;
+  const shareableBackground =
+    background !== null && !background.toLowerCase().startsWith('blob:') ? background : null;
+
   const payload: RouletteJson = {
     name: items.map((item) => item.label),
     ratio: items.map((item) => item.weight),
     show_characters_value: config.showLabels,
-    decel_value: config.decel,
+    // 配布サイトへ貼ったときも近い回り方になるよう、換算して書き出す。
+    decel_value: Number(decelValueFor(config.spinSpeed, config.stopSeconds).toFixed(6)),
+    speed_value: config.spinSpeed,
+    stop_seconds: config.stopSeconds,
+    ...(shareableBackground !== null ? { background_url: shareableBackground } : {}),
   };
   return JSON.stringify(payload);
 }

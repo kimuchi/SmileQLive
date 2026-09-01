@@ -231,7 +231,21 @@ export async function readSoundFile(
  * 既に開いている投影画面がその URL を読み続けているため。
  */
 export async function buildSoundManifest(): Promise<Record<SoundName, string>> {
-  const settings = await getSystemSoundSettings();
+  /*
+    設定を読めなくても**同梱の音の一覧を返す**。
+
+    差し替えた音が鳴らないのと、音が一切鳴らないのとでは会場での痛さが違う。
+    保存先が一時的に落ちているときに投影を黙らせないよう、
+    読めなければ既定へ倒す（差し替えた音は次に読めたときへ戻る）。
+  */
+  let settings: SoundSettings | null = null;
+  try {
+    settings = await getSystemSoundSettings();
+  } catch (error) {
+    logger.error('sound.manifest_fallback', {
+      reason: error instanceof Error ? error.message : 'unknown',
+    });
+  }
 
   const manifest = {} as Record<SoundName, string>;
   for (const name of SOUND_NAMES) {

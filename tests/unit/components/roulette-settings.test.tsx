@@ -1,10 +1,15 @@
 // @vitest-environment jsdom
 import { useState } from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RouletteSettingsPanel } from '@/components/roulette/roulette-settings-panel';
-import { ROULETTE_WEIGHT_MAX, type RouletteConfig } from '@/domain/roulette/wheel';
+import {
+  ROULETTE_SPEED_DEFAULT,
+  ROULETTE_STOP_SECONDS_DEFAULT,
+  ROULETTE_WEIGHT_MAX,
+  type RouletteConfig,
+} from '@/domain/roulette/wheel';
 
 /**
  * ルーレットの設定欄。
@@ -32,7 +37,9 @@ function configOf(): RouletteConfig {
       { id: 'b', label: '田中', weight: 3 },
     ],
     showLabels: true,
-    decel: 0.008,
+    spinSpeed: ROULETTE_SPEED_DEFAULT,
+    stopSeconds: ROULETTE_STOP_SECONDS_DEFAULT,
+    backgroundUrl: null,
   };
 }
 
@@ -126,22 +133,36 @@ describe('回している間', () => {
 });
 
 describe('回り方', () => {
-  it('止まるまでの目安を出す', () => {
+  /**
+   * 速さと止まるまでの時間は**別々のつまみ**。
+   * 片方を動かしてももう片方が変わらないことを固定する
+   * （前は「減速」ひとつしか無く、速さを変えられなかった）。
+   */
+  it('速さを変えても止まるまでの時間は変わらない', () => {
     renderPanel();
-    // 会場で「長すぎる／短すぎる」をその場で直せるように、秒数を見せる。
-    expect(screen.getByText(/秒で止まります/)).toBeInTheDocument();
+
+    const speed = screen.getByLabelText('回る速さ');
+    fireEvent.change(speed, { target: { value: '1440' } });
+
+    const next = onChange.mock.calls.at(-1)?.[0];
+    expect(next?.spinSpeed).toBe(1440);
+    expect(next?.stopSeconds).toBe(ROULETTE_STOP_SECONDS_DEFAULT);
   });
 
-  it('減速を強くすると目安が短くなる', () => {
-    const { unmount } = renderPanel();
-    const slow = screen.getByText(/秒で止まります/).textContent ?? '';
-    unmount();
+  it('止まるまでの時間を変えても速さは変わらない', () => {
+    renderPanel();
 
-    renderPanel({ config: { ...configOf(), decel: 0.08 } });
-    const fast = screen.getByText(/秒で止まります/).textContent ?? '';
+    fireEvent.change(screen.getByLabelText('止まるまでの時間'), { target: { value: '9' } });
 
-    const seconds = (text: string) => Number(/([\d.]+)\s*秒/.exec(text)?.[1] ?? '0');
-    expect(seconds(fast)).toBeLessThan(seconds(slow));
+    const next = onChange.mock.calls.at(-1)?.[0];
+    expect(next?.stopSeconds).toBe(9);
+    expect(next?.spinSpeed).toBe(ROULETTE_SPEED_DEFAULT);
+  });
+
+  it('いまの速さを 1 秒あたりの周回数で見せる', () => {
+    renderPanel({ config: { ...configOf(), spinSpeed: 720 } });
+    // 「720 度/秒」だけでは会場で速さの見当が付かない。
+    expect(screen.getByText(/1 秒に/)).toHaveTextContent('2.0');
   });
 
   it('扇の文字を消せる', async () => {
@@ -154,6 +175,48 @@ describe('回り方', () => {
   });
 });
 
+describe('背景画像', () => {
+  it('画像の URL を入れると盤面へ入る', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.type(screen.getByLabelText('画像の URL'), 'https://example.com/bg.jpg');
+    await user.click(screen.getByRole('button', { name: 'この URL を使う' }));
+
+    expect(onChange.mock.calls.at(-1)?.[0].backgroundUrl).toBe('https://example.com/bg.jpg');
+  });
+
+  /**
+   * 背景の URL は人から人へ渡る。`javascript:` を受け取ると、
+   * URL を送るだけで相手の画面で好きなことができてしまう。
+   */
+  it('画像として敷けない URL は断る', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.type(screen.getByLabelText('画像の URL'), 'javascript:alert(1)');
+    await user.click(screen.getByRole('button', { name: 'この URL を使う' }));
+
+    expect(screen.getByText(/http:\/\/ または https:\/\/ で始まる/)).toBeInTheDocument();
+    // 盤面へは入れない。
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('背景を外せる', async () => {
+    const user = userEvent.setup();
+    renderPanel({ config: { ...configOf(), backgroundUrl: 'https://example.com/bg.jpg' } });
+
+    await user.click(screen.getByRole('button', { name: '背景を外す' }));
+
+    expect(onChange.mock.calls.at(-1)?.[0].backgroundUrl).toBeNull();
+  });
+
+  it('手元のファイルはこの端末だけだと知らせる', () => {
+    renderPanel({ config: { ...configOf(), backgroundUrl: 'blob:http://localhost/abc' } });
+    expect(screen.getByText(/この端末だけ/)).toBeInTheDocument();
+  });
+});
+
 describe('URL の書き出し', () => {
   it('いまの盤面を配布サイトと同じ形で書き出す', () => {
     renderPanel();
@@ -161,11 +224,12 @@ describe('URL の書き出し', () => {
     const url = screen.getByLabelText('この盤面のURL') as HTMLTextAreaElement;
     const json = new URL(url.value).searchParams.get('json') ?? '';
 
-    expect(JSON.parse(json)).toEqual({
+    expect(JSON.parse(json)).toMatchObject({
       name: ['山田', '田中'],
       ratio: [1, 3],
       show_characters_value: true,
-      decel_value: 0.008,
+      speed_value: ROULETTE_SPEED_DEFAULT,
+      stop_seconds: ROULETTE_STOP_SECONDS_DEFAULT,
     });
   });
 

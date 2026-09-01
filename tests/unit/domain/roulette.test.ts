@@ -6,14 +6,23 @@ import {
   toRouletteJson,
   ROULETTE_JSON_MAX_LENGTH,
 } from '@/domain/roulette/roulette-url';
-import { estimatedSpinSeconds, planSpin, rotationAt, MIN_TURNS } from '@/domain/roulette/spin';
+import {
+  decelValueFor,
+  MIN_TURNS_ON_STOP,
+  planStop,
+  spinningRotationAt,
+  stopSecondsFromDecel,
+  stoppingRotationAt,
+} from '@/domain/roulette/spin';
 import {
   blankRouletteConfig,
   isSpinnable,
   itemAtPointer,
+  normalizeBackgroundUrl,
   rouletteSegments,
-  ROULETTE_DECEL_DEFAULT,
   ROULETTE_ITEM_MAX_COUNT,
+  ROULETTE_SPEED_DEFAULT,
+  ROULETTE_STOP_SECONDS_DEFAULT,
   type RouletteConfig,
   type RouletteItem,
 } from '@/domain/roulette/wheel';
@@ -43,7 +52,9 @@ function configOf(items: Array<[string, number]>): RouletteConfig {
   return {
     items: items.map(([label, weight]) => ({ id: makeId(), label, weight })),
     showLabels: true,
-    decel: ROULETTE_DECEL_DEFAULT,
+    spinSpeed: ROULETTE_SPEED_DEFAULT,
+    stopSeconds: ROULETTE_STOP_SECONDS_DEFAULT,
+    backgroundUrl: null,
   };
 }
 
@@ -68,7 +79,56 @@ describe('URL から盤面を読む', () => {
     ]);
     expect(result.config.items.map((item) => item.weight)).toEqual([1, 1, 2]);
     expect(result.config.showLabels).toBe(true);
-    expect(result.config.decel).toBe(0.008);
+    // あちらの URL には速さも止まる秒数も無い。減速から止まる秒数へ読み替える。
+    expect(result.config.spinSpeed).toBe(ROULETTE_SPEED_DEFAULT);
+    expect(result.config.stopSeconds).toBe(
+      Math.round(stopSecondsFromDecel(0.008, ROULETTE_SPEED_DEFAULT) * 10) / 10,
+    );
+  });
+
+  it('こちらで書き出した速さと止まる秒数はそのまま読む', () => {
+    const raw = JSON.stringify({
+      name: ['あ', 'い'],
+      ratio: [1, 1],
+      speed_value: 1080,
+      stop_seconds: 8.5,
+      // 換算値も入っているが、はっきり書いてあるほうを使う。
+      decel_value: 0.5,
+    });
+    const result = parseRouletteJson(raw, makeIdFactory());
+    expect(result.ok && result.config.spinSpeed).toBe(1080);
+    expect(result.ok && result.config.stopSeconds).toBe(8.5);
+  });
+
+  it('背景画像の URL を読む', () => {
+    const raw = JSON.stringify({
+      name: ['あ', 'い'],
+      background_url: 'https://example.com/bg.jpg',
+    });
+    expect(parseRouletteJson(raw, makeIdFactory())).toMatchObject({
+      ok: true,
+      config: { backgroundUrl: 'https://example.com/bg.jpg' },
+    });
+  });
+
+  /**
+   * 背景の URL は**人から人へ渡る**。
+   * `javascript:` を受け取ると、URL を送るだけで相手の画面で好きなことができる。
+   */
+  it('画像として敷けない URL は受け取らない', () => {
+    for (const url of [
+      'javascript:alert(1)',
+      'data:text/html,<script>alert(1)</script>',
+      'vbscript:msgbox',
+      '/etc/passwd',
+    ]) {
+      const raw = JSON.stringify({ name: ['あ', 'い'], background_url: url });
+      expect(parseRouletteJson(raw, makeIdFactory())).toMatchObject({
+        ok: true,
+        config: { backgroundUrl: null },
+      });
+      expect(normalizeBackgroundUrl(url)).toBeNull();
+    }
   });
 
   it('重みが足りない行は 1 として読む', () => {
@@ -118,7 +178,9 @@ describe('盤面を URL にする', () => {
       ['田中', 3],
     ]);
     config.showLabels = false;
-    config.decel = 0.02;
+    config.spinSpeed = 1080;
+    config.stopSeconds = 8.5;
+    config.backgroundUrl = 'https://example.com/bg.jpg';
 
     const back = parseRouletteJson(toRouletteJson(config), makeIdFactory());
     expect(back.ok).toBe(true);
@@ -130,7 +192,37 @@ describe('盤面を URL にする', () => {
       ['田中', 3],
     ]);
     expect(back.config.showLabels).toBe(false);
-    expect(back.config.decel).toBe(0.02);
+    expect(back.config.spinSpeed).toBe(1080);
+    expect(back.config.stopSeconds).toBe(8.5);
+    expect(back.config.backgroundUrl).toBe('https://example.com/bg.jpg');
+  });
+
+  it('配布サイトへ貼っても回るよう decel_value も書き出す', () => {
+    const config = configOf([
+      ['あ', 1],
+      ['い', 1],
+    ]);
+    config.spinSpeed = 720;
+    config.stopSeconds = 5;
+
+    const payload = JSON.parse(toRouletteJson(config)) as { decel_value: number };
+    // 720 度/秒 を 5 秒で止める＝毎秒 144 度／フレームあたり 0.04 度。
+    expect(payload.decel_value).toBeCloseTo(decelValueFor(720, 5), 6);
+    expect(payload.decel_value).toBeCloseTo(0.04, 4);
+  });
+
+  /**
+   * 手元のファイルから作った背景は、その端末の中でしか開けない。
+   * URL へ載せると「送ったのに背景が出ない」という分かりにくい壊れ方になる。
+   */
+  it('手元のファイルの背景は URL に載せない', () => {
+    const config = configOf([
+      ['あ', 1],
+      ['い', 1],
+    ]);
+    config.backgroundUrl = 'blob:http://localhost/8f2c-1234';
+
+    expect(JSON.parse(toRouletteJson(config))).not.toHaveProperty('background_url');
   });
 
   it('名前が空の項目は URL に載せない', () => {
@@ -147,7 +239,7 @@ describe('盤面を URL にする', () => {
     const url = buildRouletteUrl('http://192.168.1.10:3000', configOf([['あ', 1]]));
     expect(url.startsWith('http://192.168.1.10:3000/roulette?json=')).toBe(true);
     expect(new URL(url).searchParams.get('json')).toBe(
-      '{"name":["あ"],"ratio":[1],"show_characters_value":true,"decel_value":0.008}',
+      '{"name":["あ"],"ratio":[1],"show_characters_value":true,"decel_value":0.04,"speed_value":720,"stop_seconds":5}',
     );
   });
 });
@@ -220,34 +312,66 @@ describe('針の下にあるもの', () => {
 });
 
 describe('回り方', () => {
-  it('最低でも決めた周回数は回る', () => {
-    const plan = planSpin({ startRotation: 0, decel: 0.008, random: () => 0 });
-    expect(plan.distance).toBeGreaterThanOrEqual(MIN_TURNS * 360);
-    expect(plan.distance).toBeLessThan((MIN_TURNS + 1) * 360);
+  it('等速で回り続ける（ストップを押すまで止まらない）', () => {
+    const at = (elapsedMs: number) =>
+      spinningRotationAt({ startRotation: 30, speed: 720, elapsedMs });
+
+    expect(at(0)).toBe(30);
+    expect(at(1000)).toBe(30 + 720);
+    expect(at(10_000)).toBe(30 + 7200);
+    // 1 秒あたりの進み方がいつでも同じ。減速していない。
+    expect(at(2000) - at(1000)).toBeCloseTo(at(9000) - at(8000), 6);
   });
 
-  it('止まったところで速度がちょうど 0 になる', () => {
-    const plan = planSpin({ startRotation: 12, decel: 0.008, random: () => 0.42 });
-    // 等減速。止まる時刻の直前と直後で角度が動かない。
-    expect(rotationAt(plan, plan.durationMs)).toBeCloseTo(plan.endRotation, 6);
-    expect(rotationAt(plan, plan.durationMs + 5000)).toBe(plan.endRotation);
-    // 途中は必ず手前にある（行き過ぎて戻らない）。
-    expect(rotationAt(plan, plan.durationMs / 2)).toBeLessThan(plan.endRotation);
-    expect(rotationAt(plan, 0)).toBe(plan.startRotation);
+  it('ストップしてから決めた秒数で止まる', () => {
+    const plan = planStop({ startRotation: 12, speed: 720, stopSeconds: 5, random: () => 0.42 });
+
+    expect(plan.durationMs).toBe(5000);
+    expect(stoppingRotationAt(plan, plan.durationMs)).toBeCloseTo(plan.endRotation, 6);
+    // 止まったあとは動かない（行き過ぎて戻らない）。
+    expect(stoppingRotationAt(plan, plan.durationMs + 5000)).toBe(plan.endRotation);
+    expect(stoppingRotationAt(plan, 0)).toBe(plan.startRotation);
+    // 途中は必ず手前。
+    expect(stoppingRotationAt(plan, 2500)).toBeLessThan(plan.endRotation);
   });
 
-  it('減速を強くすると早く止まる', () => {
-    const slow = planSpin({ startRotation: 0, decel: 0.004, random: () => 0.5 });
-    const fast = planSpin({ startRotation: 0, decel: 0.032, random: () => 0.5 });
-    expect(fast.durationMs).toBeLessThan(slow.durationMs);
-    expect(estimatedSpinSeconds(0.032)).toBeLessThan(estimatedSpinSeconds(0.004));
+  it('止まるまでの秒数と速さは別々に効く', () => {
+    const short = planStop({ startRotation: 0, speed: 720, stopSeconds: 2, random: () => 0.5 });
+    const long = planStop({ startRotation: 0, speed: 720, stopSeconds: 9, random: () => 0.5 });
+    // 秒数を変えても速さは変わらない。長くした分だけ長く回る。
+    expect(long.durationMs).toBeGreaterThan(short.durationMs);
+    expect(long.distance).toBeGreaterThan(short.distance);
+
+    const slow = planStop({ startRotation: 0, speed: 180, stopSeconds: 5, random: () => 0.5 });
+    const fast = planStop({ startRotation: 0, speed: 1440, stopSeconds: 5, random: () => 0.5 });
+    // 速さを変えても止まるまでの秒数は変わらない。回る距離だけ変わる。
+    expect(slow.durationMs).toBe(fast.durationMs);
+    expect(fast.distance).toBeGreaterThan(slow.distance);
+  });
+
+  it('最低でも 1 周は回してから止める', () => {
+    // 押した位置のすぐ隣で止まると「操作で止めた」ように見える。
+    const plan = planStop({ startRotation: 0, speed: 90, stopSeconds: 0.5, random: () => 0 });
+    expect(plan.distance).toBeGreaterThanOrEqual(MIN_TURNS_ON_STOP * 360);
+  });
+
+  it('減速に入った瞬間、速さが飛ばない', () => {
+    // 回っていた速さのまま減速へ入るよう、回る距離を選んでいる。
+    const speed = 720;
+    const plan = planStop({ startRotation: 0, speed, stopSeconds: 6, random: () => 0.5 });
+
+    const step = 16;
+    const measured = ((stoppingRotationAt(plan, step) - plan.startRotation) / step) * 1000;
+    // 周回数を整数へ丸めるぶんのずれは残る。半分〜倍に収まっていれば「飛んで」見えない。
+    expect(measured).toBeGreaterThan(speed * 0.5);
+    expect(measured).toBeLessThan(speed * 2);
   });
 
   /**
    * ここが**この機能の肝**。
    *
-   * 「初速を適当に散らす」やり方だと、止まる角度の分布が初速の散らし方に
-   * 引きずられ、扇の広さどおりの確率にならない。
+   * 「勢い任せ」だと、止まる角度の分布が回した長さに引きずられ、
+   * 扇の広さどおりの確率にならない。
    * 止まる角度を先に一様に引いているので、そうならないことを確かめる。
    */
   it('止まる位置が扇の広さどおりの確率になる', () => {
@@ -260,9 +384,11 @@ describe('回り方', () => {
     const trials = 10_000;
     const counts = new Map<string, number>();
     for (let index = 0; index < trials; index += 1) {
-      const plan = planSpin({
-        startRotation: 0,
-        decel: 0.008,
+      const plan = planStop({
+        // 押すたびに位置が違っても偏らないこと。
+        startRotation: (index * 7) % 360,
+        speed: 720,
+        stopSeconds: 5,
         random: () => index / trials,
       });
       const winner = itemAtPointer(items, plan.endRotation);
@@ -274,11 +400,21 @@ describe('回り方', () => {
     expect((counts.get('い') ?? 0) / trials).toBeCloseTo(0.75, 2);
   });
 
-  it('回している間の角度から結果を先読みできない', () => {
-    // 途中の角度は、止まる角度と一致しない（回り切る前に結果は決まっていない）。
-    const plan = planSpin({ startRotation: 0, decel: 0.008, random: () => 0.7 });
-    const midway = rotationAt(plan, plan.durationMs * 0.5);
+  it('減速の途中の角度から結果を先読みできない', () => {
+    const plan = planStop({ startRotation: 0, speed: 720, stopSeconds: 5, random: () => 0.7 });
+    const midway = stoppingRotationAt(plan, plan.durationMs * 0.5);
     expect(Math.abs(plan.endRotation - midway)).toBeGreaterThan(1);
+  });
+});
+
+describe('配布サイトの decel_value との換算', () => {
+  it('速さと秒数から減速を求め、戻すと元の秒数になる', () => {
+    const decel = decelValueFor(720, 5);
+    expect(stopSecondsFromDecel(decel, 720)).toBeCloseTo(5, 6);
+  });
+
+  it('止まる秒数を短くすると減速は強くなる', () => {
+    expect(decelValueFor(720, 2)).toBeGreaterThan(decelValueFor(720, 9));
   });
 });
 

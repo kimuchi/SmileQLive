@@ -32,13 +32,27 @@ export type RouletteConfig = {
   /** 扇の中に項目名を書くか。項目が多いと読めないので消せるようにしてある。 */
   showLabels: boolean;
   /**
-   * 減速の強さ。大きいほど早く止まる。
+   * 回っている間の速さ（度/秒）。
    *
-   * 単位は「1 フレーム（60 分の 1 秒）あたり何度ぶん速度が落ちるか」。
-   * 参考にした配布サイトの `decel_value` をそのまま受け取れるようにするため、
-   * この単位にしてある（あちらの値をそのまま貼れば近い回り方になる）。
+   * スタートを押してからストップを押すまで、この速さで回り続ける。
+   * 360 で 1 秒に 1 周。
    */
-  decel: number;
+  spinSpeed: number;
+  /**
+   * ストップを押してから止まるまでの秒数。
+   *
+   * **速さとは別に決める。** 速く回して短く止めることも、
+   * ゆっくり回して長く引っぱることもできるようにするため。
+   */
+  stopSeconds: number;
+  /**
+   * 投影の背景に敷く画像の URL。無ければ null。
+   *
+   * URL に載せて共有できるよう、画像そのものではなく置き場所を持つ。
+   * 手元のファイルを選んだときは、その端末の中だけで使う一時的な URL が入る
+   * （共有できないので、URL へ書き出すときは落とす）。
+   */
+  backgroundUrl: string | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -61,16 +75,31 @@ export const ROULETTE_WEIGHT_MIN = 1;
 export const ROULETTE_WEIGHT_MAX = 1000;
 
 /**
- * 減速の範囲。
+ * 回る速さの範囲（度/秒）。
  *
- * 下限 0.001 … 60 度/秒で回し始めても 1 分近く止まらない。これ以上遅くしても待つだけ。
- * 上限 0.2   … 押した直後に止まる。演出にならないが、動作確認用に許す。
+ * 下限 90   … 4 秒で 1 周。字を読ませながらゆっくり回したいとき。
+ * 上限 2160 … 1 秒で 6 周。これ以上は扇が溶けて何も見えない。
  */
-export const ROULETTE_DECEL_MIN = 0.001;
-export const ROULETTE_DECEL_MAX = 0.2;
+export const ROULETTE_SPEED_MIN = 90;
+export const ROULETTE_SPEED_MAX = 2160;
 
-/** 既定の減速。参考にした配布サイトの初期値と同じ。 */
-export const ROULETTE_DECEL_DEFAULT = 0.008;
+/** 既定の速さ。1 秒で 2 周。会場で「回っている」と分かり、字も追える。 */
+export const ROULETTE_SPEED_DEFAULT = 720;
+
+/**
+ * 止まるまでの秒数の範囲。
+ *
+ * 下限 0.5 … ほぼ即止まり。動作確認用。
+ * 上限 30  … これ以上引っぱると会場が飽きる。
+ */
+export const ROULETTE_STOP_SECONDS_MIN = 0.5;
+export const ROULETTE_STOP_SECONDS_MAX = 30;
+
+/** 既定の止まるまでの秒数。 */
+export const ROULETTE_STOP_SECONDS_DEFAULT = 5;
+
+/** 背景画像の URL の長さ。長すぎる data: URL を URL へ載せさせないための頭打ち。 */
+export const ROULETTE_BACKGROUND_URL_MAX_LENGTH = 2048;
 
 /** 何も渡されなかったときに置いておく空の扇の数。 */
 const BLANK_ITEM_COUNT = 4;
@@ -91,11 +120,43 @@ export function clampWeight(value: number): number {
   return Math.min(ROULETTE_WEIGHT_MAX, Math.max(ROULETTE_WEIGHT_MIN, Math.round(value)));
 }
 
-export function clampDecel(value: number): number {
+export function clampSpeed(value: number): number {
   if (!Number.isFinite(value) || value <= 0) {
-    return ROULETTE_DECEL_DEFAULT;
+    return ROULETTE_SPEED_DEFAULT;
   }
-  return Math.min(ROULETTE_DECEL_MAX, Math.max(ROULETTE_DECEL_MIN, value));
+  return Math.min(ROULETTE_SPEED_MAX, Math.max(ROULETTE_SPEED_MIN, Math.round(value)));
+}
+
+export function clampStopSeconds(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    return ROULETTE_STOP_SECONDS_DEFAULT;
+  }
+  // 0.1 秒刻み。これより細かく指定できても会場では違いが分からない。
+  const rounded = Math.round(value * 10) / 10;
+  return Math.min(ROULETTE_STOP_SECONDS_MAX, Math.max(ROULETTE_STOP_SECONDS_MIN, rounded));
+}
+
+/**
+ * 背景画像の URL を受け取れる形にそろえる。
+ *
+ * **`http(s)` と、その端末だけで使える `blob:` しか通さない。**
+ * `javascript:` や `data:text/html` を背景として受け取ると、
+ * URL を渡すだけで人の画面で好きなものを実行できてしまう。
+ * 背景は URL に載って人から人へ渡るものなので、ここは狭く開ける。
+ */
+export function normalizeBackgroundUrl(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = trimLabel(value);
+  if (trimmed.length === 0 || trimmed.length > ROULETTE_BACKGROUND_URL_MAX_LENGTH) {
+    return null;
+  }
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('blob:')) {
+    return trimmed;
+  }
+  return null;
 }
 
 /** 項目名を保存できる形へそろえる。空文字は空文字のまま返す（呼び出し側が落とす）。 */
@@ -201,6 +262,8 @@ export function blankRouletteConfig(makeId: () => string): RouletteConfig {
       weight: 1,
     })),
     showLabels: true,
-    decel: ROULETTE_DECEL_DEFAULT,
+    spinSpeed: ROULETTE_SPEED_DEFAULT,
+    stopSeconds: ROULETTE_STOP_SECONDS_DEFAULT,
+    backgroundUrl: null,
   };
 }

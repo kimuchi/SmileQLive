@@ -2,18 +2,23 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
+import { RouletteBackgroundPicker } from '@/components/roulette/roulette-background-picker';
 import { RouletteImportPanel } from '@/components/roulette/roulette-import-panel';
 import { Alert } from '@/components/shared/Alert';
 import { Button } from '@/components/shared/Button';
 import { Checkbox } from '@/components/shared/Checkbox';
 import { toRouletteItems, type RouletteImportResult } from '@/domain/roulette/roulette-import';
 import { buildRouletteUrl } from '@/domain/roulette/roulette-url';
-import { estimatedSpinSeconds } from '@/domain/roulette/spin';
 import {
-  clampDecel,
+  clampSpeed,
+  clampStopSeconds,
   clampWeight,
   ROULETTE_ITEM_MAX_COUNT,
   ROULETTE_LABEL_MAX_LENGTH,
+  ROULETTE_SPEED_MAX,
+  ROULETTE_SPEED_MIN,
+  ROULETTE_STOP_SECONDS_MAX,
+  ROULETTE_STOP_SECONDS_MIN,
   ROULETTE_WEIGHT_MAX,
   ROULETTE_WEIGHT_MIN,
   usableItems,
@@ -33,8 +38,11 @@ import { formatCount } from '@/lib/format';
  * 針の下に何があるのかが会場から見て分からなくなる。
  */
 
-/** 減速つまみの刻み。細かすぎると合わせづらいので対数っぽく並べる。 */
-const DECEL_STEPS = [0.002, 0.004, 0.006, 0.008, 0.012, 0.02, 0.04, 0.08] as const;
+/** 速さのつまみの刻み（度/秒）。360 で 1 秒に 1 周。 */
+const SPEED_STEP = 30;
+
+/** 止まるまでの秒数のつまみの刻み。 */
+const STOP_SECONDS_STEP = 0.5;
 
 function newItem(): RouletteItem {
   return { id: crypto.randomUUID(), label: '', weight: 1 };
@@ -243,31 +251,73 @@ export function RouletteSettingsPanel({
           }}
         />
 
+        {/*
+          速さと止まるまでの秒数は**別々に決める**。
+          速く回して短く止めることも、ゆっくり回して長く引っぱることもできる。
+        */}
         <div className="flex flex-col gap-1">
-          <label htmlFor="roulette-decel" className="text-sm font-bold text-slate-800">
-            回る長さ（減速）
+          <label htmlFor="roulette-speed" className="text-sm font-bold text-slate-800">
+            回る速さ
           </label>
           <input
-            id="roulette-decel"
+            id="roulette-speed"
             type="range"
-            min={0}
-            max={DECEL_STEPS.length - 1}
-            step={1}
+            min={ROULETTE_SPEED_MIN}
+            max={ROULETTE_SPEED_MAX}
+            step={SPEED_STEP}
             disabled={disabled}
-            value={nearestDecelStep(config.decel)}
+            value={config.spinSpeed}
             onChange={(event) => {
-              const step = DECEL_STEPS[Number(event.currentTarget.value)] ?? config.decel;
-              onChange({ ...config, decel: clampDecel(step) });
+              onChange({ ...config, spinSpeed: clampSpeed(Number(event.currentTarget.value)) });
               setCopied(false);
             }}
             className="h-11 w-full"
           />
           <p className="text-xs text-slate-600">
-            およそ{' '}
-            <strong className="font-bold">{estimatedSpinSeconds(config.decel).toFixed(1)}</strong>{' '}
-            秒で止まります（減速 {config.decel}）。 左へ動かすほど長く回ります。
+            1 秒に <strong className="font-bold">{(config.spinSpeed / 360).toFixed(1)}</strong> 周
+            （{config.spinSpeed} 度/秒）。スタートからストップまでこの速さで回り続けます。
           </p>
         </div>
+
+        <div className="flex flex-col gap-1">
+          <label htmlFor="roulette-stop" className="text-sm font-bold text-slate-800">
+            止まるまでの時間
+          </label>
+          <input
+            id="roulette-stop"
+            type="range"
+            min={ROULETTE_STOP_SECONDS_MIN}
+            max={ROULETTE_STOP_SECONDS_MAX}
+            step={STOP_SECONDS_STEP}
+            disabled={disabled}
+            value={config.stopSeconds}
+            onChange={(event) => {
+              onChange({
+                ...config,
+                stopSeconds: clampStopSeconds(Number(event.currentTarget.value)),
+              });
+              setCopied(false);
+            }}
+            className="h-11 w-full"
+          />
+          <p className="text-xs text-slate-600">
+            ストップを押してから <strong className="font-bold">{config.stopSeconds}</strong>{' '}
+            秒かけて止まります。長くするほど「止まりそうで止まらない」時間が伸びます。
+          </p>
+        </div>
+      </section>
+
+      {/* --- 背景 --- */}
+      <section className="flex flex-col gap-2">
+        <h3 className="text-sm font-bold text-slate-900">投影の背景</h3>
+        <RouletteBackgroundPicker
+          value={config.backgroundUrl}
+          disabled={disabled}
+          onChange={(next) => {
+            onChange({ ...config, backgroundUrl: next });
+            setCopied(false);
+          }}
+        />
       </section>
 
       {/* --- 共有 --- */}
@@ -308,18 +358,4 @@ export function RouletteSettingsPanel({
       </p>
     </div>
   );
-}
-
-/** つまみの位置。いまの値にいちばん近い刻みを選ぶ。 */
-function nearestDecelStep(decel: number): number {
-  let best = 0;
-  let bestDistance = Number.POSITIVE_INFINITY;
-  for (const [index, step] of DECEL_STEPS.entries()) {
-    const distance = Math.abs(step - decel);
-    if (distance < bestDistance) {
-      best = index;
-      bestDistance = distance;
-    }
-  }
-  return best;
 }

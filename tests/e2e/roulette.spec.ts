@@ -3,32 +3,42 @@ import { expect, test, type Page } from '@playwright/test';
 /**
  * URL だけで回すルーレット（`/roulette`）。
  *
- * ここで守りたいのは 4 つ。
+ * ここで守りたいのは 6 つ。
  *   1. **ログインが要らない。** 会議の司会決めのように、その場で開いて回すためのもの。
  *      ログイン画面へ飛ばされたらこの機能は成立しない。
  *   2. 配布されているルーレットと同じ形の URL をそのまま開ける。
- *   3. スタートで回り、ひとりでに止まって、止まった扇の名前が出る。
- *   4. 何も付けずに開いたら 1 から作れる。
+ *   3. **スタートで回り続け、ストップで止まる。** 勝手に止まらない
+ *      （司会が「そろそろ止めます」の間を作れなくなる）。
+ *   4. 速さと止まるまでの時間を**別々に**決められる。
+ *   5. 効果音の案内やテストのボタンを出さない。押さなくても鳴る。
+ *   6. 何も付けずに開いたら 1 から作れる。背景画像も設定できる。
  *
  * Firebase は要らない（サーバーへ何も送らないため）。
  * 効果音の一覧だけはサーバーへ取りに行くが、取れなくても画面は動く。
  */
 
-/** 回り方の見本。減速を強めにして、テストが長く待たないようにする。 */
+/** 回り方の見本。止まるまでを短くして、テストが長く待たないようにする。 */
 const BOARD = {
   name: ['山田 太郎', '田中 花子', '鈴木 一郎'],
   ratio: [1, 3, 2],
   show_characters_value: true,
-  decel_value: 0.05,
+  decel_value: 0.4,
+  speed_value: 720,
+  stop_seconds: 1,
 };
 
 function boardUrl(board: unknown = BOARD): string {
   return `/roulette?json=${encodeURIComponent(JSON.stringify(board))}`;
 }
 
-/** 止まるまで待つ。減速 0.05 なら 3 秒ほどで止まる。 */
-async function waitUntilStopped(page: Page): Promise<void> {
-  await expect(page.getByText('まわっています…')).toBeHidden({ timeout: 30_000 });
+/** スタート → ストップ → 止まるまで。 */
+async function spinAndStop(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'スタート' }).click();
+  await expect(page.getByText('まわっています…')).toBeVisible();
+
+  // ストップを押すまで止まらない。押してから決めた秒数で止まる。
+  await page.getByRole('button', { name: 'ストップ' }).click();
+  await expect(page.getByText('とまります…')).toBeHidden({ timeout: 30_000 });
 }
 
 /** 扇に書かれている名前。SVG の文字は innerText で取れないので中身を直接読む。 */
@@ -49,32 +59,119 @@ test.describe('URL だけで回すルーレット', () => {
     expect(await segmentLabels(page)).toEqual(['山田 太郎', '田中 花子', '鈴木 一郎']);
   });
 
-  test('スタートで回り、ひとりでに止まって名前が出る', async ({ page }) => {
+  test('スタートで回り続け、ストップで止まって名前が出る', async ({ page }) => {
     await page.goto(boardUrl());
 
     await page.getByRole('button', { name: 'スタート' }).click();
     await expect(page.getByText('まわっています…')).toBeVisible();
 
-    await waitUntilStopped(page);
+    // **押すまで止まらない。** ここが自動で止まると、司会が間を作れない。
+    await page.waitForTimeout(2500);
+    await expect(page.getByText('まわっています…')).toBeVisible();
+
+    await page.getByRole('button', { name: 'ストップ' }).click();
+    await expect(page.getByText('とまります…')).toBeHidden({ timeout: 30_000 });
 
     // 止まった扇の名前が出る。盤面に無い名前は出ない。
     const result = (await page.locator('[aria-live="polite"]').innerText()).trim();
     expect(BOARD.name).toContain(result);
 
-    // 回っている間に結果を出していない（止まってから読む作りであること）。
     await expect(page.getByRole('button', { name: 'もう一度まわす' })).toBeVisible();
+  });
+
+  test('回していないときはストップを押せない', async ({ page }) => {
+    await page.goto(boardUrl());
+
+    await expect(page.getByRole('button', { name: 'ストップ' })).toBeDisabled();
+
+    await page.getByRole('button', { name: 'スタート' }).click();
+    await expect(page.getByRole('button', { name: 'ストップ' })).toBeEnabled();
+    // 回している間はスタートを押し直せない。
+    await expect(page.getByRole('button', { name: 'スタート' })).toBeDisabled();
+
+    await page.getByRole('button', { name: 'ストップ' }).click();
+    await expect(page.getByText('とまります…')).toBeHidden({ timeout: 30_000 });
+    await expect(page.getByRole('button', { name: 'ストップ' })).toBeDisabled();
   });
 
   test('リセットで最初へ戻る', async ({ page }) => {
     await page.goto(boardUrl());
 
-    await page.getByRole('button', { name: 'スタート' }).click();
-    await waitUntilStopped(page);
-
+    await spinAndStop(page);
     await page.getByRole('button', { name: 'リセット' }).click();
 
     await expect(page.getByText('スタートを押してください')).toBeVisible();
     await expect(page.getByRole('button', { name: 'スタート', exact: true })).toBeVisible();
+  });
+
+  /**
+   * 会場で「効果音を有効にする」を探させない。
+   * 音はブラウザの決まりで最初の操作まで鳴らせないが、スタートを押した
+   * その 1 押しで解除が済むので、案内の帯もテストのボタンも出さない。
+   */
+  test('効果音の案内やテストのボタンを出さない', async ({ page }) => {
+    await page.goto(boardUrl());
+
+    await expect(page.getByText('効果音はまだ鳴りません')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /効果音を有効にする/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /音を鳴らして確認/ })).toHaveCount(0);
+
+    // 案内が無くても、ボタンは押せて回る。
+    await page.getByRole('button', { name: 'スタート' }).click();
+    await expect(page.getByText('まわっています…')).toBeVisible();
+  });
+
+  test('速さと止まるまでの時間を別々に決められる', async ({ page }) => {
+    await page.goto(boardUrl());
+    await page.getByRole('button', { name: '設定' }).click();
+
+    await page.getByLabel('回る速さ').fill('1080');
+    await expect(page.getByText(/1 秒に/)).toContainText('3.0');
+    // 速さを変えても止まるまでの時間はそのまま。
+    await expect(page.getByText(/秒かけて止まります/)).toContainText('1');
+
+    await page.getByLabel('止まるまでの時間').fill('4');
+    await expect(page.getByText(/秒かけて止まります/)).toContainText('4');
+    await expect(page.getByText(/1 秒に/)).toContainText('3.0');
+
+    // 書き出す URL にも両方入る。
+    const shareUrl = await page.getByLabel('この盤面のURL').inputValue();
+    const json = JSON.parse(new URL(shareUrl).searchParams.get('json') ?? '{}') as {
+      speed_value: number;
+      stop_seconds: number;
+    };
+    expect(json.speed_value).toBe(1080);
+    expect(json.stop_seconds).toBe(4);
+  });
+
+  test('背景画像を設定できる', async ({ page }) => {
+    // 実際に画像を取りに行かせない（外部へ出ない）。
+    await page.route('**/bg.png', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        // 1x1 の透明 PNG。
+        body: Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+          'base64',
+        ),
+      }),
+    );
+
+    await page.goto(boardUrl());
+    await page.getByRole('button', { name: '設定' }).click();
+
+    await page.getByLabel('画像の URL').fill('https://example.com/bg.png');
+    await page.getByRole('button', { name: 'この URL を使う' }).click();
+
+    // 盤面の裏に敷かれる（設定欄の下見とは別物なので、飾りの側だけを見る）。
+    const backdrop = page.locator('img[aria-hidden="true"][src="https://example.com/bg.png"]');
+    await expect(backdrop).toBeVisible();
+
+    // URL にも載って、開き直すと背景が戻る。
+    const shareUrl = await page.getByLabel('この盤面のURL').inputValue();
+    await page.goto(shareUrl);
+    await expect(backdrop).toBeVisible();
   });
 
   test('何も付けずに開くと 1 から作れる', async ({ page }) => {
@@ -116,7 +213,13 @@ test.describe('URL だけで回すルーレット', () => {
     const shareUrl = await page.getByLabel('この盤面のURL').inputValue();
     // 配布サイトと同じ形。あちらの URL もこちらの URL も同じ鍵で運ぶ。
     const json = new URL(shareUrl).searchParams.get('json') ?? '';
-    expect(JSON.parse(json)).toEqual(BOARD);
+    expect(JSON.parse(json)).toMatchObject({
+      name: BOARD.name,
+      ratio: BOARD.ratio,
+      show_characters_value: true,
+      speed_value: BOARD.speed_value,
+      stop_seconds: BOARD.stop_seconds,
+    });
 
     await page.goto(shareUrl);
     expect(await segmentLabels(page)).toEqual(BOARD.name);
