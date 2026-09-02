@@ -116,8 +116,28 @@ export function StandaloneRoulette({
           'radial-gradient(ellipse at top, var(--color-stage-800) 0%, var(--color-stage-950) 70%)',
       }}
     >
-      {/* --- 盤面 --- */}
-      <section className="relative flex min-h-[70dvh] flex-1 flex-col items-center justify-center gap-4 overflow-hidden p-4 lg:min-h-dvh">
+      {/*
+        --- 盤面と操作 ---
+
+        横長（投影・ノートパソコン）では**盤面を画面の高さいっぱい**に出し、
+        結果とボタンはその右へ置く。縦長（スマートフォン）では上下に積む。
+
+        `landscape` は画面の向きそのもの。幅の断点（lg など）で分けると、
+        横長でも幅の狭い投影機で縦積みになってしまう。
+      */}
+      <section
+        className={cn(
+          'relative overflow-hidden lg:flex-1 landscape:h-dvh',
+          /*
+            高さははっきり決める。min-height だけにすると、中の
+            container-type: size が寸法を決められず盤面が消える（実際に消えた）。
+
+            縦長で設定欄を開いているときだけ少し縮める。画面いっぱいにすると、
+            項目を入れるために毎回スクロールさせることになる。
+          */
+          panelOpen ? 'h-[60dvh]' : 'h-dvh',
+        )}
+      >
         {config.backgroundUrl !== null ? (
           <>
             {/*
@@ -135,98 +155,121 @@ export function StandaloneRoulette({
               aria-hidden="true"
               className="absolute inset-0 h-full w-full object-cover"
             />
-            {/* 文字と扇が読めなくならないよう、暗い膜を 1 枚重ねる。 */}
-            <div aria-hidden="true" className="absolute inset-0 bg-black/55" />
           </>
         ) : null}
 
-        <div
-          className={cn(
-            'relative flex w-full flex-col items-center gap-4',
-            // 設定欄を閉じたら盤面を大きくする。投影に出すときはこちらで使う。
-            panelOpen ? 'max-w-[min(66vh,36rem)]' : 'max-w-[min(76vh,48rem)]',
-          )}
-        >
-          <RouletteBoard
-            items={items}
-            wheelRef={spin.wheelRef}
-            spinning={running}
-            showLabels={config.showLabels}
-            winnerLabel={spin.phase === 'stopped' ? (spin.result?.label ?? null) : null}
-          />
-
-          <p
-            aria-live="polite"
-            className={cn(
-              'min-h-[2.4em] text-center leading-tight font-bold break-words',
-              spin.phase === 'stopped' ? 'stage-pop-big text-amber-300' : 'text-cyan-200',
-            )}
-            style={{
-              fontSize: 'clamp(1.5rem, 5vw, 3.5rem)',
-              textShadow: '0 2px 12px rgba(0,0,0,0.7)',
-            }}
+        <div className="relative flex h-full w-full flex-col items-center justify-center gap-4 p-3 landscape:flex-row landscape:gap-5">
+          {/*
+            盤面。置ける場所の**短いほう**に合わせて正方形にする。
+            container-type: size と cqmin を使うのは、高さと幅のどちらが
+            足りないかを CSS だけで判断させるため（縦長でも横長でも同じ書き方で済む）。
+            98% にしているのは、真上の針が枠から出ているぶんの逃げ。
+          */}
+          <div
+            /*
+              `self-stretch` が要る。親は items-center なので、これが無いと
+              高さが中身なりになる。container-type: size は中身を寸法から
+              切り離すので、中身なり＝**高さ 0** になって盤面が消える（実際に消えた）。
+            */
+            className="flex min-h-0 w-full flex-1 items-center justify-center self-stretch landscape:w-auto"
+            style={{ containerType: 'size' }}
           >
-            {spin.phase === 'spinning'
-              ? 'まわっています…'
-              : spin.phase === 'stopping'
-                ? 'とまります…'
-                : (spin.result?.label ?? (spinnable ? 'スタートを押してください' : ''))}
-          </p>
+            <div style={{ width: '98cqmin', height: '98cqmin' }}>
+              <RouletteBoard
+                items={items}
+                wheelRef={spin.wheelRef}
+                spinning={running}
+                showLabels={config.showLabels}
+                winnerLabel={spin.phase === 'stopped' ? (spin.result?.label ?? null) : null}
+              />
+            </div>
+          </div>
 
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            <Button size="lg" disabled={!spinnable || running} onClick={spin.start}>
-              {spin.phase === 'stopped' ? 'もう一度まわす' : 'スタート'}
-            </Button>
-            <Button
-              variant="danger"
-              size="lg"
-              disabled={spin.phase !== 'spinning'}
-              onClick={spin.stop}
+          {/* 結果とボタン。横長では盤面の右へ縦に並べる。 */}
+          {/*
+            結果とボタン。横長では盤面の右へ縦に並べる。
+            幅を欲張らないのは、狭くすると盤面が大きくなるから
+            （設定欄も開いていると、ここが太いぶんだけ盤面が縮む）。
+          */}
+          <div className="flex w-full shrink-0 flex-col items-center gap-4 landscape:w-[18rem] landscape:items-stretch 2xl:landscape:w-[24rem]">
+            <p
+              aria-live="polite"
+              className={cn(
+                'min-h-[2.4em] text-center leading-tight font-bold break-words',
+                spin.phase === 'stopped' ? 'stage-pop-big text-amber-300' : 'text-cyan-200',
+              )}
+              style={{
+                // 右の列に収まる大きさ。長い名前は折り返して最後まで出す。
+                fontSize: 'clamp(1.4rem, 2.8vw, 3rem)',
+                // 背景画像の上でも読めるよう、膜の代わりに字の側へ影を付ける。
+                textShadow: '0 2px 10px rgba(0,0,0,0.85), 0 0 24px rgba(0,0,0,0.6)',
+              }}
             >
-              ストップ
-            </Button>
-            <Button variant="secondary" size="lg" disabled={running} onClick={handleReset}>
-              リセット
-            </Button>
-            {!panelOpen ? (
+              {spin.phase === 'spinning'
+                ? 'まわっています…'
+                : spin.phase === 'stopping'
+                  ? 'とまります…'
+                  : (spin.result?.label ?? (spinnable ? 'スタートを押してください' : ''))}
+            </p>
+
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <Button size="lg" disabled={!spinnable || running} onClick={spin.start}>
+                {spin.phase === 'stopped' ? 'もう一度まわす' : 'スタート'}
+              </Button>
+              <Button
+                variant="danger"
+                size="lg"
+                disabled={spin.phase !== 'spinning'}
+                onClick={spin.stop}
+              >
+                ストップ
+              </Button>
+              <Button variant="secondary" size="lg" disabled={running} onClick={handleReset}>
+                リセット
+              </Button>
+              {!panelOpen ? (
+                <Button
+                  variant="ghost"
+                  size="md"
+                  className={DARK_GHOST_CLASS}
+                  onClick={() => {
+                    setPanelOpen(true);
+                  }}
+                >
+                  設定
+                </Button>
+              ) : null}
               <Button
                 variant="ghost"
                 size="md"
                 className={DARK_GHOST_CLASS}
                 onClick={() => {
-                  setPanelOpen(true);
+                  fullscreen.toggle();
                 }}
               >
-                設定
+                {fullscreen.isFullscreen ? '全画面をやめる' : '全画面'}
               </Button>
+            </div>
+
+            {!spinnable ? (
+              <p
+                className="text-center text-sm text-amber-200"
+                style={{ textShadow: '0 1px 6px rgba(0,0,0,0.9)' }}
+              >
+                項目を 2 つ以上入れると回せます。設定から入れてください。
+              </p>
             ) : null}
-            <Button
-              variant="ghost"
-              size="md"
-              className={DARK_GHOST_CLASS}
-              onClick={() => {
-                fullscreen.toggle();
-              }}
-            >
-              {fullscreen.isFullscreen ? '全画面をやめる' : '全画面'}
-            </Button>
+
+            {spin.history.length > 1 ? (
+              <ol className="flex max-h-24 w-full flex-wrap justify-center gap-x-3 gap-y-1 overflow-y-auto text-sm text-white/80">
+                {spin.history.slice(1).map((entry) => (
+                  <li key={entry.order} style={{ textShadow: '0 1px 6px rgba(0,0,0,0.9)' }}>
+                    {entry.order}回目 {entry.label}
+                  </li>
+                ))}
+              </ol>
+            ) : null}
           </div>
-
-          {!spinnable ? (
-            <p className="text-center text-sm text-amber-200">
-              項目を 2 つ以上入れると回せます。設定から入れてください。
-            </p>
-          ) : null}
-
-          {spin.history.length > 1 ? (
-            <ol className="flex max-h-24 w-full flex-wrap justify-center gap-x-3 gap-y-1 overflow-y-auto text-sm text-white/70">
-              {spin.history.slice(1).map((entry) => (
-                <li key={entry.order}>
-                  {entry.order}回目 {entry.label}
-                </li>
-              ))}
-            </ol>
-          ) : null}
         </div>
       </section>
 

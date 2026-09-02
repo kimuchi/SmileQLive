@@ -174,6 +174,104 @@ test.describe('URL だけで回すルーレット', () => {
     await expect(backdrop).toBeVisible();
   });
 
+  /**
+   * 投影は横長。**盤面は画面の高さいっぱいに出し、結果とボタンはその右**。
+   * 上下に積むと、会場から見て盤面が小さくなってしまう。
+   */
+  test('横長では盤面が画面の高さいっぱいに出て、操作は右に並ぶ', async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 900 });
+    await page.goto(boardUrl());
+    await page.waitForSelector('text=スタート');
+
+    const box = await page.evaluate(() => {
+      const svg = document.querySelector('svg[aria-label^="ルーレット"]');
+      const wheel = svg?.getBoundingClientRect();
+      const start = [...document.querySelectorAll('button')]
+        .find((node) => node.textContent?.includes('スタート'))
+        ?.getBoundingClientRect();
+      return wheel && start
+        ? {
+            wheel: { w: wheel.width, h: wheel.height, right: wheel.right },
+            startLeft: start.left,
+            viewport: { w: window.innerWidth, h: window.innerHeight },
+            scrollH: document.documentElement.scrollHeight,
+          }
+        : null;
+    });
+
+    expect(box).not.toBeNull();
+    if (!box) {
+      return;
+    }
+
+    // 正方形のまま、画面の高さのほとんどを使う。
+    expect(Math.abs(box.wheel.w - box.wheel.h)).toBeLessThan(2);
+    expect(box.wheel.h).toBeGreaterThan(box.viewport.h * 0.9);
+
+    // 操作は盤面の右。下に積んでいない。
+    expect(box.startLeft).toBeGreaterThanOrEqual(box.wheel.right);
+
+    // 縦にはみ出して、盤面の下が切れていない。
+    expect(box.scrollH).toBeLessThanOrEqual(box.viewport.h + 1);
+  });
+
+  test('縦長では盤面の下に操作が並ぶ', async ({ page }) => {
+    await page.setViewportSize({ width: 420, height: 900 });
+    await page.goto(boardUrl());
+    await page.waitForSelector('text=スタート');
+
+    const box = await page.evaluate(() => {
+      const wheel = document
+        .querySelector('svg[aria-label^="ルーレット"]')
+        ?.getBoundingClientRect();
+      const start = [...document.querySelectorAll('button')]
+        .find((node) => node.textContent?.includes('スタート'))
+        ?.getBoundingClientRect();
+      return wheel && start ? { wheelBottom: wheel.bottom, startTop: start.top } : null;
+    });
+
+    expect(box).not.toBeNull();
+    expect(box?.startTop).toBeGreaterThanOrEqual(box?.wheelBottom ?? 0);
+  });
+
+  test('背景に暗い膜を重ねない', async ({ page }) => {
+    await page.route('**/bg.png', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        body: Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+          'base64',
+        ),
+      }),
+    );
+
+    await page.goto(boardUrl({ ...BOARD, background_url: 'https://example.com/bg.png' }));
+    await page.waitForSelector('text=スタート');
+
+    // 背景画像の上に、全面を覆う半透明の板を置いていない。
+    const veils = await page.evaluate(() => {
+      const img = document.querySelector('img[aria-hidden="true"]');
+      const parent = img?.parentElement;
+      if (!parent) {
+        return -1;
+      }
+      return [...parent.children].filter((node) => {
+        if (node === img) {
+          return false;
+        }
+        const style = getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        return (
+          style.position === 'absolute' &&
+          rect.width >= window.innerWidth * 0.9 &&
+          style.backgroundColor !== 'rgba(0, 0, 0, 0)'
+        );
+      }).length;
+    });
+    expect(veils).toBe(0);
+  });
+
   test('何も付けずに開くと 1 から作れる', async ({ page }) => {
     await page.goto('/roulette');
 
