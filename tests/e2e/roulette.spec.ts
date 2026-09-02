@@ -12,6 +12,7 @@ import { expect, test, type Page } from '@playwright/test';
  *   4. 速さと止まるまでの時間を**別々に**決められる。
  *   5. 効果音の案内やテストのボタンを出さない。押さなくても鳴る。
  *   6. 何も付けずに開いたら 1 から作れる。背景画像も設定できる。
+ *   7. **触った設定が残る。** 読み込み直しても消えない。
  *
  * Firebase は要らない（サーバーへ何も送らないため）。
  * 効果音の一覧だけはサーバーへ取りに行くが、取れなくても画面は動く。
@@ -270,6 +271,108 @@ test.describe('URL だけで回すルーレット', () => {
       }).length;
     });
     expect(veils).toBe(0);
+  });
+
+  /**
+   * **読み込み直しても設定が消えないこと。**
+   *
+   * 盤面の置き場所は URL なので、触ったらアドレス欄も合わせる。
+   * ここが抜けていて、会場で作った内容が再読込で消えていた。
+   */
+  test('触った設定が読み込み直しても残る', async ({ page }) => {
+    await page.goto('/roulette');
+
+    await page.getByLabel('1番目の項目名').fill('あたり');
+    await page.getByLabel('2番目の項目名').fill('はずれ');
+    await page.getByLabel('2番目の重み').fill('4');
+    await page.getByLabel('止まるまでの時間').fill('7');
+
+    // アドレス欄が盤面を持つようになる（少し待ってからまとめて書く）。
+    await expect(page).toHaveURL(/json=/, { timeout: 5_000 });
+
+    await page.reload();
+    await page.waitForSelector('text=スタート');
+
+    expect(await segmentLabels(page)).toEqual(['あたり', 'はずれ']);
+    await page.getByRole('button', { name: '設定', exact: true }).click();
+    await expect(page.getByLabel('2番目の重み')).toHaveValue('4');
+    await expect(page.getByLabel('止まるまでの時間')).toHaveValue('7');
+  });
+
+  test('URL を持たずに開くと前回の内容が出る', async ({ page }) => {
+    await page.goto('/roulette');
+    await page.getByLabel('1番目の項目名').fill('きのう');
+    await page.getByLabel('2番目の項目名').fill('きょう');
+    await expect(page).toHaveURL(/json=/, { timeout: 5_000 });
+
+    // URL を捨てて素の /roulette を開く。
+    await page.goto('/roulette');
+    await page.waitForSelector('text=スタート');
+
+    expect(await segmentLabels(page)).toEqual(['きのう', 'きょう']);
+    // 黙って出さない。何が起きたかを伝える。
+    await expect(page.getByText(/前回の内容/)).toBeVisible();
+  });
+
+  test('人から渡された URL のほうが、この端末の控えより優先される', async ({ page }) => {
+    await page.goto('/roulette');
+    await page.getByLabel('1番目の項目名').fill('わたしの');
+    await page.getByLabel('2番目の項目名').fill('ばんめん');
+    await expect(page).toHaveURL(/json=/, { timeout: 5_000 });
+
+    await page.goto(boardUrl());
+    await page.waitForSelector('text=スタート');
+
+    // 控えで上書きしない。渡された URL がそのまま出る。
+    expect(await segmentLabels(page)).toEqual(BOARD.name);
+  });
+
+  /**
+   * 設定ボタンは押しても消えない。
+   * 消える作りだったので、開いたあとに閉じ方が分からなくなっていた。
+   */
+  test('設定を開いてもボタンが消えない', async ({ page }) => {
+    await page.goto(boardUrl());
+
+    await page.getByRole('button', { name: '設定', exact: true }).click();
+    await expect(page.getByRole('button', { name: '設定を閉じる' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '全画面' })).toBeVisible();
+
+    await page.getByRole('button', { name: '設定を閉じる' }).click();
+    await expect(page.getByRole('button', { name: '設定', exact: true })).toBeVisible();
+    await expect(page.getByText('この盤面を保存する')).toBeHidden();
+  });
+
+  /** 決まった瞬間は、名前を大きく出して演出を添える。 */
+  test('決まったら名前が大きくなり、演出が出る', async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 900 });
+    await page.goto(boardUrl());
+
+    const fontSize = async () =>
+      page.evaluate(() => {
+        const node = document.querySelector('[aria-live="polite"]');
+        return node ? Number.parseFloat(getComputedStyle(node).fontSize) : 0;
+      });
+
+    const before = await fontSize();
+    await spinAndStop(page);
+    const after = await fontSize();
+
+    // 案内のときより、決まった名前のほうがはっきり大きい。
+    expect(after).toBeGreaterThan(before * 1.8);
+    expect(after).toBeGreaterThan(60);
+
+    // 光線・輪・紙吹雪・閃光がひとそろい出る。
+    const effects = await page.evaluate(() => ({
+      rays: document.querySelectorAll('.stage-rays').length,
+      rings: document.querySelectorAll('.stage-ring').length,
+      confetti: document.querySelectorAll('.stage-confetti').length,
+      flash: document.querySelectorAll('.stage-flash').length,
+    }));
+    expect(effects.rays).toBeGreaterThan(0);
+    expect(effects.rings).toBeGreaterThan(0);
+    expect(effects.confetti).toBeGreaterThan(0);
+    expect(effects.flash).toBeGreaterThan(0);
   });
 
   test('何も付けずに開くと 1 から作れる', async ({ page }) => {

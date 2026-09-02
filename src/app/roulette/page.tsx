@@ -46,12 +46,19 @@ export default async function RoulettePage({
             ? 'URL の中身を読み取れませんでした。ここから作り直せます。'
             : null
         }
+        /*
+          URL に何も付いていなかったときだけ、その端末に控えてある
+          前回の内容へ戻す（画面側でやる。控えはブラウザの中にしか無い）。
+          壊れた URL を開いたときは戻さない。直したい人の邪魔になる。
+        */
+        restoreSaved={parsed.reason === 'empty'}
       />
     );
   }
 
   return (
     <StandaloneRoulette
+      restoreSaved={false}
       initialConfig={parsed.config}
       initialNotice={
         parsed.truncated > 0

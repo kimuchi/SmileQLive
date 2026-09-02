@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RouletteBoard } from '@/components/presentation/RouletteBoard';
+import { StageBurst, StageConfetti, StageFlash } from '@/components/presentation/StageEffects';
 import { useFullscreen } from '@/components/presentation/use-fullscreen';
 import { useProjectorAudio } from '@/components/presentation/use-projector-audio';
 import { RouletteSettingsPanel } from '@/components/roulette/roulette-settings-panel';
@@ -9,6 +10,11 @@ import { Button } from '@/components/shared/Button';
 import { isSpinnable, usableItems, type RouletteConfig } from '@/domain/roulette/wheel';
 import { useRouletteSpin, type RouletteResult } from '@/hooks/use-roulette-spin';
 import { cn } from '@/lib/client/cn';
+import {
+  readSavedRouletteBoard,
+  saveRouletteBoard,
+  syncRouletteUrl,
+} from '@/lib/client/roulette-storage';
 
 /**
  * URL だけで回すルーレット。
@@ -41,13 +47,24 @@ const AUDIO_NAMESPACE = 'roulette';
  */
 const DARK_GHOST_CLASS = 'text-white/85 hover:bg-white/10 active:bg-white/20';
 
+/** 設定を URL とこの端末へ書き戻すまでの待ち時間。打鍵のたびに書かない。 */
+const SAVE_DEBOUNCE_MS = 400;
+
 export function StandaloneRoulette({
   initialConfig,
   /** URL が壊れていて読めなかったか。読めなかったときだけ最初から設定欄を開く。 */
   initialNotice,
+  /**
+   * URL に盤面が付いていなかったか。
+   *
+   * 付いていなければ、この端末に控えてある前回の内容へ戻す。
+   * 付いているときは戻さない。**渡された URL のほうが新しい意図**だから。
+   */
+  restoreSaved,
 }: {
   initialConfig: RouletteConfig;
   initialNotice: string | null;
+  restoreSaved: boolean;
 }) {
   const [config, setConfig] = useState<RouletteConfig>(initialConfig);
   const [panelOpen, setPanelOpen] = useState(!isSpinnable(initialConfig));
@@ -78,7 +95,10 @@ export function StandaloneRoulette({
   const handleSettle = useCallback(
     (result: RouletteResult) => {
       audio.stopLoop('draw-spin');
-      audio.play('draw-win', `roulette:${String(result.order)}`);
+      // 当選音とファンファーレを重ねて鳴らす。1 音だけだと会場では
+      // 「止まった」ようにしか聞こえず、決まった感じが出ない。
+      audio.play('draw-win', `roulette:win:${String(result.order)}`);
+      audio.play('fanfare', `roulette:fanfare:${String(result.order)}`);
     },
     [audio],
   );
@@ -92,6 +112,8 @@ export function StandaloneRoulette({
   });
 
   const running = spin.phase === 'spinning' || spin.phase === 'stopping';
+  /** 止まって結果が出ている状態。演出はここでだけ出す。 */
+  const settled = spin.phase === 'stopped' && spin.result !== null;
 
   const handleReset = useCallback(() => {
     audio.stopLoop('draw-spin');
@@ -102,6 +124,51 @@ export function StandaloneRoulette({
     setConfig(next);
     setNotice(null);
   }, []);
+
+  /*
+    前回の内容を戻す。
+
+    URL に盤面が付いていないときだけ。付いているときに上書きすると、
+    人から渡された URL を開いても自分の前回の盤面が出てしまう。
+    書き戻し（下の効果）より先に済ませる必要があるので、ref で順番を作る。
+  */
+  const restoredRef = useRef(!restoreSaved);
+  useEffect(() => {
+    if (restoredRef.current) {
+      return;
+    }
+    restoredRef.current = true;
+
+    const saved = readSavedRouletteBoard(() => crypto.randomUUID());
+    if (!saved) {
+      return;
+    }
+    /* eslint-disable react-hooks/set-state-in-effect -- 控えはブラウザにしか無く、レンダー中に読めないため */
+    setConfig(saved);
+    setNotice('前回の内容を出しました。作り直すときは項目を書き換えてください。');
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+
+  /*
+    設定を URL とこの端末へ書き戻す。
+
+    **これが無いと、読み込み直した瞬間に設定が消える**（実際に消えた）。
+    盤面の置き場所は URL なので、触ったらアドレス欄も合わせておく。
+    打鍵のたびに書くと重いので、少し待ってからまとめて書く。
+  */
+  useEffect(() => {
+    if (!restoredRef.current) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      syncRouletteUrl(config);
+      saveRouletteBoard(config);
+    }, SAVE_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [config]);
 
   return (
     <div
@@ -126,6 +193,11 @@ export function StandaloneRoulette({
         横長でも幅の狭い投影機で縦積みになってしまう。
       */}
       <section
+        /*
+          演出（光線・輪・紙吹雪）は cqw で寸法を決めている。
+          ここを問い合わせ対象にしておかないと、投影機の大きさに比例しない。
+        */
+        style={{ containerType: 'inline-size' }}
         className={cn(
           'relative overflow-hidden lg:flex-1 landscape:h-dvh',
           /*
@@ -158,7 +230,19 @@ export function StandaloneRoulette({
           </>
         ) : null}
 
-        <div className="relative flex h-full w-full flex-col items-center justify-center gap-4 p-3 landscape:flex-row landscape:gap-5">
+        {/*
+          決まった瞬間の演出。閃光と紙吹雪は画面全体へ。
+          **光線と輪は結果の文字の側だけ**に置く（下の列の中）。
+          円盤の上まで広げると、扇の名前が読みにくくなる。
+        */}
+        {settled ? (
+          <>
+            <StageFlash burst={spin.result?.order ?? 0} />
+            <StageConfetti burst={spin.result?.order ?? 0} />
+          </>
+        ) : null}
+
+        <div className="relative z-10 flex h-full w-full flex-col items-center justify-center gap-4 p-3 landscape:flex-row landscape:gap-5">
           {/*
             盤面。置ける場所の**短いほう**に合わせて正方形にする。
             container-type: size と cqmin を使うのは、高さと幅のどちらが
@@ -185,32 +269,51 @@ export function StandaloneRoulette({
             </div>
           </div>
 
-          {/* 結果とボタン。横長では盤面の右へ縦に並べる。 */}
           {/*
             結果とボタン。横長では盤面の右へ縦に並べる。
-            幅を欲張らないのは、狭くすると盤面が大きくなるから
-            （設定欄も開いていると、ここが太いぶんだけ盤面が縮む）。
+
+            幅は画面の 3 割。固定幅にすると、狭い画面では盤面を食いつぶし、
+            広い画面では決まった名前が入りきらない。
           */}
-          <div className="flex w-full shrink-0 flex-col items-center gap-4 landscape:w-[18rem] landscape:items-stretch 2xl:landscape:w-[24rem]">
-            <p
-              aria-live="polite"
-              className={cn(
-                'min-h-[2.4em] text-center leading-tight font-bold break-words',
-                spin.phase === 'stopped' ? 'stage-pop-big text-amber-300' : 'text-cyan-200',
-              )}
-              style={{
-                // 右の列に収まる大きさ。長い名前は折り返して最後まで出す。
-                fontSize: 'clamp(1.4rem, 2.8vw, 3rem)',
-                // 背景画像の上でも読めるよう、膜の代わりに字の側へ影を付ける。
-                textShadow: '0 2px 10px rgba(0,0,0,0.85), 0 0 24px rgba(0,0,0,0.6)',
-              }}
-            >
-              {spin.phase === 'spinning'
-                ? 'まわっています…'
-                : spin.phase === 'stopping'
-                  ? 'とまります…'
-                  : (spin.result?.label ?? (spinnable ? 'スタートを押してください' : ''))}
-            </p>
+          <div className="relative flex w-full shrink-0 flex-col items-center gap-4 landscape:w-[30%] landscape:max-w-[34rem] landscape:min-w-[16rem] landscape:items-stretch">
+            {/*
+              光線と輪は**名前のうしろ**に置く。列の真ん中へ置くと
+              中心がボタンの側へずれて、どこが決まったのか分かりにくい。
+            */}
+            <div className="relative flex items-center justify-center">
+              {settled ? <StageBurst burst={spin.result?.order ?? 0} /> : null}
+
+              <p
+                aria-live="polite"
+                // 回すたびに演出をやり直す。同じ名前が続けて出ても「決まった」と分かる。
+                key={settled ? `result-${String(spin.result?.order ?? 0)}` : spin.phase}
+                className={cn(
+                  'relative z-10 min-h-[2.2em] text-center leading-tight font-bold break-words',
+                  /*
+                  決まった名前は**塗りつぶしの明るい色**にする。
+                  金色のきらめき（stage-shine）は文字そのものを透明にして描くので、
+                  暗い背景や背景画像の上では読みづらくなった。
+                  会場の後方から読めることを優先する。
+                */
+                  settled ? 'stage-slam text-amber-300' : 'text-cyan-200',
+                )}
+                style={{
+                  /*
+                  決まった名前は会場の後方から読めるところまで大きく出す。
+                  途中の案内は同じ大きさだと騒がしいので、そちらは控えめにする。
+                */
+                  fontSize: settled ? 'clamp(2rem, 5.2vw, 6rem)' : 'clamp(1.25rem, 2.2vw, 2.25rem)',
+                  // 背景画像の上でも読めるよう、膜の代わりに字の側へ影を付ける。
+                  textShadow: '0 2px 10px rgba(0,0,0,0.85), 0 0 28px rgba(0,0,0,0.65)',
+                }}
+              >
+                {spin.phase === 'spinning'
+                  ? 'まわっています…'
+                  : spin.phase === 'stopping'
+                    ? 'とまります…'
+                    : (spin.result?.label ?? (spinnable ? 'スタートを押してください' : ''))}
+              </p>
+            </div>
 
             <div className="flex flex-wrap items-center justify-center gap-3">
               <Button size="lg" disabled={!spinnable || running} onClick={spin.start}>
@@ -227,18 +330,20 @@ export function StandaloneRoulette({
               <Button variant="secondary" size="lg" disabled={running} onClick={handleReset}>
                 リセット
               </Button>
-              {!panelOpen ? (
-                <Button
-                  variant="ghost"
-                  size="md"
-                  className={DARK_GHOST_CLASS}
-                  onClick={() => {
-                    setPanelOpen(true);
-                  }}
-                >
-                  設定
-                </Button>
-              ) : null}
+              {/*
+                設定は**開いていても出したままにする**。
+                押したら消える作りだったので、閉じ方が分からなくなっていた。
+              */}
+              <Button
+                variant="ghost"
+                size="md"
+                className={DARK_GHOST_CLASS}
+                onClick={() => {
+                  setPanelOpen((previous) => !previous);
+                }}
+              >
+                {panelOpen ? '設定を閉じる' : '設定'}
+              </Button>
               <Button
                 variant="ghost"
                 size="md"
