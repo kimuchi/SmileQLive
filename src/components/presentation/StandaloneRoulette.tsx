@@ -8,6 +8,7 @@ import { useProjectorAudio } from '@/components/presentation/use-projector-audio
 import { RouletteSettingsPanel } from '@/components/roulette/roulette-settings-panel';
 import { Button } from '@/components/shared/Button';
 import { isSpinnable, usableItems, type RouletteConfig } from '@/domain/roulette/wheel';
+import { textWidthRatio } from '@/domain/draw/fit-text';
 import { useRouletteSpin, type RouletteResult } from '@/hooks/use-roulette-spin';
 import { cn } from '@/lib/client/cn';
 import {
@@ -39,16 +40,39 @@ const SOUND_MANIFEST_URL = '/api/sound-settings/manifest';
 /** 二重再生を防ぐ記録を分ける鍵。ルーム ID の代わり。 */
 const AUDIO_NAMESPACE = 'roulette';
 
-/**
- * 暗い盤面の上に置く控えめなボタンの色。
- *
- * 共有部品の ghost は明るい管理画面向けで、文字が濃い灰色。
- * そのまま置くと投影の暗い背景に沈んで読めない（実際に見えなかった）。
- */
-const DARK_GHOST_CLASS = 'text-white/85 hover:bg-white/10 active:bg-white/20';
-
 /** 設定を URL とこの端末へ書き戻すまでの待ち時間。打鍵のたびに書かない。 */
 const SAVE_DEBOUNCE_MS = 400;
+
+/** 決まった名前をいちばん大きく出すときの上限。 */
+const RESULT_FONT_MAX = '11rem';
+/** これ以上は小さくしない。ここを下回るなら縮めるより折り返させる。 */
+const RESULT_FONT_MIN = '2.5rem';
+/**
+ * 名前を収める幅（結果の列の幅に対する割合）。
+ *
+ * 文字数からの見積もりは半角の名前で少し小さく出る（実測で列いっぱいに届いた）。
+ * 折り返させないぶんの余白として、ここで 1 割ほど残しておく。
+ */
+const RESULT_FILL_PERCENT = 88;
+
+/**
+ * 決まった名前の大きさ。
+ *
+ * **列の幅いっぱいまで大きくして、はみ出す前に縮める。**
+ * 決め打ちの大きさだと、短い名前は小さすぎ、長い名前は名前の途中で
+ * 折り返してしまう（「渡邉真理／子」のように切れて出た）。
+ *
+ * 文字数から見積もるので、描く前に正しい大きさが決まる
+ * （実寸を測って縮めると、1 フレームだけ大きい字が出て会場で目立つ）。
+ * 幅は結果の列を問い合わせ対象にして `cqw` で取る。
+ */
+function resultFontSize(label: string): string {
+  const ratio = textWidthRatio(label);
+  if (ratio <= 0) {
+    return RESULT_FONT_MAX;
+  }
+  return `clamp(${RESULT_FONT_MIN}, ${(RESULT_FILL_PERCENT / ratio).toFixed(2)}cqw, ${RESULT_FONT_MAX})`;
+}
 
 export function StandaloneRoulette({
   initialConfig,
@@ -275,7 +299,11 @@ export function StandaloneRoulette({
             幅は画面の 3 割。固定幅にすると、狭い画面では盤面を食いつぶし、
             広い画面では決まった名前が入りきらない。
           */}
-          <div className="relative flex w-full shrink-0 flex-col items-center gap-4 landscape:w-[30%] landscape:max-w-[34rem] landscape:min-w-[16rem] landscape:items-stretch">
+          <div
+            // 名前を列の幅へ合わせるため、ここを問い合わせ対象にする。
+            style={{ containerType: 'inline-size' }}
+            className="relative flex w-full shrink-0 flex-col items-center gap-4 landscape:w-[32%] landscape:max-w-[46rem] landscape:min-w-[16rem] landscape:items-stretch"
+          >
             {/*
               光線と輪は**名前のうしろ**に置く。列の真ん中へ置くと
               中心がボタンの側へずれて、どこが決まったのか分かりにくい。
@@ -302,7 +330,9 @@ export function StandaloneRoulette({
                   決まった名前は会場の後方から読めるところまで大きく出す。
                   途中の案内は同じ大きさだと騒がしいので、そちらは控えめにする。
                 */
-                  fontSize: settled ? 'clamp(2rem, 5.2vw, 6rem)' : 'clamp(1.25rem, 2.2vw, 2.25rem)',
+                  fontSize: settled
+                    ? resultFontSize(spin.result?.label ?? '')
+                    : 'clamp(1.25rem, 2.4vw, 2.5rem)',
                   // 背景画像の上でも読めるよう、膜の代わりに字の側へ影を付ける。
                   textShadow: '0 2px 10px rgba(0,0,0,0.85), 0 0 28px rgba(0,0,0,0.65)',
                 }}
@@ -334,10 +364,15 @@ export function StandaloneRoulette({
                 設定は**開いていても出したままにする**。
                 押したら消える作りだったので、閉じ方が分からなくなっていた。
               */}
+              {/*
+                設定と全画面は**枠と地の色があるボタン**にする。
+                文字だけ（ghost）で白く置いていたが、明るい背景画像を敷くと
+                白い文字が飛んで読めなくなった。背景に何が敷かれるかは
+                こちらで決められないので、地の色を持たせておく。
+              */}
               <Button
-                variant="ghost"
+                variant="secondary"
                 size="md"
-                className={DARK_GHOST_CLASS}
                 onClick={() => {
                   setPanelOpen((previous) => !previous);
                 }}
@@ -345,9 +380,8 @@ export function StandaloneRoulette({
                 {panelOpen ? '設定を閉じる' : '設定'}
               </Button>
               <Button
-                variant="ghost"
+                variant="secondary"
                 size="md"
-                className={DARK_GHOST_CLASS}
                 onClick={() => {
                   fullscreen.toggle();
                 }}

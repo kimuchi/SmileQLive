@@ -343,6 +343,32 @@ test.describe('URL だけで回すルーレット', () => {
     await expect(page.getByText('この盤面を保存する')).toBeHidden();
   });
 
+  /**
+   * 明るい背景画像を敷くと、白い文字のボタンが飛んで読めなくなっていた。
+   * 背景に何が敷かれるかはこちらで決められないので、地の色を持たせる。
+   */
+  test('設定・全画面は地の色のあるボタンにする', async ({ page }) => {
+    await page.goto(boardUrl());
+
+    const TRANSPARENT = 'rgba(0, 0, 0, 0)';
+    for (const name of ['設定', '全画面']) {
+      const style = await page.evaluate((label) => {
+        const button = [...document.querySelectorAll('button')].find(
+          (node) => node.textContent?.trim() === label,
+        );
+        if (!button) {
+          return null;
+        }
+        const computed = getComputedStyle(button);
+        return { background: computed.backgroundColor, border: computed.borderTopWidth };
+      }, name);
+
+      expect(style).not.toBeNull();
+      expect(style?.background).not.toBe(TRANSPARENT);
+      expect(Number.parseFloat(style?.border ?? '0')).toBeGreaterThan(0);
+    }
+  });
+
   /** 決まった瞬間は、名前を大きく出して演出を添える。 */
   test('決まったら名前が大きくなり、演出が出る', async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 900 });
@@ -360,7 +386,7 @@ test.describe('URL だけで回すルーレット', () => {
 
     // 案内のときより、決まった名前のほうがはっきり大きい。
     expect(after).toBeGreaterThan(before * 1.8);
-    expect(after).toBeGreaterThan(60);
+    expect(after).toBeGreaterThan(80);
 
     // 光線・輪・紙吹雪・閃光がひとそろい出る。
     const effects = await page.evaluate(() => ({
@@ -373,6 +399,70 @@ test.describe('URL だけで回すルーレット', () => {
     expect(effects.rings).toBeGreaterThan(0);
     expect(effects.confetti).toBeGreaterThan(0);
     expect(effects.flash).toBeGreaterThan(0);
+  });
+
+  /**
+   * 決まった名前は**列の幅いっぱいまで**大きくする。
+   *
+   * 決め打ちの大きさにしていたころは、短い名前が列の端まで届かず
+   * 「結果の文字が小さい」と言われ、長い名前は名前の途中で折り返していた。
+   * 短い名前と長い名前の 2 つの盤面で、両方を押さえる。
+   */
+  test('決まった名前は列の幅に合わせて大きさが変わる', async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 900 });
+
+    /** その盤面を 1 回まわして、決まった名前の大きさと行数を測る。 */
+    async function measure(names: string[]) {
+      await page.goto(boardUrl({ ...BOARD, name: names, ratio: names.map(() => 1) }));
+      await spinAndStop(page);
+
+      // 「どーん」の拡大が残っていると寸法が狂う。演出が収まってから測る。
+      await page.waitForFunction(() => {
+        const node = document.querySelector('[aria-live="polite"]');
+        const running = node?.getAnimations() ?? [];
+        return (
+          running.length > 0 && running.every((animation) => animation.playState === 'finished')
+        );
+      });
+
+      /*
+        枠の高さでは行数を測れない。字が動かないよう下に余白を取ってあるので、
+        1 行でも 2 行ぶんの高さになる。**字そのもの**を測って行box を数える。
+      */
+      return page.evaluate(() => {
+        const node = document.querySelector('[aria-live="polite"]');
+        const column = node?.closest('div[style*="inline-size"]');
+        if (!node || !column) {
+          return null;
+        }
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        return {
+          fontSize: Number.parseFloat(getComputedStyle(node).fontSize),
+          lines: range.getClientRects().length,
+          textWidth: range.getBoundingClientRect().width,
+          columnWidth: column.getBoundingClientRect().width,
+        };
+      });
+    }
+
+    // 短い名前は、会場の後方から読めるところまで大きくする。
+    const short = await measure(['甲', '乙', '丙']);
+    expect(short).not.toBeNull();
+    if (short) {
+      expect(short.fontSize).toBeGreaterThan(120);
+      expect(short.lines).toBe(1);
+    }
+
+    // 長い名前は縮めて 1 行に収める（名前の途中で折り返していた）。
+    const long = await measure(['株式会社スマイル', '有限会社ホゲホゲ', '合同会社フガフガ']);
+    expect(long).not.toBeNull();
+    if (long) {
+      expect(long.lines).toBe(1);
+      expect(long.textWidth).toBeLessThanOrEqual(long.columnWidth);
+      // 長いぶんだけ小さい。同じ大きさで出したら入りきらない。
+      expect(long.fontSize).toBeLessThan(short?.fontSize ?? 0);
+    }
   });
 
   test('何も付けずに開くと 1 から作れる', async ({ page }) => {
