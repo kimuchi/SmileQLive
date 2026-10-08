@@ -1,6 +1,5 @@
 // @vitest-environment node
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type * as SessionModule from '@/lib/auth/session';
 import type * as MediaStorageModule from '@/infrastructure/firebase/storage/media-storage';
 
 vi.mock('server-only', () => ({}));
@@ -8,11 +7,13 @@ vi.mock('server-only', () => ({}));
 /**
  * 効果音の差し替え。
  *
- * ここで固めたいのは次の 4 つ。
+ * ここで固めたいのは次の 5 つ。
  *   1. **デプロイし直さずに差し替えられる。** 保存すればすぐ、投影が読む一覧に載る。
- *   2. 差し替えていない音は同梱の既定音が鳴る。設定が空でも 9 音すべて並ぶ。
+ *   2. 差し替えていない音は同梱の既定音が鳴る。設定が空でも全部の音が並ぶ。
  *   3. 音の形式は**実データ**で見る。拡張子や Content-Type を信用しない。
  *   4. 差し替え直したとき、前の実体を残さない（保存先にゴミが溜まらない）。
+ *   5. **設定はシステム全体で 1 つ。ログインも要らない。**
+ *      司会者ごとに持っていた頃の設定は引き継ぐ（会場でいきなり既定音に戻らない）。
  */
 const EMULATOR = process.env.FIRESTORE_EMULATOR_HOST ?? '127.0.0.1:8080';
 
@@ -27,24 +28,13 @@ async function emulatorReachable(): Promise<boolean> {
 
 const available = await emulatorReachable();
 
-const OWNER = 'sound-owner';
-
-const authUser = {
-  uid: OWNER,
-  id: OWNER,
-  email: 'host@example.com',
-  isAnonymous: false,
-  displayName: '司会',
-  hostedDomain: 'example.com',
-};
-
-vi.mock('@/lib/auth/session', async (importOriginal) => {
-  const actual = await importOriginal<typeof SessionModule>();
-  return {
-    ...actual,
-    requireHostUser: async () => ({ user: authUser, profileId: OWNER }),
-  };
-});
+/**
+ * 設定を置くドキュメント。
+ *
+ * **ログインは要らない。** サービス側が固定の ID を使うので、
+ * ここでは司会者を作らずに差し替えられることまで含めて確かめている。
+ */
+const SYSTEM = 'system';
 
 /**
  * Cloud Storage の代わり。
@@ -125,22 +115,11 @@ describe.skipIf(!available)('効果音の差し替え', () => {
     stored.clear();
     deleted.length = 0;
     const { getDb } = await import('@/infrastructure/firebase/admin');
-    await getDb().collection('soundSettings').doc(OWNER).delete();
+    const existing = await getDb().collection('soundSettings').get();
+    await Promise.all(existing.docs.map((doc) => doc.ref.delete()));
   });
 
-  /** 抽選会のルームを 1 つ置く。投影が読む一覧は所有者から引くため、所有者だけ合っていればよい。 */
-  async function seedRoom(): Promise<string> {
-    const { getDb } = await import('@/infrastructure/firebase/admin');
-    const { Timestamp } = await import('firebase-admin/firestore');
-    const roomId = crypto.randomUUID();
-    await getDb()
-      .collection('rooms')
-      .doc(roomId)
-      .set({ id: roomId, ownerId: OWNER, createdAt: Timestamp.now() });
-    return roomId;
-  }
-
-  it('一度も差し替えていなければ、9音すべてが同梱の音として並ぶ', async () => {
+  it('一度も差し替えていなければ、全部の音が同梱の音として並ぶ', async () => {
     const { listSoundSettings } = await import('@/application/services/sound-service');
     const { SOUND_NAMES } = await import('@/domain/sound/sound-catalog');
 
@@ -153,16 +132,15 @@ describe.skipIf(!available)('効果音の差し替え', () => {
   });
 
   it('差し替えると、投影が読む一覧が同梱の音から配信経路へ入れ替わる', async () => {
-    const roomId = await seedRoom();
     const { buildSoundManifest, uploadSound } =
       await import('@/application/services/sound-service');
 
-    const before = await buildSoundManifest(roomId);
+    const before = await buildSoundManifest();
     expect(before['draw-win']).toBe('/sounds/default/draw-win.wav');
 
     await uploadSound({ name: 'draw-win', file: wavFile('fanfare.wav') });
 
-    const after = await buildSoundManifest(roomId);
+    const after = await buildSoundManifest();
     // デプロイし直していないのに、次に投影を開けば新しい音を読む。
     expect(after['draw-win']).toMatch(/^\/api\/sounds\/[0-9a-f-]{36}\/draw-win\?v=\d+$/);
     // 触っていない音はそのまま。1 音の差し替えが他へ波及しない。
@@ -211,7 +189,6 @@ describe.skipIf(!available)('効果音の差し替え', () => {
   });
 
   it('既定へ戻すと、一覧も実体も同梱の音に戻る', async () => {
-    const roomId = await seedRoom();
     const { buildSoundManifest, resetSound, uploadSound } =
       await import('@/application/services/sound-service');
 
@@ -219,21 +196,103 @@ describe.skipIf(!available)('効果音の差し替え', () => {
     const { sounds } = await resetSound('ranking');
 
     expect(sounds.find((slot) => slot.name === 'ranking')?.source).toBe('default');
-    expect((await buildSoundManifest(roomId)).ranking).toBe('/sounds/default/ranking.wav');
+    expect((await buildSoundManifest()).ranking).toBe('/sounds/default/ranking.wav');
     expect(stored.size).toBe(0);
   });
 
+  /**
+   * 効果音は以前**司会者ごと**に持っていた。
+   *
+   * システム全体の 1 件へまとめた日に、既に入れてあった音が既定へ戻ると、
+   * 会場でいきなり音が変わる（当日まで気づけない類の事故）。
+   * まとめ先が空のときだけ、古い設定を引き継ぐ。
+   */
+  it('司会者ごとに入れてあった音を引き継ぐ', async () => {
+    const { getDb } = await import('@/infrastructure/firebase/admin');
+    const { Timestamp } = await import('firebase-admin/firestore');
+    const { buildSoundManifest, listSoundSettings } =
+      await import('@/application/services/sound-service');
+
+    // まとめる前の形。司会者の uid をドキュメント ID にして置かれていた。
+    await getDb()
+      .collection('soundSettings')
+      .doc('old-host-uid')
+      .set({
+        ownerId: 'old-host-uid',
+        publicId: '11111111-1111-4111-8111-111111111111',
+        sounds: {
+          fanfare: {
+            assetId: 'asset-1',
+            bucket: 'smileq-live-emulator.appspot.com',
+            objectPath: 'sounds/old-host-uid/asset-1.wav',
+            mimeType: 'audio/wav',
+            byteSize: 44,
+            originalName: 'fanfare.wav',
+            updatedAtMs: 1_700_000_000_000,
+          },
+        },
+        updatedAt: Timestamp.now(),
+      });
+
+    const { sounds } = await listSoundSettings();
+    expect(sounds.find((slot) => slot.name === 'fanfare')?.source).toBe('custom');
+
+    // 配信 ID も引き継ぐ。既に開いている投影画面の音の URL がそのまま生きる。
+    expect((await buildSoundManifest()).fanfare).toBe(
+      '/api/sounds/11111111-1111-4111-8111-111111111111/fanfare?v=1700000000000',
+    );
+
+    // 引き継ぎ元は消す。同じ配信 ID の設定が 2 つあると、
+    // あとで差し替えたのに古い方の音が返ることがある。
+    const docs = await getDb().collection('soundSettings').get();
+    expect(docs.docs.map((doc) => doc.id)).toEqual([SYSTEM]);
+  });
+
+  it('引き継ぎは 1 度だけで、そのあとは差し替えを上書きしない', async () => {
+    const { getDb } = await import('@/infrastructure/firebase/admin');
+    const { Timestamp } = await import('firebase-admin/firestore');
+    const { listSoundSettings, uploadSound } =
+      await import('@/application/services/sound-service');
+
+    await getDb()
+      .collection('soundSettings')
+      .doc('old-host-uid')
+      .set({
+        ownerId: 'old-host-uid',
+        publicId: '22222222-2222-4222-8222-222222222222',
+        sounds: {
+          tick: {
+            assetId: 'asset-2',
+            bucket: 'b',
+            objectPath: 'sounds/old-host-uid/asset-2.wav',
+            mimeType: 'audio/wav',
+            byteSize: 44,
+            originalName: 'tick.wav',
+            updatedAtMs: 1,
+          },
+        },
+        updatedAt: Timestamp.now(),
+      });
+
+    await listSoundSettings();
+    await uploadSound({ name: 'finish', file: wavFile('new.wav') });
+
+    const { sounds } = await listSoundSettings();
+    // 引き継いだ音も、そのあと入れた音も、両方そのまま残る。
+    expect(sounds.find((slot) => slot.name === 'tick')?.source).toBe('custom');
+    expect(sounds.find((slot) => slot.name === 'finish')?.source).toBe('custom');
+  });
+
   it('差し替えた音の URL は、差し替えるたびに変わる', async () => {
-    const roomId = await seedRoom();
     const { buildSoundManifest, uploadSound } =
       await import('@/application/services/sound-service');
 
     await uploadSound({ name: 'question-start', file: wavFile('a.wav') });
-    const first = (await buildSoundManifest(roomId))['question-start'];
+    const first = (await buildSoundManifest())['question-start'];
 
     await new Promise((resolve) => setTimeout(resolve, 5));
     await uploadSound({ name: 'question-start', file: wavFile('b.wav') });
-    const second = (await buildSoundManifest(roomId))['question-start'];
+    const second = (await buildSoundManifest())['question-start'];
 
     // 同じ URL のままだと、会の途中で差し替えても古い音がキャッシュから鳴る。
     expect(second).not.toBe(first);

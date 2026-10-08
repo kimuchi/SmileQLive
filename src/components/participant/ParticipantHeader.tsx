@@ -9,6 +9,10 @@ import { formatQuestionProgress } from '@/lib/format';
  *
  * 通信が切れても消さない。進行状況と自分のニックネームを常に見せ、
  * 再接続中であることだけを細い帯で伝える。
+ *
+ * nickname が null なら名前を出さない。投票では名前を聞かずに参加させ、
+ * 表示名はサーバーが割り当てている。本人が名乗っていない名前を
+ * 「あなた」として出すと、別人の画面を見ているのかと迷わせてしまう。
  */
 export function ParticipantHeader({
   quizTitle,
@@ -20,7 +24,8 @@ export function ParticipantHeader({
   status,
 }: {
   quizTitle: string;
-  nickname: string;
+  /** 本人が名乗った名前。名前を聞かないモードでは null。 */
+  nickname: string | null;
   phase: RoomPhase;
   questionPosition: number | null;
   totalQuestions: number;
@@ -48,7 +53,9 @@ export function ParticipantHeader({
           <Badge variant="brand" size="md">
             {ROOM_PHASE_LABELS[phase]}
           </Badge>
-          <span className="max-w-32 truncate text-xs text-slate-600">{nickname}</span>
+          {nickname !== null ? (
+            <span className="max-w-32 truncate text-xs text-slate-600">{nickname}</span>
+          ) : null}
         </div>
       </div>
 

@@ -4,6 +4,7 @@ import type { RankedParticipant } from '@/domain/room/scoring';
 import type { RoomAction, RoomPhase } from '@/domain/room/state-machine';
 import type { RoomMode } from '@/domain/room/room-mode';
 import type { StageDraw } from '@/domain/draw/draw-stage';
+import type { PollResult, PollStage, PollTallyRow } from '@/domain/poll/poll-stage';
 
 /**
  * Snapshot は「現在状態の唯一の復元手段」。
@@ -49,6 +50,18 @@ export type ParticipantSnapshot = SnapshotBase & {
   /** scoreboard フェーズのみ。 */
   leaderboard: RankedParticipant[] | null;
   joinOpen: boolean;
+  /**
+   * 投票の中身。投票のルームでのみ入る。
+   * **票数も順位も入っていない**（投票中に途中経過が見えると、あとの人が引っぱられる）。
+   */
+  poll: PollStage | null;
+  /** 自分が入れた選択肢を選んだ順に。まだなら null。1 端末 1 票なので直せない。 */
+  myVote: string[] | null;
+  /**
+   * 発表済みの順位。会場と同じものを手元でも見せる。
+   * 出していない順位は入っていない。
+   */
+  pollResult: PollResult | null;
 };
 
 /** 投影・司会向け Snapshot。 */
@@ -88,6 +101,18 @@ export type StaffSnapshot = SnapshotBase & {
    * 参加受付を開かないモードと、平文を保存する前の古いルームでは null。
    */
   joinUrl?: string | null;
+  /** 投票の中身。投票のルームでのみ入る。 */
+  poll: PollStage | null;
+  /**
+   * 発表済みの順位。**投影にも司会にも、出した順位までしか渡さない。**
+   * 司会が先の順位を知りたいときは pollTally を見る（そちらは司会だけ）。
+   */
+  pollResult: PollResult | null;
+  /**
+   * 司会のみ: 締め切ったあとの全順位。確かめて直すための表。
+   * 投影担当へは渡さない（会場のスクリーンに映りうるため）。
+   */
+  pollTally?: PollTallyRow[] | null;
   /** 司会のみ: 参加者一覧。 */
   participants?: Array<{
     participantId: string;

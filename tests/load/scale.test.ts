@@ -17,6 +17,7 @@ vi.mock('server-only', () => ({}));
  *   1. 開場直後に全員が二次元コードを読む   → 参加登録が一斉に走る
  *   2. 出題ごとに全員が同時に回答する       → 回答登録が一斉に走る
  *   3. 正解発表でみんなの画面が一斉に更新   → Snapshot 取得が一斉に走る
+ *   4. 「今から投票です」で全員が同時に押す → 投票が一斉に走る
  *
  * Firestore は 1 ドキュメントあたり毎秒 1 回程度の書き込みしか想定していない。
  * トランザクションが同じドキュメントを読んで書くと、同時実行のたびに
@@ -50,6 +51,8 @@ const ROOM_ID = 'room-load';
 const QUESTION_ID = '11111111-1111-4111-8111-111111111111';
 const CHOICE_A = '22222222-2222-4222-8222-222222222222';
 const CHOICE_B = '33333333-3333-4333-8333-333333333333';
+const OPTION_A = '44444444-4444-4444-8444-444444444444';
+const OPTION_B = '55555555-5555-4555-8555-555555555555';
 
 type Outcome = { ok: number; failed: Map<string, number> };
 
@@ -102,13 +105,18 @@ describe.skipIf(!available)(`会場規模の負荷（${PARTICIPANTS}人）`, () 
   }
 
   /** ルーム配下を消してから作り直す。 */
-  async function resetRoom(options: { phase: string; deadlineInMs: number | null }) {
+  async function resetRoom(options: {
+    phase: string;
+    deadlineInMs: number | null;
+    /** 投票のルームにする（投票の負荷を測るとき）。 */
+    poll?: boolean;
+  }) {
     const { Timestamp } = await import('firebase-admin/firestore');
     const store = await db();
     const room = store.collection('rooms').doc(ROOM_ID);
 
     // 前回の実行が残っていると人数が合わなくなる。配下ごと消す。
-    for (const sub of ['members', 'answers', 'events']) {
+    for (const sub of ['members', 'answers', 'events', 'votes']) {
       const docs = await room.collection(sub).limit(2000).get();
       for (let index = 0; index < docs.docs.length; index += 400) {
         const batch = store.batch();
@@ -164,6 +172,31 @@ describe.skipIf(!available)(`会場規模の負荷（${PARTICIPANTS}人）`, () 
       createdAt: now,
       updatedAt: now,
       finishedAt: null,
+      ...(options.poll
+        ? {
+            mode: 'poll',
+            pollSnapshot: {
+              ballotId: 'ballot-load',
+              title: '負荷検証の投票',
+              structure: 'flat',
+              groups: [],
+              options: [
+                { id: OPTION_A, position: 1, label: 'あ', groupId: null, note: null },
+                { id: OPTION_B, position: 2, label: 'い', groupId: null, note: null },
+              ],
+              settings: {
+                rankDepth: 1,
+                points: [1],
+                revealDepth: 3,
+                resultFontSize: 160,
+                backgroundAssetId: null,
+              },
+            },
+            pollTally: null,
+            revealedCount: 0,
+            voteCount: 0,
+          }
+        : {}),
     });
 
     await room.collection('public').doc('state').set({
@@ -254,6 +287,75 @@ describe.skipIf(!available)(`会場規模の負荷（${PARTICIPANTS}人）`, () 
       expect(roomDoc.data()?.participantCount).toBe(PARTICIPANTS);
     },
   );
+
+  it(
+    '「今から投票です」で全員が同時に押しても、1 票も落ちない',
+    { timeout: 300_000 },
+    async () => {
+      /*
+        投票は回答よりも同時性が高い。司会が「今から投票です」と言った直後に
+        全員が押すため、1 台 1 票の書き込みが一気に並ぶ。
+
+        ここで見ているのは「1 票も落ちないこと」。
+        投票の経路をトランザクションにすると、参加登録で起きたのと同じ理由で
+        ここが落ちる（上の registerParticipant の注記を参照）。
+
+        なお**エミュレータは 1 ドキュメントあたりの書き込み制限を再現しません**。
+        ここが通っても本番の混雑を確かめたことにはなりません。
+        表示用の人数（rooms.voteCount）を票と別の書き込みにしているのは、
+        本番の制限（1 ドキュメント毎秒 1 回程度）に対する備えです。
+      */
+      await resetRoom({ phase: 'poll_open', deadlineInMs: null, poll: true });
+      await seedMembers(PARTICIPANTS);
+
+      const { insertVote, bumpVoteCount } = await import(
+        '@/infrastructure/firebase/repositories/poll-repository'
+      );
+
+      const startedAt = performance.now();
+      const results = await Promise.allSettled(
+        Array.from({ length: PARTICIPANTS }, (_, index) =>
+          insertVote(ROOM_ID, `load-user-${index}`, [index % 2 === 0 ? OPTION_A : OPTION_B]).then(
+            () => bumpVoteCount(ROOM_ID),
+          ),
+        ),
+      );
+      const elapsed = performance.now() - startedAt;
+      const outcome = tally(results);
+
+      const store = await db();
+      const stored = await store.collection('rooms').doc(ROOM_ID).collection('votes').count().get();
+
+      console.log(
+        `[投票] ${outcome.ok}/${PARTICIPANTS} 成功 / ${ms(elapsed)} / ` +
+          `1件あたり ${ms(elapsed / PARTICIPANTS)} / 失敗: ${describeFailures(outcome)}`,
+      );
+
+      // 会場では「入れられなかった人」が出た時点で失敗。
+      expect(outcome.ok).toBe(PARTICIPANTS);
+      expect(stored.data().count).toBe(PARTICIPANTS);
+    },
+  );
+
+  it('二度押ししても 1 票しか入らない（同時に送っても）', { timeout: 300_000 }, async () => {
+    await resetRoom({ phase: 'poll_open', deadlineInMs: null, poll: true });
+    await seedMembers(2);
+
+    const { insertVote } = await import('@/infrastructure/firebase/repositories/poll-repository');
+
+    // 同じ端末から同時に 10 回。通ってよいのは 1 回だけ。
+    const results = await Promise.allSettled(
+      Array.from({ length: 10 }, () => insertVote(ROOM_ID, 'load-user-0', [OPTION_A])),
+    );
+    const outcome = tally(results);
+
+    const store = await db();
+    const stored = await store.collection('rooms').doc(ROOM_ID).collection('votes').count().get();
+
+    expect(outcome.ok).toBe(1);
+    expect(stored.data().count).toBe(1);
+    expect(outcome.failed.get('ALREADY_VOTED')).toBe(9);
+  });
 
   it(
     '出題後に全員が同時に回答しても、1 件も落ちない',

@@ -5,22 +5,19 @@
  * こちらでは、その**スプレッドシートから範囲をコピーして貼り付ける**か、
  * CSV ファイルを読み込むことで同じことをできるようにする。
  *
- * 表計算ソフトからのコピーはタブ区切り、書き出したファイルはカンマ区切りになるため、
- * どちらも同じ関数で受け取る。引用符つきの項目（"山田, 太郎" のような）も、
- * 表計算ソフトが書き出す形（RFC 4180）に沿って解く。
+ * 表を読む部分（区切りの判定・引用符の解釈）は domain/text/delimited.ts が持つ。
+ * ここは読んだ表を「名簿」として解釈することだけを受け持つ。
  *
  * ここはドメイン層。ファイル入出力も DOM も触らない。
  */
 
+import { detectDelimiter, parseDelimitedText, type Delimiter } from '@/domain/text/delimited';
 import {
   DRAW_ENTRY_MAX_COUNT,
   DRAW_LABEL_MAX_LENGTH,
   DRAW_WEIGHT_MAX,
   DRAW_WEIGHT_MIN,
 } from '@/domain/draw/draw-list';
-
-/** 区切り文字。貼り付けはタブ、CSV はカンマになる。 */
-export type RosterDelimiter = 'tab' | 'comma';
 
 export type RosterImportRow = {
   /** 取り込む文字（画面に出る名前）。 */
@@ -44,7 +41,7 @@ export type RosterImportResult = {
   weightColumnIndex: number | null;
   /** 重みとして読めなかった件数（1 として扱った）。 */
   weightFallbacks: number;
-  delimiter: RosterDelimiter;
+  delimiter: Delimiter;
   /** 空だったので飛ばした行数。 */
   skippedEmpty: number;
   /** 上限を超えたので取り込まなかった行数。 */
@@ -145,97 +142,6 @@ function pickLabelColumn(headers: readonly string[]): number | null {
       !NON_LABEL_HEADERS.some((hint) => normalizeHeaderCell(cell) === hint.toLowerCase()),
   );
   return firstUsable >= 0 ? firstUsable : null;
-}
-
-/**
- * 区切り文字を見分ける。
- *
- * 表計算ソフトからの貼り付けはタブ区切りなので、タブが 1 つでもあればタブとみなす。
- * （名前にタブが入ることは無い。カンマは名前に入りうるので、タブを優先する。）
- */
-export function detectDelimiter(text: string): RosterDelimiter {
-  return text.includes('\t') ? 'tab' : 'comma';
-}
-
-/**
- * 表形式の文字列を行と列へ解く（RFC 4180 に沿う）。
- *
- * - `"` で囲まれた項目の中では、区切り文字も改行もそのままの文字として扱う
- * - 囲みの中の `""` は 1 つの `"` を表す
- * - 改行は CRLF / LF / CR のどれでも受ける
- */
-export function parseDelimitedText(text: string, delimiter: RosterDelimiter): string[][] {
-  const separator = delimiter === 'tab' ? '\t' : ',';
-  // 先頭の BOM は表計算ソフトの書き出しに付くことがある。項目名を壊すので落とす。
-  const source = text.replace(/^﻿/, '');
-
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = '';
-  let quoted = false;
-  let index = 0;
-
-  const endField = () => {
-    row.push(field);
-    field = '';
-  };
-  const endRow = () => {
-    endField();
-    rows.push(row);
-    row = [];
-  };
-
-  while (index < source.length) {
-    const char = source[index] ?? '';
-
-    if (quoted) {
-      if (char === '"') {
-        if (source[index + 1] === '"') {
-          field += '"';
-          index += 2;
-          continue;
-        }
-        quoted = false;
-        index += 1;
-        continue;
-      }
-      field += char;
-      index += 1;
-      continue;
-    }
-
-    if (char === '"' && field.length === 0) {
-      quoted = true;
-      index += 1;
-      continue;
-    }
-    if (char === separator) {
-      endField();
-      index += 1;
-      continue;
-    }
-    if (char === '\r') {
-      endRow();
-      // CRLF はまとめて 1 つの改行として扱う。
-      index += source[index + 1] === '\n' ? 2 : 1;
-      continue;
-    }
-    if (char === '\n') {
-      endRow();
-      index += 1;
-      continue;
-    }
-
-    field += char;
-    index += 1;
-  }
-
-  // 最後の行に改行が無くても取りこぼさない。
-  if (field.length > 0 || row.length > 0) {
-    endRow();
-  }
-
-  return rows;
 }
 
 /** 前後の空白を落とす。全角空白も空白として扱う（名前の中の空白は残す）。 */

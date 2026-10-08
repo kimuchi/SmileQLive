@@ -5,6 +5,8 @@ import { AudioControls } from '@/components/presentation/AudioControls';
 import { DrawWaitingStage } from '@/components/presentation/DrawWaitingStage';
 import { JoinCodeBadge } from '@/components/presentation/JoinCodeBadge';
 import { PresentAudioHint } from '@/components/presentation/PresentAudioHint';
+import { PollResultStage } from '@/components/presentation/PollResultStage';
+import { PollVotingStage } from '@/components/presentation/PollVotingStage';
 import { QuestionStage } from '@/components/presentation/QuestionStage';
 import { RankingStage } from '@/components/presentation/RankingStage';
 import { RevealStage } from '@/components/presentation/RevealStage';
@@ -33,7 +35,7 @@ import { useLocalDraw } from '@/hooks/use-local-draw';
 import { useRoomSnapshot } from '@/hooks/use-room-snapshot';
 import { cn } from '@/lib/client/cn';
 import {} from '@/domain/draw/draw-stage';
-import { acceptsParticipants, isDrawMode } from '@/domain/room/room-mode';
+import { acceptsParticipants, isDrawMode, isPollMode } from '@/domain/room/room-mode';
 
 /**
  * 会場投影画面。
@@ -279,10 +281,32 @@ export function PresentScreen({ roomId }: { roomId: string }) {
   const phase = snapshot.phase;
   const question = snapshot.currentQuestion;
   const drawMode = isDrawMode(snapshot.mode);
+  const pollMode = isPollMode(snapshot.mode);
+  const poll = snapshot.poll;
 
   let body: ReactNode;
 
-  if (drawMode && draw) {
+  if (pollMode && poll) {
+    /*
+      投票。
+
+      受付中は二次元コードと票数だけ。**どれに何票入ったかは出さない**
+      （そもそもサーバーから届かない）。
+      発表は下の順位から 1 つずつ。出していない順位も届いていない。
+    */
+    body =
+      phase === 'poll_revealing' && snapshot.pollResult !== null ? (
+        <PollResultStage poll={poll} result={snapshot.pollResult} audio={audio} />
+      ) : (
+        <PollVotingStage
+          poll={poll}
+          joinUrl={joinUrl}
+          joinOpen={snapshot.joinOpen}
+          closed={phase === 'poll_closed' || phase === 'finished'}
+          audio={audio}
+        />
+      );
+  } else if (drawMode && draw) {
     // 抽選会・ビンゴ・ルーレット。参加者は来ないので、待機画面も参加 URL を出さない。
     if (!demoActive && phase === 'lobby') {
       body = <DrawWaitingStage draw={draw} />;
@@ -374,21 +398,24 @@ export function PresentScreen({ roomId }: { roomId: string }) {
     snapshot.joinOpen &&
     joinUrl !== null &&
     phase !== 'lobby' &&
-    !drawMode;
+    !drawMode &&
+    // 投票の受付画面はもともと大きな二次元コードを出しているので重ねない。
+    !(pollMode && phase !== 'poll_revealing');
 
   return (
     <>
       <StageFrame
         // デモ中は操作の帯のぶん 16:9 を縮める（盤面の最後の行が隠れないように）。
         bottomInset={demoActive ? CONTROL_BAR_HEIGHT : 0}
-        // 抽選リストに背景画像があれば敷く（GAS 版の背景画像に相当）。
-        backgroundUrl={draw?.background?.url ?? null}
+        // 抽選リスト・投票用紙に背景画像があれば敷く（GAS 版の背景画像に相当）。
+        backgroundUrl={draw?.background?.url ?? poll?.background?.url ?? null}
         aside={showJoinBadge && joinUrl ? <JoinCodeBadge joinUrl={joinUrl} /> : undefined}
         header={
           <StageHeader
             quizTitle={snapshot.quizTitle}
-            // 抽選会・ビンゴ・ルーレットでは表題を出さない（見せたいものだけを出す）。
-            showTitle={!drawMode}
+            // 抽選会・ビンゴ・ルーレットと投票の発表では表題を出さない
+            // （投影に出したいものだけを出す）。
+            showTitle={!drawMode && !pollMode}
             phase={phase}
             questionPosition={snapshot.currentQuestionPosition}
             totalQuestions={snapshot.totalQuestions}

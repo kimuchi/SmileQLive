@@ -86,8 +86,10 @@ test.describe('ルームコード手入力の導線が存在しない', () => {
     // 構成済みなら無効リンクの案内になる。**どちらでも入力欄は出てはいけない。**
     await page.goto(INVALID_JOIN_PATH);
 
+    // 見出しと本文の両方が当たることがあるので、最初の 1 つで見る
+    // （Firebase を構成した環境では「参加できませんでした」と本文が同時に出る）。
     await expect(
-      page.getByText(/参加できませんでした|読み込めませんでした|この参加URLは無効/),
+      page.getByText(/参加できませんでした|読み込めませんでした|この参加URLは無効/).first(),
     ).toBeVisible();
 
     await expectNoRoomCodeInput(page);

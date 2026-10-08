@@ -38,6 +38,7 @@ import { logger } from '@/infrastructure/logging/logger';
 import type { QuizSnapshot } from '@/domain/quiz/quiz-snapshot';
 import type { DrawSnapshot } from '@/domain/draw/draw-list';
 import { roomModeOf, type RoomMode } from '@/domain/room/room-mode';
+import type { PollSnapshot } from '@/domain/poll/ballot';
 import { AppError } from '@/lib/errors/app-error';
 import type { RoomListItem } from '@/types/api';
 import type {
@@ -64,6 +65,8 @@ export type CreateRoomDbInput = {
   quizSnapshot: QuizSnapshot;
   /** 抽選会・ビンゴのときだけ。クイズでは null。 */
   drawSnapshot: DrawSnapshot | null;
+  /** 投票のときだけ。それ以外では null。 */
+  pollSnapshot?: PollSnapshot | null;
   maxParticipants: number;
   /** 参加受付を開けるか。抽選会・ビンゴでは開けない。 */
   joinOpen: boolean;
@@ -112,6 +115,10 @@ export async function createRoom(input: CreateRoomDbInput): Promise<RoomDoc> {
     phase: 'lobby',
     quizSnapshot: input.quizSnapshot,
     drawSnapshot: input.drawSnapshot,
+    pollSnapshot: input.pollSnapshot ?? null,
+    pollTally: null,
+    revealedCount: 0,
+    voteCount: 0,
     drawn: [],
     currentQuestionId: null,
     currentQuestionPosition: null,

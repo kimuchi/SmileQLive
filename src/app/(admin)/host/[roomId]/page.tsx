@@ -8,6 +8,7 @@ import { parseQuizSnapshot } from '@/application/services/quiz-snapshot-codec';
 import {
   ROOM_MODE_DESCRIPTIONS,
   isDrawMode,
+  isPollMode,
   roomModeOf,
   type RoomMode,
 } from '@/domain/room/room-mode';
@@ -22,8 +23,8 @@ import { uuidSchema } from '@/lib/validation/schemas';
  * ルームのスナップショットには正解情報が含まれるため、
  * ここでは ID・番号・回答形式・問題文の要約だけを取り出し、正解はクライアントへ送らない。
  *
- * 抽選会・ビンゴのルームには問題が無い（0 問のクイズが入っている）。
- * 引くものは Snapshot の draw で届くため、ここでは案内文と戻り先だけをモードに合わせる。
+ * 抽選会・ビンゴ・投票のルームには問題が無い（0 問のクイズが入っている）。
+ * 引くもの・投票の中身は Snapshot で届くため、ここでは案内文と戻り先だけをモードに合わせる。
  *
  * Next.js 16 では params が Promise なので await して使う。
  */
@@ -139,10 +140,14 @@ export default async function HostRoomPage({ params }: { params: Promise<{ roomI
             : '参加は二次元コードの読み取りだけで完了します。'
         }
         breadcrumb={
-          // 抽選会・ビンゴはクイズから開かない。戻り先もルーム一覧にする。
+          // 抽選会・ビンゴ・投票はクイズから開かない。戻り先もそれぞれに合わせる。
           isDrawMode(mode) ? (
             <Link href="/admin/rooms" className="text-brand-700 font-bold hover:underline">
               ← ルーム一覧へ戻る
+            </Link>
+          ) : isPollMode(mode) ? (
+            <Link href="/admin/poll-ballots" className="text-brand-700 font-bold hover:underline">
+              ← 投票用紙一覧へ戻る
             </Link>
           ) : (
             <Link href="/admin/quizzes" className="text-brand-700 font-bold hover:underline">

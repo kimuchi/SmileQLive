@@ -99,12 +99,33 @@ export const APP_ERROR_DEFINITIONS = {
   },
   SOUND_NOT_FOUND: { status: 404, message: '効果音が見つかりません' },
 
+  // 投票
+  POLL_BALLOT_NOT_FOUND: { status: 404, message: '投票用紙が見つかりません' },
+  POLL_BALLOT_EMPTY: { status: 409, message: '投票用紙に選択肢がありません' },
+  POLL_NOT_OPEN: { status: 409, message: 'いまは投票を受け付けていません' },
+  /** 1 端末につき 1 票。二度目はここで止まる。 */
+  ALREADY_VOTED: { status: 409, message: 'すでに投票済みです' },
+  POLL_CHOICE_INVALID: { status: 422, message: '選んだ内容を確認してください' },
+  POLL_TALLY_NOT_READY: { status: 409, message: '投票を締め切ってから操作してください' },
+  POLL_REVEAL_DONE: { status: 409, message: 'すべての順位を発表しました' },
+
   // 共通
   VALIDATION_FAILED: { status: 400, message: '入力内容を確認してください' },
   RATE_LIMITED: { status: 429, message: '操作が多すぎます。しばらく待ってから再度お試しください' },
   CAPTCHA_FAILED: { status: 403, message: '本人確認に失敗しました。もう一度お試しください' },
   ORIGIN_NOT_ALLOWED: { status: 403, message: '不正なリクエストです' },
   CONFIGURATION_ERROR: { status: 500, message: 'サーバー設定に問題があります' },
+  /**
+   * Firestore の索引がまだ使えない（作成していない／構築中）。
+   *
+   * 新しい一覧を足したあと、索引を反映してから数分は必ずこうなる。
+   * ここを INTERNAL_ERROR に丸めると「処理に失敗しました」としか出ず、
+   * 待てば直るのか壊れているのかが運営担当者に分からない。
+   */
+  INDEX_NOT_READY: {
+    status: 503,
+    message: 'データベースの準備中です。数分おいてから開き直してください',
+  },
   INTERNAL_ERROR: { status: 500, message: '処理に失敗しました。時間をおいて再度お試しください' },
 } as const satisfies Record<string, { status: number; message: string }>;
 
@@ -138,9 +159,30 @@ export class AppError extends Error {
   }
 }
 
+/**
+ * Firestore の「索引がまだ使えない」か。
+ *
+ * gRPC の FAILED_PRECONDITION (9) は他の理由でも返るため、**本文まで見て**絞る。
+ * 索引を反映した直後は必ずこれになる（構築に数分かかる）。
+ */
+export function isIndexNotReadyError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  const code = (error as { code?: unknown }).code;
+  if (code !== 9 && code !== 'failed-precondition') {
+    return false;
+  }
+  const message = (error as { message?: unknown }).message;
+  return typeof message === 'string' && message.includes('requires an index');
+}
+
 export function toAppError(error: unknown): AppError {
   if (error instanceof AppError) {
     return error;
+  }
+  if (isIndexNotReadyError(error)) {
+    return new AppError('INDEX_NOT_READY', { cause: error });
   }
   return new AppError('INTERNAL_ERROR', { cause: error });
 }

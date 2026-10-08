@@ -23,7 +23,13 @@ export type SoundName =
    */
   | 'draw-spin'
   /** 引いたものが確定した瞬間の音。 */
-  | 'draw-win';
+  | 'draw-win'
+  /** 投票が 1 票入った瞬間の音。会場に「入った」と伝わるだけの短い音。 */
+  | 'poll-vote'
+  /** 順位を出すまでのためる音。出すまでの間ずっと繰り返す。 */
+  | 'poll-drumroll'
+  /** 順位が出た瞬間の音（1 位だけは fanfare を鳴らす）。 */
+  | 'poll-result';
 
 export const SOUND_NAMES = [
   'question-start',
@@ -35,6 +41,9 @@ export const SOUND_NAMES = [
   'finish',
   'draw-spin',
   'draw-win',
+  'poll-vote',
+  'poll-drumroll',
+  'poll-result',
 ] as const satisfies readonly SoundName[];
 
 export function isSoundName(value: string): value is SoundName {
@@ -52,6 +61,9 @@ export const SOUND_LABELS: Record<SoundName, string> = {
   finish: '終了',
   'draw-spin': '抽選を回している音',
   'draw-win': '当選の瞬間',
+  'poll-vote': '投票が入った合図',
+  'poll-drumroll': '投票結果のためる音',
+  'poll-result': '投票結果が出た瞬間',
 };
 
 /** いつ鳴るか。差し替えるときに「どれを変えているか」が分かるようにする。 */
@@ -65,6 +77,9 @@ export const SOUND_DESCRIPTIONS: Record<SoundName, string> = {
   finish: '会を終えた瞬間に 1 回。',
   'draw-spin': '抽選・ルーレットを回している間ずっと繰り返します。',
   'draw-win': '引いたものが確定した瞬間に 1 回。',
+  'poll-vote': '投票が 1 票入るたびに 1 回。短い素材にしてください。',
+  'poll-drumroll': '順位が出るまでの間ずっと繰り返します（ドラムロール向き）。',
+  'poll-result': '順位が出た瞬間に 1 回。1 位だけは「ランキングのファンファーレ」が鳴ります。',
 };
 
 /**
@@ -83,4 +98,7 @@ export const DEFAULT_SOUND_URLS: Record<SoundName, string> = {
   finish: '/sounds/default/finish.wav',
   'draw-spin': '/sounds/default/draw-spin.wav',
   'draw-win': '/sounds/default/draw-win.wav',
+  'poll-vote': '/sounds/default/poll-vote.wav',
+  'poll-drumroll': '/sounds/default/poll-drumroll.wav',
+  'poll-result': '/sounds/default/poll-result.wav',
 };

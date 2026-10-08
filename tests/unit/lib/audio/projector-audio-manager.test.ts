@@ -28,17 +28,14 @@ function collectWarnings() {
   return { messages, onWarning: (message: string) => messages.push(message) };
 }
 
-const MANIFEST = {
-  'question-start': 'question-start.wav',
-  tick: 'tick.wav',
-  'answer-lock': 'answer-lock.wav',
-  'answer-reveal': 'answer-reveal.wav',
-  ranking: 'ranking.wav',
-  fanfare: 'fanfare.wav',
-  finish: 'finish.wav',
-  'draw-spin': 'draw-spin.wav',
-  'draw-win': 'draw-win.wav',
-};
+/**
+ * 音の一覧。**SOUND_NAMES から組み立てる。**
+ * ここへ名前を書き並べると、音を足したときに更新し忘れて
+ * 「足した音だけ読み込めない」状態を検知できなくなる。
+ */
+const MANIFEST: Record<string, string> = Object.fromEntries(
+  SOUND_NAMES.map((name) => [name, `${name}.wav`]),
+);
 
 /** 鳴った回数を数えるための最小限の AudioContext。 */
 function installFakeAudioContext(): {

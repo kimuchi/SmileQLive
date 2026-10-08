@@ -28,6 +28,7 @@ import {
   publicStateRef,
   roomRef,
   staffProgressRef,
+  votesCollection,
 } from '@/infrastructure/firebase/paths';
 import {
   isRecord,
@@ -41,6 +42,8 @@ import { randomInt } from 'node:crypto';
 import { countAnswers } from '@/infrastructure/firebase/repositories/room-repository';
 import { pickWeighted, remainingEntries, type DrawRecord } from '@/domain/draw/draw-list';
 import { acceptsParticipants, removesDrawnEntries, roomModeOf } from '@/domain/room/room-mode';
+import { tallyVotes } from '@/domain/poll/tally';
+import { effectiveRevealDepth } from '@/domain/poll/ballot';
 import { judgeNumberAnswer, toDecimalRule } from '@/domain/answer/number-judgement';
 import { findSnapshotQuestion, type QuizSnapshot } from '@/domain/quiz/quiz-snapshot';
 import type { Question } from '@/domain/quiz/question';
@@ -50,6 +53,7 @@ import {
   actionAllowedInMode,
   canTransition,
   nextPhase,
+  revealComplete,
   EXTEND_SECONDS_MAX,
   EXTEND_SECONDS_MIN,
   type RoomAction,
@@ -200,6 +204,21 @@ async function applyTransition(
   let joinOpen = room.joinOpen;
   // 抽選会・ビンゴで引いた記録。クイズのルームでは触らない。
   let drawn: DrawRecord[] = room.drawn ?? [];
+  /*
+    投票の集計と、発表済みの順位の数。
+
+    集計は**締め切った瞬間に 1 回だけ**作る。以後は司会が直せるが、
+    ここでは触らない（直すのは専用の操作）。
+  */
+  let pollTally = room.pollTally ?? null;
+  let revealedCount = room.revealedCount ?? 0;
+  /*
+    投票した人数の表示値。
+
+    1 票ごとの加算は混雑を避けるため取りこぼしうる（poll-repository の bumpVoteCount）。
+    締め切るときに実際の票を数えて上書きするので、ずれは残らない。
+  */
+  let voteCount = room.voteCount ?? 0;
 
   // 公開してよい回答数。締切・正解発表では必ず正確な値を書く（§3.4）。
   const publicSnapshot = await tx.get(publicStateRef(roomId));
@@ -342,6 +361,66 @@ async function applyTransition(
       joinOpen = false;
       break;
     }
+    // --- 投票 ---
+    case 'open_poll': {
+      // 受付開始。ここから参加者が投票できる。
+      answerDeadlineAt = null;
+      joinOpen = true;
+      break;
+    }
+    case 'close_poll': {
+      /*
+        締切。**この瞬間の投票をすべて数えて凍らせる。**
+        以後は票が増えないので、司会は落ち着いて中身を確かめられる。
+      */
+      answerDeadlineAt = null;
+      const snapshotPoll = room.pollSnapshot;
+      if (!snapshotPoll) {
+        throw new AppError('ROOM_MODE_MISMATCH');
+      }
+      const votes = await tx.get(votesCollection(roomId));
+      pollTally = tallyVotes(
+        snapshotPoll.options.map((option) => option.id),
+        snapshotPoll.settings.rankDepth,
+        votes.docs.map((doc) => doc.data().choices),
+      );
+      voteCount = votes.size;
+      revealedCount = 0;
+      break;
+    }
+    case 'reopen_poll': {
+      // 締切の押し間違いから戻す。凍らせた集計は捨てる
+      // （受付を再開したのに古い集計が残っていると、直したつもりの数字が生き残る）。
+      answerDeadlineAt = null;
+      pollTally = null;
+      revealedCount = 0;
+      break;
+    }
+    case 'start_reveal': {
+      if (!room.pollTally) {
+        throw new AppError('POLL_TALLY_NOT_READY');
+      }
+      answerDeadlineAt = null;
+      // まだ 1 つも出していない状態から始める。
+      revealedCount = 0;
+      break;
+    }
+    case 'reveal_next': {
+      const ballot = room.pollSnapshot;
+      if (!ballot) {
+        throw new AppError('ROOM_MODE_MISMATCH');
+      }
+      // 選択肢の数で頭打ちにする。投影が使う数と同じでないと
+      //「押したのに何も出ない」まま出し切ったことにならない。
+      const depth = effectiveRevealDepth(ballot.settings, ballot.options.length);
+      if (revealComplete(depth, revealedCount)) {
+        throw new AppError('POLL_REVEAL_DONE');
+      }
+      answerDeadlineAt = null;
+      revealedCount += 1;
+      break;
+    }
+
     case 'reopen_room': {
       // 得点・回答・引いた記録は消さない。終了の記録だけを取り消して続きから再開する。
       answerDeadlineAt = null;
@@ -360,6 +439,9 @@ async function applyTransition(
     phase,
     stateVersion: nextVersion,
     drawn,
+    pollTally,
+    revealedCount,
+    voteCount,
     currentQuestionId,
     currentQuestionPosition,
     // 延長はフェーズを変えないので「いつこのフェーズに入ったか」も動かさない。
@@ -859,6 +941,21 @@ function shouldWriteProgress(key: string): boolean {
 /** テスト用にスロットリング状態を破棄する。 */
 export function resetAnswerProgressThrottle(): void {
   lastProgressWriteAt.clear();
+}
+
+/**
+ * 投票が 1 票入ったことを投影・司会へ知らせる。
+ *
+ * 票数そのものはルームの `voteCount` にあるので、ここでは中身を書かず
+ * 「取り直して」とだけ伝える（版番号は上げない。上げると司会の二度押し防止が誤検知する）。
+ * 200 人が一斉に押す場面があるため、回答進捗と同じく間引く。
+ */
+export async function publishVoteProgress(roomId: string): Promise<boolean> {
+  if (!shouldWriteProgress(`votes:${roomId}`)) {
+    return false;
+  }
+  await staffProgressRef(roomId).set({ updatedAt: nowTimestamp() }, { merge: true });
+  return true;
 }
 
 /**

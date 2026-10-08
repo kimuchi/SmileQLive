@@ -16,7 +16,7 @@ import type { SoundSettingsResponse } from '@/types/api';
  * 実際の形式判定（magic bytes）はサーバー側が行う。
  */
 
-const ENDPOINT = '/api/admin/sounds';
+const ENDPOINT = '/api/sound-settings';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;

@@ -15,6 +15,7 @@ import type { JoinRegisterResponse } from '@/types/api';
  *
  * レート制限・CAPTCHA 検証・人数上限・ニックネーム一意性はサービス層と DB が担保する。
  * ここでは重複時に「使える候補名」を details へ添えて、入力し直しの手間を減らす。
+ * 投票のルームは名前を聞かない（本文は空で届く）ので、候補も返さない。
  *
  * details の形: { suggestedNickname: string }
  */
@@ -31,6 +32,10 @@ export const POST = defineRoute<{ joinToken: string }>('join.register', async (r
     return jsonCreated<JoinRegisterResponse>(registered);
   } catch (error) {
     if (!(error instanceof AppError) || error.code !== 'NICKNAME_TAKEN') {
+      throw error;
+    }
+    // 名前を送ってこないルーム（投票）では、示せる候補が無い。
+    if (input.nickname === undefined) {
       throw error;
     }
 

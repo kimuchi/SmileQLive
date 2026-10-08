@@ -226,9 +226,19 @@ describe('クイズ作成', () => {
 });
 
 describe('参加登録', () => {
-  it('ニックネームを必須にする', () => {
+  /**
+   * ニックネームは**任意**。投票のルームでは名前を聞かずに参加させるため、
+   * 画面は本文を空で送ってくる。名前が要るかどうかはモードで決まるので、
+   * ここでは形だけを見て、必須かどうかは join-service が判断する
+   * （tests/integration/poll-join-without-nickname.test.ts）。
+   */
+  it('ニックネームは無くてもよいが、空文字は受け付けない', () => {
     expect(registerParticipantSchema.safeParse({ nickname: '木村' }).success).toBe(true);
-    expect(registerParticipantSchema.safeParse({}).success).toBe(false);
+    expect(registerParticipantSchema.safeParse({}).success).toBe(true);
+    expect(registerParticipantSchema.safeParse({}).data?.nickname).toBeUndefined();
+    // 空欄のまま送られてきたものを「名前を聞かない参加」と取り違えない。
+    expect(registerParticipantSchema.safeParse({ nickname: '' }).success).toBe(false);
+    expect(registerParticipantSchema.safeParse({ nickname: '　 ' }).success).toBe(false);
   });
 
   it('クライアントが role や参加者IDを詐称しても取り込まない', () => {

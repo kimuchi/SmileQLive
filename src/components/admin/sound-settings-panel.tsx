@@ -52,7 +52,7 @@ export function SoundSettingsPanel() {
     let cancelled = false;
     void (async () => {
       try {
-        const response = await apiGet<SoundSettingsResponse>('/api/admin/sounds');
+        const response = await apiGet<SoundSettingsResponse>('/api/sound-settings');
         if (!cancelled) {
           setSlots(response.sounds);
         }
@@ -87,7 +87,7 @@ export function SoundSettingsPanel() {
     setNotice(null);
     setBusyName(name);
     try {
-      const response = await apiDelete<SoundSettingsResponse>(`/api/admin/sounds/${name}`);
+      const response = await apiDelete<SoundSettingsResponse>(`/api/sound-settings/${name}`);
       setSlots(response.sounds);
       setNotice(`「${SOUND_LABELS[name]}」を同梱の音へ戻しました。`);
     } catch (caught) {

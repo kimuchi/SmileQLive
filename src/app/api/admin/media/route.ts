@@ -5,13 +5,14 @@
  *   file        ... 画像本体（JPEG / PNG / WebP。判定は magic bytes でサービス層が行う）
  *   quizId      ... 紐づけるクイズ（所有者だけがアップロードできる）
  *   drawListId  ... 紐づける抽選リスト（quizId とどちらか一方）
+ *   ballotId    ... 紐づける投票用紙（投影の背景。上の 2 つとどれか 1 つ）
  *   usage       ... question / choice / reveal / drawItem / stageBackground（長辺の上限が変わる）
  *   alt         ... 代替テキスト（任意）
  *
  * sharp を使うため Node ランタイムを明示する。
  */
 
-import { uploadImage } from '@/application/services/media-service';
+import { uploadImage, type UploadScope } from '@/application/services/media-service';
 import { IMAGE_ALT_MAX_LENGTH, MAX_UPLOAD_BYTES } from '@/domain/media/image-policy';
 import { AppError } from '@/lib/errors/app-error';
 import { jsonCreated } from '@/lib/errors/api-response';
@@ -32,20 +33,39 @@ const MULTIPART_OVERHEAD_BYTES = 512 * 1024;
 const UPLOAD_RATE_LIMIT = { limit: 60, windowMs: 60_000 } as const;
 
 /**
- * 紐づけ先はクイズか抽選リストのどちらか一方。
- * 両方来たときに片方を黙って無視すると、意図と違う場所へ保存されてしまう。
+ * 紐づけ先はクイズ・抽選リスト・投票用紙のどれか 1 つ。
+ * 2 つ来たときに片方を黙って無視すると、意図と違う場所へ保存されてしまう。
  */
 const uploadFieldsSchema = z
   .object({
     quizId: uuidSchema.optional(),
     drawListId: uuidSchema.optional(),
+    ballotId: uuidSchema.optional(),
     usage: mediaUsageSchema,
     alt: z.string().max(IMAGE_ALT_MAX_LENGTH).optional(),
   })
-  .refine((value) => (value.quizId === undefined) !== (value.drawListId === undefined), {
-    message: 'quizId または drawListId のどちらか一方を指定してください',
-    path: ['quizId'],
-  });
+  .refine(
+    (value) =>
+      [value.quizId, value.drawListId, value.ballotId].filter(
+        (id) => id !== undefined,
+      ).length === 1,
+    {
+      message: 'quizId・drawListId・ballotId のどれか 1 つを指定してください',
+      path: ['quizId'],
+    },
+  );
+
+/** 検証済みのフィールドから紐づけ先を組み立てる。 */
+function uploadScopeOf(fields: z.infer<typeof uploadFieldsSchema>): UploadScope {
+  if (fields.quizId !== undefined) {
+    return { kind: 'quiz', quizId: fields.quizId };
+  }
+  if (fields.ballotId !== undefined) {
+    return { kind: 'pollBallot', ballotId: fields.ballotId };
+  }
+  // refine で 3 つのうち 1 つだけが入っていることを保証済み。
+  return { kind: 'drawList', listId: fields.drawListId as string };
+}
 
 function readTextField(form: FormData, name: string): string | undefined {
   const value = form.get(name);
@@ -93,9 +113,11 @@ export const POST = withRoute<MediaUploadResponse>('admin.media.upload', async (
   const alt = readTextField(form, 'alt');
   const quizId = readTextField(form, 'quizId');
   const drawListId = readTextField(form, 'drawListId');
+  const ballotId = readTextField(form, 'ballotId');
   const fields = parseValue(uploadFieldsSchema, {
     ...(quizId !== undefined && quizId.length > 0 ? { quizId } : {}),
     ...(drawListId !== undefined && drawListId.length > 0 ? { drawListId } : {}),
+    ...(ballotId !== undefined && ballotId.length > 0 ? { ballotId } : {}),
     usage: readTextField(form, 'usage'),
     ...(alt !== undefined && alt.length > 0 ? { alt } : {}),
   });
@@ -103,10 +125,7 @@ export const POST = withRoute<MediaUploadResponse>('admin.media.upload', async (
   // 所有権の確認・形式判定・縮小・WebP 変換はすべてサービス層で行う。
   const result = await uploadImage({
     file,
-    scope:
-      fields.quizId !== undefined
-        ? { kind: 'quiz', quizId: fields.quizId }
-        : { kind: 'drawList', listId: fields.drawListId as string },
+    scope: uploadScopeOf(fields),
     usage: fields.usage,
     ...(fields.alt !== undefined ? { alt: fields.alt } : {}),
   });

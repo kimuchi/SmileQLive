@@ -31,6 +31,7 @@ const MODE_VARIANT: Record<RoomMode, BadgeVariant> = {
   lottery: 'warning',
   bingo: 'success',
   roulette: 'info',
+  poll: 'danger',
 };
 
 const PHASE_LABEL: Record<RoomListItem['phase'], string> = {
@@ -43,6 +44,9 @@ const PHASE_LABEL: Record<RoomListItem['phase'], string> = {
   draw_ready: '抽選待ち',
   draw_spinning: '回転中',
   draw_revealed: '結果表示中',
+  poll_open: '投票受付中',
+  poll_closed: '締切・集計確認',
+  poll_revealing: '結果発表中',
   finished: '終了',
 };
 
@@ -56,6 +60,9 @@ const PHASE_VARIANT: Record<RoomListItem['phase'], BadgeVariant> = {
   draw_ready: 'info',
   draw_spinning: 'brand',
   draw_revealed: 'success',
+  poll_open: 'brand',
+  poll_closed: 'warning',
+  poll_revealing: 'success',
   finished: 'neutral',
 };
 
@@ -91,7 +98,7 @@ export function RoomListPanel() {
     return (
       <Card title="ルームがありません">
         <p className="text-sm text-slate-600">
-          「ルームを作成する」から、クイズ・抽選会・ビンゴ・ルーレットのルームを作れます。
+          「ルームを作成する」から、クイズ・抽選会・ビンゴ・ルーレット・投票のルームを作れます。
         </p>
         <div className="mt-4">
           <Link href="/admin/rooms/new" className="text-brand-700 font-bold hover:underline">

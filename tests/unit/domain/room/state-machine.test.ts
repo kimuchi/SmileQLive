@@ -35,7 +35,7 @@ import { ROOM_MODES, type RoomMode } from '@/domain/room/room-mode';
  * （クイズのルームで抽選の操作が出ない、など）。
  */
 const EXPECTED_ACTIONS: Record<RoomPhase, RoomAction[]> = {
-  lobby: ['show_question', 'open_draw', 'finish_room'],
+  lobby: ['show_question', 'open_draw', 'open_poll', 'finish_room'],
   question_ready: ['open_question'],
   question_open: ['lock_question', 'extend_deadline'],
   question_locked: ['reopen_question', 'reveal_answer', 'finish_room'],
@@ -52,6 +52,12 @@ const EXPECTED_ACTIONS: Record<RoomPhase, RoomAction[]> = {
     'reset_draws',
     'finish_room',
   ],
+  // 投票の受付中。締め切るか、そのまま終わるか。
+  poll_open: ['close_poll', 'finish_room'],
+  // 締切後。ここで票数を確かめ、直してから発表へ進む。
+  // 受付へ戻せるのはこのフェーズだけ（発表を始めたら戻れない）。
+  poll_closed: ['reopen_poll', 'start_reveal', 'finish_room'],
+  poll_revealing: ['reveal_next', 'finish_room'],
   finished: ['reopen_room'],
 };
 
@@ -70,6 +76,12 @@ const EXPECTED_NEXT_PHASE: Record<RoomAction, RoomPhase> = {
   continue_draw: 'draw_ready',
   undo_draw: 'draw_ready',
   reset_draws: 'draw_ready',
+  open_poll: 'poll_open',
+  close_poll: 'poll_closed',
+  reopen_poll: 'poll_open',
+  start_reveal: 'poll_revealing',
+  // 順位を 1 つ出してもフェーズは変わらない。出した数だけが増える。
+  reveal_next: 'poll_revealing',
   finish_room: 'finished',
   // 出題前に終了した場合の戻り先。出題済みなら scoreboard（別途検証）。
   reopen_room: 'lobby',
@@ -200,6 +212,7 @@ const MODE_ACTIONS: Record<RoomMode, RoomAction[]> = {
     'finish_room',
     'reopen_room',
   ],
+  poll: ['open_poll', 'close_poll', 'reopen_poll', 'start_reveal', 'reveal_next', 'finish_room', 'reopen_room'],
 };
 
 function expectedFor(phase: RoomPhase, mode: RoomMode): RoomAction[] {
@@ -219,6 +232,10 @@ describe('availableActions', () => {
     expect(availableActions(phase, 'bingo')).toEqual(expectedFor(phase, 'bingo'));
   });
 
+  it.each(ROOM_PHASES)('%s のボタン一覧（投票）', (phase) => {
+    expect(availableActions(phase, 'poll')).toEqual(expectedFor(phase, 'poll'));
+  });
+
   it('モードを省略したらクイズとして扱う（既存の呼び出しを変えない）', () => {
     for (const phase of ROOM_PHASES) {
       expect(availableActions(phase)).toEqual(availableActions(phase, 'quiz'));
@@ -233,6 +250,34 @@ describe('availableActions', () => {
       expect(actions).not.toContain('open_draw');
       expect(actions).not.toContain('reset_draws');
     }
+  });
+
+  it('投票のルームに抽選・クイズの操作は出ない', () => {
+    for (const phase of ROOM_PHASES) {
+      const actions = availableActions(phase, 'poll');
+      expect(actions).not.toContain('draw_next');
+      expect(actions).not.toContain('open_draw');
+      expect(actions).not.toContain('show_question');
+    }
+  });
+
+  it('投票の操作は投票のルームにしか出ない', () => {
+    for (const mode of ['quiz', 'lottery', 'bingo', 'roulette'] as const) {
+      for (const phase of ROOM_PHASES) {
+        const actions = availableActions(phase, mode);
+        expect(actions).not.toContain('open_poll');
+        expect(actions).not.toContain('close_poll');
+        expect(actions).not.toContain('start_reveal');
+        expect(actions).not.toContain('reveal_next');
+      }
+    }
+  });
+
+  it('結果を出しはじめたら投票受付へは戻せない', () => {
+    // 結果を見てから投票できてしまう。締切直後だけが戻り道。
+    expect(availableActions('poll_closed', 'poll')).toContain('reopen_poll');
+    expect(availableActions('poll_revealing', 'poll')).not.toContain('reopen_poll');
+    expect(() => nextPhase('poll_revealing', 'reopen_poll')).toThrow(/INVALID_TRANSITION/);
   });
 
   it('抽選会・ビンゴのルームにクイズの操作は出ない', () => {

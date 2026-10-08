@@ -14,6 +14,11 @@
 | ranking | `default/ranking.wav` | 自家生成（同上） | 同上 | 可 | 不要 |
 | fanfare | `default/fanfare.wav` | 自家生成（同上） | 同上 | 可 | 不要 |
 | finish | `default/finish.wav` | 自家生成（同上） | 同上 | 可 | 不要 |
+| draw-spin | `default/draw-spin.wav` | 自家生成（同上） | 同上 | 可 | 不要 |
+| draw-win | `default/draw-win.wav` | 自家生成（同上） | 同上 | 可 | 不要 |
+| poll-vote | `default/poll-vote.wav` | 自家生成（同上） | 同上 | 可 | 不要 |
+| poll-drumroll | `default/poll-drumroll.wav` | 自家生成（同上） | 同上 | 可 | 不要 |
+| poll-result | `default/poll-result.wav` | 自家生成（同上） | 同上 | 可 | 不要 |
 
 ## 外部の音源へ差し替えた場合
 
@@ -31,6 +36,11 @@
 | ranking | 未使用 | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
 | fanfare | 未使用 | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
 | finish | 未使用 | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
+| draw-spin | 未使用 | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
+| draw-win | 未使用 | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
+| poll-vote | 未使用 | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
+| poll-drumroll | 未使用 | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
+| poll-result | 未使用 | 未記入 | 未記入 | 未確認 | 不要 / 必要（記載文言: ） | YYYY-MM-DD | 未記入 |
 
 ## 確認する項目
 

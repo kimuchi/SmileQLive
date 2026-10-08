@@ -1,0 +1,542 @@
+import { expect, test, type Page } from '@playwright/test';
+
+/**
+ * URL だけで回すルーレット（`/roulette`）。
+ *
+ * ここで守りたいのは 6 つ。
+ *   1. **ログインが要らない。** 会議の司会決めのように、その場で開いて回すためのもの。
+ *      ログイン画面へ飛ばされたらこの機能は成立しない。
+ *   2. 配布されているルーレットと同じ形の URL をそのまま開ける。
+ *   3. **スタートで回り続け、ストップで止まる。** 勝手に止まらない
+ *      （司会が「そろそろ止めます」の間を作れなくなる）。
+ *   4. 速さと止まるまでの時間を**別々に**決められる。
+ *   5. 効果音の案内やテストのボタンを出さない。押さなくても鳴る。
+ *   6. 何も付けずに開いたら 1 から作れる。背景画像も設定できる。
+ *   7. **触った設定が残る。** 読み込み直しても消えない。
+ *
+ * Firebase は要らない（サーバーへ何も送らないため）。
+ * 効果音の一覧だけはサーバーへ取りに行くが、取れなくても画面は動く。
+ */
+
+/** 回り方の見本。止まるまでを短くして、テストが長く待たないようにする。 */
+const BOARD = {
+  name: ['山田 太郎', '田中 花子', '鈴木 一郎'],
+  ratio: [1, 3, 2],
+  show_characters_value: true,
+  decel_value: 0.4,
+  speed_value: 720,
+  stop_seconds: 1,
+};
+
+function boardUrl(board: unknown = BOARD): string {
+  return `/roulette?json=${encodeURIComponent(JSON.stringify(board))}`;
+}
+
+/** スタート → ストップ → 止まるまで。 */
+async function spinAndStop(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'スタート' }).click();
+  await expect(page.getByText('まわっています…')).toBeVisible();
+
+  // ストップを押すまで止まらない。押してから決めた秒数で止まる。
+  await page.getByRole('button', { name: 'ストップ' }).click();
+  await expect(page.getByText('とまります…')).toBeHidden({ timeout: 30_000 });
+}
+
+/** 扇に書かれている名前。SVG の文字は innerText で取れないので中身を直接読む。 */
+async function segmentLabels(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('svg text')].map((node) => node.textContent ?? ''),
+  );
+}
+
+test.describe('URL だけで回すルーレット', () => {
+  test('ログイン無しで開けて、URL の盤面がそのまま出る', async ({ page }) => {
+    await page.goto(boardUrl());
+
+    // ログイン画面へ飛ばされない。
+    await expect(page).toHaveURL(/\/roulette\?/);
+    await expect(page.getByRole('button', { name: 'スタート' })).toBeVisible();
+
+    expect(await segmentLabels(page)).toEqual(['山田 太郎', '田中 花子', '鈴木 一郎']);
+  });
+
+  test('スタートで回り続け、ストップで止まって名前が出る', async ({ page }) => {
+    await page.goto(boardUrl());
+
+    await page.getByRole('button', { name: 'スタート' }).click();
+    await expect(page.getByText('まわっています…')).toBeVisible();
+
+    // **押すまで止まらない。** ここが自動で止まると、司会が間を作れない。
+    await page.waitForTimeout(2500);
+    await expect(page.getByText('まわっています…')).toBeVisible();
+
+    await page.getByRole('button', { name: 'ストップ' }).click();
+    await expect(page.getByText('とまります…')).toBeHidden({ timeout: 30_000 });
+
+    // 止まった扇の名前が出る。盤面に無い名前は出ない。
+    const result = (await page.locator('[aria-live="polite"]').innerText()).trim();
+    expect(BOARD.name).toContain(result);
+
+    await expect(page.getByRole('button', { name: 'もう一度まわす' })).toBeVisible();
+  });
+
+  test('回していないときはストップを押せない', async ({ page }) => {
+    await page.goto(boardUrl());
+
+    await expect(page.getByRole('button', { name: 'ストップ' })).toBeDisabled();
+
+    await page.getByRole('button', { name: 'スタート' }).click();
+    await expect(page.getByRole('button', { name: 'ストップ' })).toBeEnabled();
+    // 回している間はスタートを押し直せない。
+    await expect(page.getByRole('button', { name: 'スタート' })).toBeDisabled();
+
+    await page.getByRole('button', { name: 'ストップ' }).click();
+    await expect(page.getByText('とまります…')).toBeHidden({ timeout: 30_000 });
+    await expect(page.getByRole('button', { name: 'ストップ' })).toBeDisabled();
+  });
+
+  test('リセットで最初へ戻る', async ({ page }) => {
+    await page.goto(boardUrl());
+
+    await spinAndStop(page);
+    await page.getByRole('button', { name: 'リセット' }).click();
+
+    await expect(page.getByText('スタートを押してください')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'スタート', exact: true })).toBeVisible();
+  });
+
+  /**
+   * 会場で「効果音を有効にする」を探させない。
+   * 音はブラウザの決まりで最初の操作まで鳴らせないが、スタートを押した
+   * その 1 押しで解除が済むので、案内の帯もテストのボタンも出さない。
+   */
+  test('効果音の案内やテストのボタンを出さない', async ({ page }) => {
+    await page.goto(boardUrl());
+
+    await expect(page.getByText('効果音はまだ鳴りません')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /効果音を有効にする/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /音を鳴らして確認/ })).toHaveCount(0);
+
+    // 案内が無くても、ボタンは押せて回る。
+    await page.getByRole('button', { name: 'スタート' }).click();
+    await expect(page.getByText('まわっています…')).toBeVisible();
+  });
+
+  test('速さと止まるまでの時間を別々に決められる', async ({ page }) => {
+    await page.goto(boardUrl());
+    await page.getByRole('button', { name: '設定' }).click();
+
+    await page.getByLabel('回る速さ').fill('1080');
+    await expect(page.getByText(/1 秒に/)).toContainText('3.0');
+    // 速さを変えても止まるまでの時間はそのまま。
+    await expect(page.getByText(/秒かけて止まります/)).toContainText('1');
+
+    await page.getByLabel('止まるまでの時間').fill('4');
+    await expect(page.getByText(/秒かけて止まります/)).toContainText('4');
+    await expect(page.getByText(/1 秒に/)).toContainText('3.0');
+
+    // 書き出す URL にも両方入る。
+    const shareUrl = await page.getByLabel('この盤面のURL').inputValue();
+    const json = JSON.parse(new URL(shareUrl).searchParams.get('json') ?? '{}') as {
+      speed_value: number;
+      stop_seconds: number;
+    };
+    expect(json.speed_value).toBe(1080);
+    expect(json.stop_seconds).toBe(4);
+  });
+
+  test('背景画像を設定できる', async ({ page }) => {
+    // 実際に画像を取りに行かせない（外部へ出ない）。
+    await page.route('**/bg.png', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        // 1x1 の透明 PNG。
+        body: Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+          'base64',
+        ),
+      }),
+    );
+
+    await page.goto(boardUrl());
+    await page.getByRole('button', { name: '設定' }).click();
+
+    await page.getByLabel('画像の URL').fill('https://example.com/bg.png');
+    await page.getByRole('button', { name: 'この URL を使う' }).click();
+
+    // 盤面の裏に敷かれる（設定欄の下見とは別物なので、飾りの側だけを見る）。
+    const backdrop = page.locator('img[aria-hidden="true"][src="https://example.com/bg.png"]');
+    await expect(backdrop).toBeVisible();
+
+    // URL にも載って、開き直すと背景が戻る。
+    const shareUrl = await page.getByLabel('この盤面のURL').inputValue();
+    await page.goto(shareUrl);
+    await expect(backdrop).toBeVisible();
+  });
+
+  /**
+   * 投影は横長。**盤面は画面の高さいっぱいに出し、結果とボタンはその右**。
+   * 上下に積むと、会場から見て盤面が小さくなってしまう。
+   */
+  test('横長では盤面が画面の高さいっぱいに出て、操作は右に並ぶ', async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 900 });
+    await page.goto(boardUrl());
+    await page.waitForSelector('text=スタート');
+
+    const box = await page.evaluate(() => {
+      const svg = document.querySelector('svg[aria-label^="ルーレット"]');
+      const wheel = svg?.getBoundingClientRect();
+      const start = [...document.querySelectorAll('button')]
+        .find((node) => node.textContent?.includes('スタート'))
+        ?.getBoundingClientRect();
+      return wheel && start
+        ? {
+            wheel: { w: wheel.width, h: wheel.height, right: wheel.right },
+            startLeft: start.left,
+            viewport: { w: window.innerWidth, h: window.innerHeight },
+            scrollH: document.documentElement.scrollHeight,
+          }
+        : null;
+    });
+
+    expect(box).not.toBeNull();
+    if (!box) {
+      return;
+    }
+
+    // 正方形のまま、画面の高さのほとんどを使う。
+    expect(Math.abs(box.wheel.w - box.wheel.h)).toBeLessThan(2);
+    expect(box.wheel.h).toBeGreaterThan(box.viewport.h * 0.9);
+
+    // 操作は盤面の右。下に積んでいない。
+    expect(box.startLeft).toBeGreaterThanOrEqual(box.wheel.right);
+
+    // 縦にはみ出して、盤面の下が切れていない。
+    expect(box.scrollH).toBeLessThanOrEqual(box.viewport.h + 1);
+  });
+
+  test('縦長では盤面の下に操作が並ぶ', async ({ page }) => {
+    await page.setViewportSize({ width: 420, height: 900 });
+    await page.goto(boardUrl());
+    await page.waitForSelector('text=スタート');
+
+    const box = await page.evaluate(() => {
+      const wheel = document
+        .querySelector('svg[aria-label^="ルーレット"]')
+        ?.getBoundingClientRect();
+      const start = [...document.querySelectorAll('button')]
+        .find((node) => node.textContent?.includes('スタート'))
+        ?.getBoundingClientRect();
+      return wheel && start ? { wheelBottom: wheel.bottom, startTop: start.top } : null;
+    });
+
+    expect(box).not.toBeNull();
+    expect(box?.startTop).toBeGreaterThanOrEqual(box?.wheelBottom ?? 0);
+  });
+
+  test('背景に暗い膜を重ねない', async ({ page }) => {
+    await page.route('**/bg.png', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        body: Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+          'base64',
+        ),
+      }),
+    );
+
+    await page.goto(boardUrl({ ...BOARD, background_url: 'https://example.com/bg.png' }));
+    await page.waitForSelector('text=スタート');
+
+    // 背景画像の上に、全面を覆う半透明の板を置いていない。
+    const veils = await page.evaluate(() => {
+      const img = document.querySelector('img[aria-hidden="true"]');
+      const parent = img?.parentElement;
+      if (!parent) {
+        return -1;
+      }
+      return [...parent.children].filter((node) => {
+        if (node === img) {
+          return false;
+        }
+        const style = getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        return (
+          style.position === 'absolute' &&
+          rect.width >= window.innerWidth * 0.9 &&
+          style.backgroundColor !== 'rgba(0, 0, 0, 0)'
+        );
+      }).length;
+    });
+    expect(veils).toBe(0);
+  });
+
+  /**
+   * **読み込み直しても設定が消えないこと。**
+   *
+   * 盤面の置き場所は URL なので、触ったらアドレス欄も合わせる。
+   * ここが抜けていて、会場で作った内容が再読込で消えていた。
+   */
+  test('触った設定が読み込み直しても残る', async ({ page }) => {
+    await page.goto('/roulette');
+
+    await page.getByLabel('1番目の項目名').fill('あたり');
+    await page.getByLabel('2番目の項目名').fill('はずれ');
+    await page.getByLabel('2番目の重み').fill('4');
+    await page.getByLabel('止まるまでの時間').fill('7');
+
+    // アドレス欄が盤面を持つようになる（少し待ってからまとめて書く）。
+    await expect(page).toHaveURL(/json=/, { timeout: 5_000 });
+
+    await page.reload();
+    await page.waitForSelector('text=スタート');
+
+    expect(await segmentLabels(page)).toEqual(['あたり', 'はずれ']);
+    await page.getByRole('button', { name: '設定', exact: true }).click();
+    await expect(page.getByLabel('2番目の重み')).toHaveValue('4');
+    await expect(page.getByLabel('止まるまでの時間')).toHaveValue('7');
+  });
+
+  test('URL を持たずに開くと前回の内容が出る', async ({ page }) => {
+    await page.goto('/roulette');
+    await page.getByLabel('1番目の項目名').fill('きのう');
+    await page.getByLabel('2番目の項目名').fill('きょう');
+    await expect(page).toHaveURL(/json=/, { timeout: 5_000 });
+
+    // URL を捨てて素の /roulette を開く。
+    await page.goto('/roulette');
+    await page.waitForSelector('text=スタート');
+
+    expect(await segmentLabels(page)).toEqual(['きのう', 'きょう']);
+    // 黙って出さない。何が起きたかを伝える。
+    await expect(page.getByText(/前回の内容/)).toBeVisible();
+  });
+
+  test('人から渡された URL のほうが、この端末の控えより優先される', async ({ page }) => {
+    await page.goto('/roulette');
+    await page.getByLabel('1番目の項目名').fill('わたしの');
+    await page.getByLabel('2番目の項目名').fill('ばんめん');
+    await expect(page).toHaveURL(/json=/, { timeout: 5_000 });
+
+    await page.goto(boardUrl());
+    await page.waitForSelector('text=スタート');
+
+    // 控えで上書きしない。渡された URL がそのまま出る。
+    expect(await segmentLabels(page)).toEqual(BOARD.name);
+  });
+
+  /**
+   * 設定ボタンは押しても消えない。
+   * 消える作りだったので、開いたあとに閉じ方が分からなくなっていた。
+   */
+  test('設定を開いてもボタンが消えない', async ({ page }) => {
+    await page.goto(boardUrl());
+
+    await page.getByRole('button', { name: '設定', exact: true }).click();
+    await expect(page.getByRole('button', { name: '設定を閉じる' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '全画面' })).toBeVisible();
+
+    await page.getByRole('button', { name: '設定を閉じる' }).click();
+    await expect(page.getByRole('button', { name: '設定', exact: true })).toBeVisible();
+    await expect(page.getByText('この盤面を保存する')).toBeHidden();
+  });
+
+  /**
+   * 明るい背景画像を敷くと、白い文字のボタンが飛んで読めなくなっていた。
+   * 背景に何が敷かれるかはこちらで決められないので、地の色を持たせる。
+   */
+  test('設定・全画面は地の色のあるボタンにする', async ({ page }) => {
+    await page.goto(boardUrl());
+
+    const TRANSPARENT = 'rgba(0, 0, 0, 0)';
+    for (const name of ['設定', '全画面']) {
+      const style = await page.evaluate((label) => {
+        const button = [...document.querySelectorAll('button')].find(
+          (node) => node.textContent?.trim() === label,
+        );
+        if (!button) {
+          return null;
+        }
+        const computed = getComputedStyle(button);
+        return { background: computed.backgroundColor, border: computed.borderTopWidth };
+      }, name);
+
+      expect(style).not.toBeNull();
+      expect(style?.background).not.toBe(TRANSPARENT);
+      expect(Number.parseFloat(style?.border ?? '0')).toBeGreaterThan(0);
+    }
+  });
+
+  /** 決まった瞬間は、名前を大きく出して演出を添える。 */
+  test('決まったら名前が大きくなり、演出が出る', async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 900 });
+    await page.goto(boardUrl());
+
+    const fontSize = async () =>
+      page.evaluate(() => {
+        const node = document.querySelector('[aria-live="polite"]');
+        return node ? Number.parseFloat(getComputedStyle(node).fontSize) : 0;
+      });
+
+    const before = await fontSize();
+    await spinAndStop(page);
+    const after = await fontSize();
+
+    // 案内のときより、決まった名前のほうがはっきり大きい。
+    expect(after).toBeGreaterThan(before * 1.8);
+    expect(after).toBeGreaterThan(80);
+
+    // 光線・輪・紙吹雪・閃光がひとそろい出る。
+    const effects = await page.evaluate(() => ({
+      rays: document.querySelectorAll('.stage-rays').length,
+      rings: document.querySelectorAll('.stage-ring').length,
+      confetti: document.querySelectorAll('.stage-confetti').length,
+      flash: document.querySelectorAll('.stage-flash').length,
+    }));
+    expect(effects.rays).toBeGreaterThan(0);
+    expect(effects.rings).toBeGreaterThan(0);
+    expect(effects.confetti).toBeGreaterThan(0);
+    expect(effects.flash).toBeGreaterThan(0);
+  });
+
+  /**
+   * 決まった名前は**列の幅いっぱいまで**大きくする。
+   *
+   * 決め打ちの大きさにしていたころは、短い名前が列の端まで届かず
+   * 「結果の文字が小さい」と言われ、長い名前は名前の途中で折り返していた。
+   * 短い名前と長い名前の 2 つの盤面で、両方を押さえる。
+   */
+  test('決まった名前は列の幅に合わせて大きさが変わる', async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 900 });
+
+    /** その盤面を 1 回まわして、決まった名前の大きさと行数を測る。 */
+    async function measure(names: string[]) {
+      await page.goto(boardUrl({ ...BOARD, name: names, ratio: names.map(() => 1) }));
+      await spinAndStop(page);
+
+      // 「どーん」の拡大が残っていると寸法が狂う。演出が収まってから測る。
+      await page.waitForFunction(() => {
+        const node = document.querySelector('[aria-live="polite"]');
+        const running = node?.getAnimations() ?? [];
+        return (
+          running.length > 0 && running.every((animation) => animation.playState === 'finished')
+        );
+      });
+
+      /*
+        枠の高さでは行数を測れない。字が動かないよう下に余白を取ってあるので、
+        1 行でも 2 行ぶんの高さになる。**字そのもの**を測って行box を数える。
+      */
+      return page.evaluate(() => {
+        const node = document.querySelector('[aria-live="polite"]');
+        const column = node?.closest('div[style*="inline-size"]');
+        if (!node || !column) {
+          return null;
+        }
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        return {
+          fontSize: Number.parseFloat(getComputedStyle(node).fontSize),
+          lines: range.getClientRects().length,
+          textWidth: range.getBoundingClientRect().width,
+          columnWidth: column.getBoundingClientRect().width,
+        };
+      });
+    }
+
+    // 短い名前は、会場の後方から読めるところまで大きくする。
+    const short = await measure(['甲', '乙', '丙']);
+    expect(short).not.toBeNull();
+    if (short) {
+      expect(short.fontSize).toBeGreaterThan(120);
+      expect(short.lines).toBe(1);
+    }
+
+    // 長い名前は縮めて 1 行に収める（名前の途中で折り返していた）。
+    const long = await measure(['株式会社スマイル', '有限会社ホゲホゲ', '合同会社フガフガ']);
+    expect(long).not.toBeNull();
+    if (long) {
+      expect(long.lines).toBe(1);
+      expect(long.textWidth).toBeLessThanOrEqual(long.columnWidth);
+      // 長いぶんだけ小さい。同じ大きさで出したら入りきらない。
+      expect(long.fontSize).toBeLessThan(short?.fontSize ?? 0);
+    }
+  });
+
+  test('何も付けずに開くと 1 から作れる', async ({ page }) => {
+    await page.goto('/roulette');
+
+    // 空の盤面では設定欄が開いた状態で始まる。
+    await expect(page.getByText('この盤面を保存する')).toBeVisible();
+    // 項目が 2 つ無いうちは回せない。
+    await expect(page.getByRole('button', { name: 'スタート' })).toBeDisabled();
+
+    await page.getByLabel('1番目の項目名').fill('あたり');
+    await page.getByLabel('2番目の項目名').fill('はずれ');
+    await page.getByLabel('2番目の重み').fill('4');
+
+    await expect(page.getByRole('button', { name: 'スタート' })).toBeEnabled();
+    expect(await segmentLabels(page)).toEqual(['あたり', 'はずれ']);
+  });
+
+  test('貼り付けで項目を入れられる', async ({ page }) => {
+    await page.goto('/roulette');
+
+    await page.getByRole('button', { name: '貼り付け・CSVで入れる' }).click();
+    await page.getByLabel('貼り付け').fill('項目,重み\nA,1\nB,2\n,9');
+
+    // 取り込む前に必ず下見が出る。飛ばした行も知らせる。
+    await expect(page.getByText('2件を読み込みます')).toBeVisible();
+    await expect(page.getByText(/項目名が空の行 1 件は飛ばしました/)).toBeVisible();
+
+    await page.getByRole('button', { name: 'この内容で取り込む' }).click();
+
+    expect(await segmentLabels(page)).toEqual(['A', 'B']);
+    await expect(page.getByLabel('2番目の重み')).toHaveValue('2');
+  });
+
+  test('書き出した URL を開き直すと同じ盤面になる', async ({ page }) => {
+    await page.goto(boardUrl());
+    await page.getByRole('button', { name: '設定' }).click();
+
+    const shareUrl = await page.getByLabel('この盤面のURL').inputValue();
+    // 配布サイトと同じ形。あちらの URL もこちらの URL も同じ鍵で運ぶ。
+    const json = new URL(shareUrl).searchParams.get('json') ?? '';
+    expect(JSON.parse(json)).toMatchObject({
+      name: BOARD.name,
+      ratio: BOARD.ratio,
+      show_characters_value: true,
+      speed_value: BOARD.speed_value,
+      stop_seconds: BOARD.stop_seconds,
+    });
+
+    await page.goto(shareUrl);
+    expect(await segmentLabels(page)).toEqual(BOARD.name);
+  });
+
+  test('URL が壊れていても白い画面にしない', async ({ page }) => {
+    await page.goto('/roulette?json=%7Bbroken');
+
+    await expect(page.getByText(/読み取れませんでした/)).toBeVisible();
+    // その場で作り直せる。
+    await expect(page.getByLabel('1番目の項目名')).toBeVisible();
+  });
+});
+
+test.describe('効果音の設定', () => {
+  test('ログイン無しで開ける', async ({ page }) => {
+    await page.goto('/sounds');
+
+    await expect(page).toHaveURL(/\/sounds$/);
+    await expect(page.getByRole('heading', { name: '効果音' })).toBeVisible();
+  });
+
+  test('古い /admin/sounds は転送する', async ({ page }) => {
+    await page.goto('/admin/sounds');
+
+    // ログイン画面ではなく、ログイン不要の設定画面へ着く。
+    await expect(page).toHaveURL(/\/sounds$/);
+  });
+});

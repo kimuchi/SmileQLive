@@ -47,7 +47,7 @@ export function isAcceptedInputMime(value: string): value is AcceptedInputMimeTy
  * 保存パス。正解を推測できる語 (correct / answer など) を含めない。
  * `<ownerId>/<scopeId>/<randomUuid>.webp`
  *
- * `scopeId` はクイズの ID か抽選リストの ID。
+ * `scopeId` はクイズ・抽選リスト・投票用紙のいずれかの ID。
  * 所有者ごとに分けるのは、消し忘れを見つけやすくするため。
  */
 export function buildObjectPath(ownerId: string, scopeId: string, assetId: string): string {

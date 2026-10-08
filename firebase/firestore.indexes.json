@@ -173,6 +173,21 @@
       ]
     },
     {
+      "$comment": "管理画面の投票用紙一覧: 自分の用紙を更新日時の新しい順に並べる",
+      "collectionGroup": "pollBallots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "ownerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
       "$comment": "抽選リストの編集: 中身を position 順に取得する",
       "collectionGroup": "entries",
       "queryScope": "COLLECTION",
@@ -216,6 +231,29 @@
       "$comment": "drawn は引いた記録の配列。検索対象にならない。",
       "collectionGroup": "rooms",
       "fieldPath": "drawn",
+      "indexes": []
+    },
+    {
+      "$comment": "pollSnapshot は投票用紙の丸ごとの写し。検索対象にならない。",
+      "collectionGroup": "rooms",
+      "fieldPath": "pollSnapshot",
+      "indexes": []
+    },
+    {
+      "$comment": "pollTally は凍らせた集計。検索対象にならない。",
+      "collectionGroup": "rooms",
+      "fieldPath": "pollTally",
+      "indexes": []
+    },
+    {
+      "$comment": "投票用紙の選択肢・区分は埋め込みの配列。検索対象にならない。",
+      "collectionGroup": "pollBallots",
+      "fieldPath": "options",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "pollBallots",
+      "fieldPath": "groups",
       "indexes": []
     }
   ]

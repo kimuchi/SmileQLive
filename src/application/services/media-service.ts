@@ -32,6 +32,7 @@ import type { StageDrawEntry } from '@/domain/draw/draw-stage';
 import type { PublicImage } from '@/domain/quiz/public-question';
 import { requireHostUser, requireQuizOwner } from '@/lib/auth/session';
 import { requireDrawList } from '@/infrastructure/firebase/repositories/draw-list-repository';
+import { requirePollBallot } from '@/infrastructure/firebase/repositories/poll-repository';
 import { AppError } from '@/lib/errors/app-error';
 import { logger } from '@/infrastructure/logging/logger';
 import {
@@ -54,11 +55,15 @@ import type { MediaUploadResponse } from '@/types/api';
 /**
  * 画像の紐づけ先。
  *
- * クイズの問題・選択肢・解説で使うか、抽選リスト（景品の写真・投影の背景）で使うか。
- * どちらも「所有者だけがアップロードできる」を守るため、
+ * クイズの問題・選択肢・解説か、抽選リスト（景品の写真・投影の背景）か、
+ * 投票用紙（投影の背景）か。
+ * どれも「所有者だけがアップロードできる」を守るため、
  * ここで所有者の確認先を切り替える。
  */
-export type UploadScope = { kind: 'quiz'; quizId: string } | { kind: 'drawList'; listId: string };
+export type UploadScope =
+  | { kind: 'quiz'; quizId: string }
+  | { kind: 'drawList'; listId: string }
+  | { kind: 'pollBallot'; ballotId: string };
 
 export type UploadImageInput = {
   file: File;
@@ -77,6 +82,15 @@ async function requireScopeOwner(
   }
 
   const { user } = await requireHostUser();
+
+  if (scope.kind === 'pollBallot') {
+    const ballot = await requirePollBallot(scope.ballotId);
+    if (ballot.ownerId !== user.uid) {
+      throw new AppError('FORBIDDEN');
+    }
+    return { ownerId: user.id, scopeId: ballot.id };
+  }
+
   const list = await requireDrawList(scope.listId);
   if (list.ownerId !== user.uid) {
     throw new AppError('FORBIDDEN');

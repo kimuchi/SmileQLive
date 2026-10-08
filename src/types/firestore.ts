@@ -4,6 +4,14 @@ import type { DrawListKind, DrawRecord, DrawSettings, DrawSnapshot } from '@/dom
 import type { RoomMode } from '@/domain/room/room-mode';
 import type { QuestionType } from '@/domain/quiz/question';
 import type { RoomPhase } from '@/domain/room/state-machine';
+import type {
+  BallotGroup,
+  BallotOption,
+  BallotStructure,
+  PollSettings,
+  PollSnapshot,
+} from '@/domain/poll/ballot';
+import type { PollTally } from '@/domain/poll/tally';
 import type { SoundName } from '@/domain/sound/sound-catalog';
 
 /**
@@ -30,6 +38,8 @@ export const COLLECTIONS = {
   soundSettings: 'soundSettings',
   drawLists: 'drawLists',
   drawEntries: 'entries',
+  pollBallots: 'pollBallots',
+  votes: 'votes',
   rooms: 'rooms',
   members: 'members',
   answers: 'answers',
@@ -236,6 +246,42 @@ export type DrawListEntryDoc = {
   updatedAt: FirestoreTimestamp;
 };
 
+/**
+ * 投票用紙。クイズ・抽選リストと同じく、司会者が事前に用意して使い回す資産。
+ *
+ * 選択肢は**ドキュメントへ埋め込む**（サブコレクションにしない）。
+ * 200 件 × 60 文字でも 1MB の上限に遠く届かず、
+ * 埋め込んでおけば「用紙を丸ごと差し替える」編集が 1 回の書き込みで原子的に済む。
+ */
+export type PollBallotDoc = {
+  id: string;
+  ownerId: string;
+  title: string;
+  structure: BallotStructure;
+  /** 2 段階のときの 1 階層目。flat では空配列。 */
+  groups: BallotGroup[];
+  options: BallotOption[];
+  settings: PollSettings;
+  /** 一覧表示用のキャッシュ。 */
+  optionCount: number;
+  createdAt: FirestoreTimestamp;
+  updatedAt: FirestoreTimestamp;
+};
+
+/**
+ * `rooms/{roomId}/votes/{participantId}` — 1 人ぶんの投票。
+ *
+ * **ドキュメント ID が参加者 ID**。`create` で書くので、
+ * 二度目の投票は Firestore が弾く（1 端末につき 1 票がこれで決まる）。
+ */
+export type VoteDoc = {
+  roomId: string;
+  participantId: string;
+  /** 選んだ順の選択肢 ID。`choices[0]` が 1 位。 */
+  choices: string[];
+  createdAt: FirestoreTimestamp;
+};
+
 export type RoomDoc = {
   id: string;
   ownerId: string;
@@ -290,6 +336,33 @@ export type RoomDoc = {
    * この項目が増える前に作られたルームには入っていない（読み側で false 扱い）。
    */
   showDrawHistory?: boolean;
+  /**
+   * 投票の用紙。ルームを作った瞬間の内容を写し取る
+   * （当日に用紙を編集されても、進行中の投票の中身は変わらない）。
+   * 投票以外のルームでは null。
+   */
+  pollSnapshot?: PollSnapshot | null;
+  /**
+   * 投票を締め切った時点で凍らせた集計。
+   *
+   * ここから先は票が増えない。司会はこの数字を確かめ、
+   * 必要なら直してから発表する（紙の投票と合わせる・異常値を外す）。
+   * 締め切る前は null。
+   */
+  pollTally?: PollTally | null;
+  /**
+   * 発表済みの順位の数。下の順位から数える。
+   * 3 位まで発表する会で 1 なら 3 位まで出している。
+   */
+  revealedCount?: number;
+  /**
+   * 投票した人数。
+   *
+   * 1 票書くたびに同じ書き込みで 1 増やす（数え直さない）。
+   * 参加者は全員が同時に画面を取りに来るので、
+   * そのたびに件数を数えると人数ぶんの集計が走る。
+   */
+  voteCount?: number;
   createdAt: FirestoreTimestamp;
   updatedAt: FirestoreTimestamp;
   finishedAt: FirestoreTimestamp | null;
