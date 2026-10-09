@@ -519,6 +519,12 @@ CI は `pnpm audit --audit-level moderate` を実行し、moderate 以上の勧�
 | 勧告 | 経路 | 登録している理由 | 外す条件 |
 |---|---|---|---|
 | [GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq)（uuid < 11.1.1） | `firebase-admin` → `@google-cloud/storage@7` → `gaxios@6` → `uuid@9` | 欠陥は **v3/v5/v6 に呼び出し側のバッファを渡したとき**の境界チェック漏れ。gaxios は `v4()` を引数なしで 1 回だけ呼び、multipart の境界文字列を作るためだけに使っている（`gaxios/build/src/gaxios.js`）。このアプリは uuid を直接使っていない | `@google-cloud/storage` が gaxios 7 系へ上がったとき（gaxios 7 は uuid に依存していない）。`firebase-admin` を上げたら、この行を消して `pnpm audit` を通してみる |
+| [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)（braces ≤ 3.0.3） | 開発依存の `eslint-config-next` → `@next/eslint-plugin-next` → `fast-glob` → `micromatch` → `braces` | 深くネストした外部入力の glob によるスタック枯渇。Next の ESLint プラグインでは `get-root-dirs.js` が `settings.next.rootDir` を glob に渡す場合だけ使用する。このリポジトリの `eslint.config.mjs` はその設定を指定せず、既定の `context.cwd` を使うため、この経路は実行されない。アプリのリクエストを扱う依存でもない。2026-10-09 時点で公開済みの修正版なし | braces の修正版または上流の依存除去後に外す。`settings.next.rootDir` の追加や別の braces 利用経路が増えた場合も再評価する |
+
+Firebase Web SDK の Firestore は `@grpc/grpc-js` を `~1.9.0` に固定しているため、
+`pnpm.overrides` でこの経路だけを修正版 `1.13.6` に更新しています
+（GHSA-m9gg-hp2v-232j / GHSA-f596-whhp-79r4）。上流の指定範囲が修正版を含むようになったら、
+override を外して監査と Firestore の検証を実行してください。
 
 登録を増やすときは、**「なぜ当てはまらないか」を確認した根拠**と**外す条件**を必ずこの表へ書いてください。
 理由の書けない勧告は、無視ではなく直してください。

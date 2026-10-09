@@ -58,13 +58,13 @@
     "file-type": "22.0.1",
     "firebase": "12.17.1",
     "firebase-admin": "14.2.0",
-    "next": "16.3.0",
+    "next": "16.3.8",
     "qrcode.react": "4.2.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-hook-form": "7.85.0",
     "server-only": "0.0.1",
-    "sharp": "0.35.3",
+    "sharp": "0.35.5",
     "zod": "4.4.3"
   },
   "devDependencies": {
@@ -78,16 +78,16 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
     "@vitejs/plugin-react": "5.1.1",
-    "@vitest/coverage-v8": "4.1.10",
+    "@vitest/coverage-v8": "4.1.11",
     "eslint": "9.39.5",
-    "eslint-config-next": "16.3.0",
+    "eslint-config-next": "16.3.8",
     "jsdom": "30.0.1",
     "prettier": "3.9.6",
     "prettier-plugin-tailwindcss": "0.8.1",
     "tailwindcss": "4.3.3",
     "typescript": "5.9.3",
     "vite-tsconfig-paths": "6.1.1",
-    "vitest": "4.1.10"
+    "vitest": "4.1.11"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -97,8 +97,12 @@
     ],
     "auditConfig": {
       "ignoreGhsas": [
-        "GHSA-w5hq-g745-h8pq"
+        "GHSA-w5hq-g745-h8pq",
+        "GHSA-vfj7-8cjw-p6xm"
       ]
+    },
+    "overrides": {
+      "@firebase/firestore>@grpc/grpc-js": "1.13.6"
     }
   }
 }
